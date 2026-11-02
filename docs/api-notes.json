@@ -1,0 +1,517 @@
+{
+  "GET /healthz": {
+    "summary": "Liveness for a load balancer or uptime check. No auth, no data.",
+    "response": {
+      "ok": "boolean"
+    }
+  },
+  "POST /api/auth/request": {
+    "summary": "Send a sign-in code by SMS to a phone number (creates nothing yet).",
+    "request": {
+      "phone": "string: international (+971...) or national form",
+      "lang": "string: ar | en, language of the SMS"
+    },
+    "response": {
+      "ok": "boolean",
+      "newUser": "boolean: this number has no account yet (the next step then needs a name)",
+      "devCode": "string: the code, ONLY in development"
+    },
+    "errors": [
+      "invalid_phone",
+      "too_many_requests",
+      "sms_blocked",
+      "sms_unavailable",
+      "sms_failed"
+    ]
+  },
+  "POST /api/auth/verify": {
+    "summary": "Check the SMS code. Starts a session (cookie), or asks for the two-step PIN.",
+    "request": {
+      "phone": "string",
+      "code": "string: 6 digits",
+      "name": "string: required for a new account",
+      "lang": "string: ar | en"
+    },
+    "response": {
+      "ok": "boolean",
+      "needPin": "boolean: the account has a PIN; no session yet",
+      "ticket": "string: present with needPin, valid 5 minutes, use it on /api/auth/pin"
+    },
+    "errors": [
+      "invalid_phone",
+      "code_expired",
+      "wrong_code",
+      "name_required"
+    ]
+  },
+  "POST /api/auth/pin": {
+    "summary": "Second step of sign-in: the 6-digit PIN. Starts the session. 5 wrong tries lock it for 15 minutes.",
+    "request": {
+      "ticket": "string",
+      "pin": "string: 6 digits"
+    },
+    "response": {
+      "ok": "boolean"
+    },
+    "errors": [
+      "code_expired",
+      "wrong_pin",
+      "pin_locked"
+    ]
+  },
+  "POST /api/auth/pin-forgot": {
+    "summary": "Start the 7-day wait after which the SMS code alone signs in and the PIN is cleared.",
+    "request": {
+      "ticket": "string"
+    },
+    "response": {
+      "ok": "boolean",
+      "resetAt": "integer: when the wait ends (ms since epoch)"
+    },
+    "errors": [
+      "code_expired"
+    ]
+  },
+  "POST /api/auth/logout": {
+    "summary": "End this session.",
+    "response": {
+      "ok": "boolean"
+    }
+  },
+  "GET /api/me": {
+    "summary": "The signed-in person.",
+    "response": {
+      "id": "integer",
+      "phone": "string",
+      "name": "string",
+      "lang": "string",
+      "is_admin": "integer",
+      "read_receipts": "integer",
+      "push_preview": "integer",
+      "has_pin": "integer: 1 when two-step verification is on"
+    }
+  },
+  "PATCH /api/me": {
+    "summary": "Change name, language, read receipts, push preview.",
+    "request": {
+      "name": "string",
+      "lang": "string: ar | en",
+      "read_receipts": "boolean",
+      "push_preview": "boolean"
+    }
+  },
+  "DELETE /api/me": {
+    "summary": "Delete the account."
+  },
+  "POST /api/me/phone/request": {
+    "summary": "Change phone number, step 1: a code goes to the NEW number.",
+    "request": {
+      "phone": "string"
+    },
+    "response": {
+      "ok": "boolean",
+      "devCode": "string: development only"
+    },
+    "errors": [
+      "invalid_phone",
+      "same_phone",
+      "phone_taken",
+      "too_many_requests",
+      "sms_blocked"
+    ]
+  },
+  "POST /api/me/phone/confirm": {
+    "summary": "Change phone number, step 2: confirm with the code. The account, circles and history stay.",
+    "request": {
+      "phone": "string",
+      "code": "string"
+    },
+    "response": {
+      "ok": "boolean",
+      "phone": "string"
+    },
+    "errors": [
+      "invalid_phone",
+      "phone_taken",
+      "code_expired",
+      "wrong_code"
+    ]
+  },
+  "POST /api/me/pin": {
+    "summary": "Turn on or change two-step verification (6-digit PIN). Changing needs the current PIN.",
+    "request": {
+      "pin": "string: 6 digits",
+      "current": "string: required when a PIN already exists"
+    },
+    "response": {
+      "ok": "boolean"
+    },
+    "errors": [
+      "invalid_pin",
+      "wrong_pin",
+      "pin_locked"
+    ]
+  },
+  "POST /api/me/pin/remove": {
+    "summary": "Turn two-step verification off (needs the PIN).",
+    "request": {
+      "pin": "string"
+    },
+    "response": {
+      "ok": "boolean"
+    },
+    "errors": [
+      "wrong_pin",
+      "pin_locked"
+    ]
+  },
+  "GET /api/circles": {
+    "summary": "The chat list: circles, groups and one-to-one chats with last message, unread count and personal settings."
+  },
+  "POST /api/circles": {
+    "summary": "Create a family circle (with the agent) or a plain group.",
+    "request": {
+      "name": "string",
+      "kind": "string: circle | group"
+    },
+    "status": 201,
+    "errors": [
+      "name_required"
+    ]
+  },
+  "POST /api/direct": {
+    "summary": "Open (or create) a one-to-one chat with a registered person by phone number.",
+    "request": {
+      "phone": "string"
+    },
+    "response": {
+      "id": "integer: the chat"
+    },
+    "errors": [
+      "invalid_phone",
+      "user_not_found",
+      "too_many_requests"
+    ]
+  },
+  "POST /api/circles/join": {
+    "summary": "Join a circle with its invite code.",
+    "request": {
+      "code": "string"
+    },
+    "errors": [
+      "too_many_requests"
+    ]
+  },
+  "GET /api/circles/:id": {
+    "summary": "One circle: members (with delivered/read marks), settings, last sequence number."
+  },
+  "GET /api/circles/:id/messages": {
+    "summary": "Messages. Sync by sequence (`after_seq`) or by revision (`after_rev`, also returns edits and deletions); pages are oldest-first.",
+    "query": {
+      "after_seq": "integer: messages with seq greater than this",
+      "after_rev": "integer: messages whose revision is greater than this",
+      "after": "integer: legacy, by id"
+    }
+  },
+  "POST /api/circles/:id/messages": {
+    "summary": "Send a text message. Idempotent by `client_msg_id`: a retry returns 200 with the same id.",
+    "request": {
+      "body": "string: up to 4000 characters",
+      "client_msg_id": "string: up to 64 characters",
+      "reply_to": "integer: message id"
+    },
+    "response": {
+      "id": "integer",
+      "seq": "integer"
+    },
+    "status": 201,
+    "errors": [
+      "empty",
+      "blocked",
+      "not_found"
+    ]
+  },
+  "POST /api/circles/:id/read": {
+    "summary": "Mark messages read up to a sequence number.",
+    "request": {
+      "seq": "integer"
+    }
+  },
+  "PATCH /api/messages/:mid": {
+    "summary": "Edit your own text message (15 minutes).",
+    "request": {
+      "body": "string"
+    }
+  },
+  "DELETE /api/messages/:mid": {
+    "summary": "Delete for everyone (member 48 hours, manager 7 days; an opened sealed letter only by its author)."
+  },
+  "POST /api/messages/:mid/react": {
+    "summary": "React with one of the allowed emoji.",
+    "request": {
+      "emoji": "string"
+    }
+  },
+  "POST /api/circles/:id/attachments": {
+    "summary": "Upload photos, video or documents (multipart). The server decides the type by the bytes."
+  },
+  "POST /api/circles/:id/voice": {
+    "summary": "Upload a voice message (multipart)."
+  },
+  "GET /api/circles/:id/search": {
+    "summary": "Arabic-aware search inside one chat.",
+    "query": {
+      "q": "string"
+    }
+  },
+  "POST /api/circles/:id/sealed": {
+    "summary": "Write a sealed letter (text, voice, video or photo) opened on a date, an occasion or after the author's death (event and death need the agent on).",
+    "errors": [
+      "agent_required",
+      "occasion_required",
+      "too_many_requests"
+    ]
+  },
+  "GET /api/circles/:id/sealed-envelopes": {
+    "summary": "What the family sees: how many letters are waiting and how far the agent is from concluding, never titles or content.",
+    "response": {
+      "total": "integer",
+      "events": "array",
+      "deaths": "array",
+      "waitHours": "integer",
+      "agentActive": "boolean"
+    }
+  },
+  "GET /api/me/memory": {
+    "summary": "The agent's archive across all your family circles, newest first."
+  },
+  "GET /api/me/export": {
+    "summary": "Download your data in an open format (zip)."
+  },
+  "GET /api/circles/:id/book": {
+    "summary": "The yearly family book as a printable page.",
+    "query": {
+      "year": "integer",
+      "lang": "string: ar | en"
+    }
+  },
+  "GET /api/admin/stats": {
+    "summary": "Platform totals (no content)."
+  },
+  "GET /api/admin/reports": {
+    "summary": "Reports sent by members, open first. The only place staff see message text (of reported messages); each look is written to the audit log.",
+    "errors": [
+      "forbidden",
+      "admin_requires_pin"
+    ]
+  },
+  "GET /api/admin/metrics": {
+    "summary": "Latency percentiles, counters and live connections of THIS node. No content, no names."
+  },
+  "POST /api/admin/reports/:id/action": {
+    "summary": "A moderator's decision on a report: dismiss, warn, remove_message, suspend_user, ban, escalate. suspend_user and ban also need the user-moderation permission. Sealed letters cannot be removed by moderation.",
+    "request": {
+      "action": "string: dismiss | warn | remove_message | suspend_user | ban | escalate",
+      "note": "string: reason, up to 500 characters",
+      "days": "integer: for suspend_user; omit for until lifted"
+    },
+    "response": {
+      "ok": "boolean",
+      "status": "string: resolved | escalated"
+    },
+    "errors": [
+      "invalid_action",
+      "not_found",
+      "already_resolved",
+      "message_gone",
+      "sealed_protected",
+      "user_gone",
+      "not_yourself",
+      "forbidden"
+    ]
+  },
+  "POST /api/admin/reports/:id/resolve": {
+    "summary": "Older single action: resolve (dismiss) a report with a note.",
+    "request": {
+      "resolution": "string"
+    }
+  },
+  "GET /api/admin/audit": {
+    "summary": "The audit log of staff actions, newest first. Append-only. Never holds message text or a full phone number.",
+    "query": {
+      "before": "integer: id to page from",
+      "limit": "integer: up to 200",
+      "action": "string: only this action"
+    }
+  },
+  "GET /api/admin/users": {
+    "summary": "Find people. By name, or by the last 4+ digits of a phone number. Numbers are always masked here.",
+    "query": {
+      "q": "string",
+      "before": "integer: id to page from"
+    }
+  },
+  "GET /api/admin/users/:id": {
+    "summary": "One person's account facts (no message content). `reveal=1` shows the full number, needs the reveal permission, and is audited.",
+    "query": {
+      "reveal": "string: 1 to show the full phone number"
+    },
+    "errors": [
+      "not_found",
+      "forbidden"
+    ]
+  },
+  "POST /api/admin/users/:id/suspend": {
+    "summary": "Suspend a person (sessions end at once; no sign-in, no live connection). With `days` it lifts itself.",
+    "request": {
+      "reason": "string",
+      "days": "integer: 0 or omitted = until lifted"
+    },
+    "errors": [
+      "not_found",
+      "not_yourself",
+      "forbidden"
+    ]
+  },
+  "POST /api/admin/users/:id/unsuspend": {
+    "summary": "Lift a suspension."
+  },
+  "POST /api/admin/users/:id/revoke-sessions": {
+    "summary": "Sign a person out everywhere."
+  },
+  "GET /api/admin/staff": {
+    "summary": "The people with an admin role."
+  },
+  "POST /api/admin/users/:id/role": {
+    "summary": "Give or take a staff role. Owner only. The last owner cannot be removed.",
+    "request": {
+      "role": "string | null: owner | moderator | support, or null to remove"
+    },
+    "errors": [
+      "invalid_role",
+      "not_found",
+      "last_owner"
+    ]
+  },
+  "GET /api/admin/analytics": {
+    "summary": "Usage without content: 30 daily series (sign-ups, active people, messages, new circles), weekly and monthly users, retention (day 1, 7, 30; only since activity tracking began), sealed-letter counts by status.",
+    "response": {
+      "days": "array",
+      "wau": "integer",
+      "mau": "integer",
+      "trackingSince": "string",
+      "retention": "object",
+      "sealed": "object",
+      "archivedLast30": "integer"
+    }
+  },
+  "GET /api/admin/sms": {
+    "summary": "SMS operations (owner): provider, daily cap and use today, blocked calling codes, and per country (last 14 days) sent, failed, blocked, capped, verified and the completion rate. Only calling codes are stored, never numbers.",
+    "response": {
+      "provider": "string",
+      "dailyCap": "integer",
+      "usedToday": "integer",
+      "blockedCodes": "array",
+      "countries": "array"
+    }
+  },
+  "POST /api/admin/sms/blocked": {
+    "summary": "Replace the list of blocked country calling codes (owner). Blocked countries get no code. Audited.",
+    "request": {
+      "codes": "array: calling codes such as 966, up to 4 digits each"
+    },
+    "response": {
+      "ok": "boolean",
+      "blockedCodes": "array"
+    }
+  },
+  "GET /api/admin/flags": {
+    "summary": "Platform switches (owner): signups_open, agent_enabled, sealed_enabled, with their current value and what they do.",
+    "response": {
+      "name": "string",
+      "on": "boolean",
+      "default": "boolean",
+      "description": "string"
+    }
+  },
+  "POST /api/admin/flags/:name": {
+    "summary": "Turn a platform switch on or off (owner). Audited.",
+    "request": {
+      "on": "boolean"
+    },
+    "response": {
+      "ok": "boolean",
+      "name": "string",
+      "on": "boolean"
+    },
+    "errors": [
+      "not_found",
+      "invalid_value"
+    ]
+  },
+  "POST /api/circles/:id/albums": {
+    "summary": "Create an album (managers of a family circle): the place for photos and voices kept from an old chat.",
+    "request": {
+      "title": "string",
+      "source": "string: whatsapp | manual",
+      "from": "string: first day, YYYY-MM-DD",
+      "to": "string: last day, YYYY-MM-DD"
+    },
+    "response": {
+      "id": "integer"
+    },
+    "status": 201,
+    "errors": [
+      "forbidden",
+      "name_required",
+      "not_a_circle",
+      "archive_readonly"
+    ]
+  },
+  "GET /api/circles/:id/albums": {
+    "summary": "The circle's albums with, for each, how many photos, voices and videos per year."
+  },
+  "POST /api/albums/:aid/items": {
+    "summary": "Add one file to an album (multipart: file, optional thumb, takenAt 'YYYY-MM-DD HH:MM' as in the original chat, sender, w, h). Photos, voice recordings and videos only, judged by their bytes. Sending the same file again returns duplicate:true.",
+    "response": {
+      "id": "integer",
+      "kind": "string: image | voice | video",
+      "duplicate": "boolean"
+    },
+    "status": 201,
+    "errors": [
+      "forbidden",
+      "invalid_attachment",
+      "invalid_date",
+      "attachment_too_large",
+      "storage_full",
+      "archive_readonly",
+      "too_many_requests"
+    ]
+  },
+  "GET /api/albums/:aid/items": {
+    "summary": "Items of an album, oldest first, a page at a time.",
+    "query": {
+      "year": "integer",
+      "kind": "string: image | voice | video",
+      "after": "integer: item id to continue after",
+      "limit": "integer: up to 200"
+    }
+  },
+  "GET /api/album-items/:id/file": {
+    "summary": "The file of an album item (voices play inline, Range supported); `thumb=1` gives the small preview of a photo or video.",
+    "query": {
+      "thumb": "string: 1 for the preview"
+    }
+  },
+  "DELETE /api/album-items/:id": {
+    "summary": "Remove one item from its album (managers)."
+  },
+  "DELETE /api/circles/:id/albums/:aid": {
+    "summary": "Remove a whole album and its files (managers).",
+    "response": {
+      "ok": "boolean",
+      "removed": "integer"
+    }
+  }
+}

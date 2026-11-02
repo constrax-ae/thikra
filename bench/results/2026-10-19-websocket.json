@@ -1,0 +1,57 @@
+{
+  "date": "2026-10-19",
+  "design": "websocket gateway",
+  "environment": {
+    "node": "v24.18.0",
+    "platform": "darwin/x64",
+    "sqlite": "node:sqlite",
+    "network": "loopback (no real network)"
+  },
+  "receivers": 8,
+  "writes": {
+    "sequential": {
+      "n": 150,
+      "p50": 3.71569199999999,
+      "p95": 4.65944300000001,
+      "p99": 5.101895999999897,
+      "max": 7.826302999999825
+    },
+    "concurrent20": {
+      "n": 200,
+      "p50": 18.497243000000026,
+      "p95": 31.570662999999968,
+      "p99": 36.64325299999996,
+      "max": 37.62347899999986
+    }
+  },
+  "delivery": {
+    "n": 192,
+    "p50": 1.8898589999998876,
+    "p95": 3.4321870000001127,
+    "p99": 3.629081000000042,
+    "max": 3.6571700000001783,
+    "missing": 0,
+    "ack": {
+      "n": 24,
+      "p50": 2.1636840000010125,
+      "p95": 3.7095570000001317,
+      "p99": 3.73661600000014,
+      "max": 3.73661600000014
+    },
+    "requestsPerSecondPer1000IdleClients": 40
+  },
+  "checks": [
+    {
+      "name": "write p95 <= 50 ms",
+      "ok": true
+    },
+    {
+      "name": "delivery p95 <= 300 ms",
+      "ok": true
+    },
+    {
+      "name": "no lost message",
+      "ok": true
+    }
+  ]
+}

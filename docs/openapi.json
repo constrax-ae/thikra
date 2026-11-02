@@ -1,0 +1,7479 @@
+{
+ "openapi": "3.1.0",
+ "info": {
+  "title": "Thekra API",
+  "version": "0.1.0",
+  "description": "Generated from the routes the server registers; summaries and shapes come from docs/api-notes.json (partial: endpoints without notes only list their path and method).\n\nLive gateway: a WebSocket at `/ws` (same session cookie). Frames (JSON, `t` = type). Client to server: `ping`, `join {circle}`, `visible {on}`, `send {circle, body, client_msg_id, reply_to?}`, `read {circle, seq}`, `typing {circle, on}`, `sync {circle, after_seq | after_rev}`. Server to client: `hello {circles}`, `pong`, `ack {client_msg_id, id, seq, duplicate}`, `err {error, client_msg_id?}`, `msg`, `update`, `changed`, `receipt`, `pins`, `typing`, `sync {messages, more}`. The socket only makes things faster: every screen still works through the HTTP endpoints."
+ },
+ "components": {
+  "securitySchemes": {
+   "cookieAuth": {
+    "type": "apiKey",
+    "in": "cookie",
+    "name": "thikra_session"
+   }
+  }
+ },
+ "security": [
+  {
+   "cookieAuth": []
+  }
+ ],
+ "paths": {
+  "/healthz": {
+   "get": {
+    "tags": [
+     "health"
+    ],
+    "summary": "Liveness for a load balancer or uptime check. No auth, no data.",
+    "parameters": [],
+    "security": [],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean",
+           "description": "boolean"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/auth/request": {
+   "post": {
+    "tags": [
+     "auth"
+    ],
+    "summary": "Send a sign-in code by SMS to a phone number (creates nothing yet).",
+    "parameters": [],
+    "security": [],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "phone": {
+          "description": "string: international (+971...) or national form"
+         },
+         "lang": {
+          "description": "string: ar | en, language of the SMS"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean",
+           "description": "boolean"
+          },
+          "newUser": {
+           "description": "boolean: this number has no account yet (the next step then needs a name)"
+          },
+          "devCode": {
+           "description": "string: the code, ONLY in development"
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: invalid_phone, too_many_requests, sms_blocked, sms_unavailable, sms_failed",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/auth/verify": {
+   "post": {
+    "tags": [
+     "auth"
+    ],
+    "summary": "Check the SMS code. Starts a session (cookie), or asks for the two-step PIN.",
+    "parameters": [],
+    "security": [],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "phone": {
+          "type": "string",
+          "description": "string"
+         },
+         "code": {
+          "description": "string: 6 digits"
+         },
+         "name": {
+          "description": "string: required for a new account"
+         },
+         "lang": {
+          "description": "string: ar | en"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean",
+           "description": "boolean"
+          },
+          "needPin": {
+           "description": "boolean: the account has a PIN; no session yet"
+          },
+          "ticket": {
+           "description": "string: present with needPin, valid 5 minutes, use it on /api/auth/pin"
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: invalid_phone, code_expired, wrong_code, name_required",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/auth/pin": {
+   "post": {
+    "tags": [
+     "auth"
+    ],
+    "summary": "Second step of sign-in: the 6-digit PIN. Starts the session. 5 wrong tries lock it for 15 minutes.",
+    "parameters": [],
+    "security": [],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "ticket": {
+          "type": "string",
+          "description": "string"
+         },
+         "pin": {
+          "description": "string: 6 digits"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean",
+           "description": "boolean"
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: code_expired, wrong_pin, pin_locked",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/auth/pin-forgot": {
+   "post": {
+    "tags": [
+     "auth"
+    ],
+    "summary": "Start the 7-day wait after which the SMS code alone signs in and the PIN is cleared.",
+    "parameters": [],
+    "security": [],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "ticket": {
+          "type": "string",
+          "description": "string"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean",
+           "description": "boolean"
+          },
+          "resetAt": {
+           "description": "integer: when the wait ends (ms since epoch)"
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: code_expired",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/auth/logout": {
+   "post": {
+    "tags": [
+     "auth"
+    ],
+    "summary": "End this session.",
+    "parameters": [],
+    "security": [],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean",
+           "description": "boolean"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/me/phone/request": {
+   "post": {
+    "tags": [
+     "me"
+    ],
+    "summary": "Change phone number, step 1: a code goes to the NEW number.",
+    "parameters": [],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "phone": {
+          "type": "string",
+          "description": "string"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean",
+           "description": "boolean"
+          },
+          "devCode": {
+           "description": "string: development only"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: invalid_phone, same_phone, phone_taken, too_many_requests, sms_blocked",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/me/phone/confirm": {
+   "post": {
+    "tags": [
+     "me"
+    ],
+    "summary": "Change phone number, step 2: confirm with the code. The account, circles and history stay.",
+    "parameters": [],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "phone": {
+          "type": "string",
+          "description": "string"
+         },
+         "code": {
+          "type": "string",
+          "description": "string"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean",
+           "description": "boolean"
+          },
+          "phone": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: invalid_phone, phone_taken, code_expired, wrong_code",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/me/pin": {
+   "post": {
+    "tags": [
+     "me"
+    ],
+    "summary": "Turn on or change two-step verification (6-digit PIN). Changing needs the current PIN.",
+    "parameters": [],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "pin": {
+          "description": "string: 6 digits"
+         },
+         "current": {
+          "description": "string: required when a PIN already exists"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean",
+           "description": "boolean"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: invalid_pin, wrong_pin, pin_locked",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/me/pin/remove": {
+   "post": {
+    "tags": [
+     "me"
+    ],
+    "summary": "Turn two-step verification off (needs the PIN).",
+    "parameters": [],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "pin": {
+          "type": "string",
+          "description": "string"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean",
+           "description": "boolean"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: wrong_pin, pin_locked",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/me": {
+   "get": {
+    "tags": [
+     "me"
+    ],
+    "summary": "The signed-in person.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "id": {
+           "type": "integer",
+           "description": "integer"
+          },
+          "phone": {
+           "type": "string",
+           "description": "string"
+          },
+          "name": {
+           "type": "string",
+           "description": "string"
+          },
+          "lang": {
+           "type": "string",
+           "description": "string"
+          },
+          "is_admin": {
+           "type": "integer",
+           "description": "integer"
+          },
+          "read_receipts": {
+           "type": "integer",
+           "description": "integer"
+          },
+          "push_preview": {
+           "type": "integer",
+           "description": "integer"
+          },
+          "has_pin": {
+           "description": "integer: 1 when two-step verification is on"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "patch": {
+    "tags": [
+     "me"
+    ],
+    "summary": "Change name, language, read receipts, push preview.",
+    "parameters": [],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "name": {
+          "type": "string",
+          "description": "string"
+         },
+         "lang": {
+          "description": "string: ar | en"
+         },
+         "read_receipts": {
+          "type": "boolean",
+          "description": "boolean"
+         },
+         "push_preview": {
+          "type": "boolean",
+          "description": "boolean"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "me"
+    ],
+    "summary": "Delete the account.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles": {
+   "get": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "The chat list: circles, groups and one-to-one chats with last message, unread count and personal settings.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "Create a family circle (with the agent) or a plain group.",
+    "parameters": [],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "name": {
+          "type": "string",
+          "description": "string"
+         },
+         "kind": {
+          "description": "string: circle | group"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: name_required",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/prefs": {
+   "patch": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "PATCH /api/circles/:id/prefs",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/direct": {
+   "post": {
+    "tags": [
+     "direct"
+    ],
+    "summary": "Open (or create) a one-to-one chat with a registered person by phone number.",
+    "parameters": [],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "phone": {
+          "type": "string",
+          "description": "string"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "id": {
+           "description": "integer: the chat"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: invalid_phone, user_not_found, too_many_requests",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/convert": {
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "POST /api/circles/:id/convert",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/join": {
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "Join a circle with its invite code.",
+    "parameters": [],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "code": {
+          "type": "string",
+          "description": "string"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: too_many_requests",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}": {
+   "get": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "One circle: members (with delivered/read marks), settings, last sequence number.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "patch": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "PATCH /api/circles/:id",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "DELETE /api/circles/:id",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/me/deleted-circles": {
+   "get": {
+    "tags": [
+     "me"
+    ],
+    "summary": "GET /api/me/deleted-circles",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/restore": {
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "POST /api/circles/:id/restore",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/members/{uid}": {
+   "delete": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "DELETE /api/circles/:id/members/:uid",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "uid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "patch": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "PATCH /api/circles/:id/members/:uid",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "uid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/transfer": {
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "POST /api/circles/:id/transfer",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/invite/regenerate": {
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "POST /api/circles/:id/invite/regenerate",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/people": {
+   "get": {
+    "tags": [
+     "people"
+    ],
+    "summary": "GET /api/people",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/billing": {
+   "get": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "GET /api/circles/:id/billing",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/persons": {
+   "get": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "GET /api/circles/:id/persons",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "POST /api/circles/:id/persons",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/persons/{pid}": {
+   "patch": {
+    "tags": [
+     "persons"
+    ],
+    "summary": "PATCH /api/persons/:pid",
+    "parameters": [
+     {
+      "name": "pid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/messages": {
+   "get": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "Messages. Sync by sequence (`after_seq`) or by revision (`after_rev`, also returns edits and deletions); pages are oldest-first.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "after_seq",
+      "in": "query",
+      "required": false,
+      "description": "integer: messages with seq greater than this",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "after_rev",
+      "in": "query",
+      "required": false,
+      "description": "integer: messages whose revision is greater than this",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "after",
+      "in": "query",
+      "required": false,
+      "description": "integer: legacy, by id",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "Send a text message. Idempotent by `client_msg_id`: a retry returns 200 with the same id.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "body": {
+          "description": "string: up to 4000 characters"
+         },
+         "client_msg_id": {
+          "description": "string: up to 64 characters"
+         },
+         "reply_to": {
+          "description": "integer: message id"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "id": {
+           "type": "integer",
+           "description": "integer"
+          },
+          "seq": {
+           "type": "integer",
+           "description": "integer"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: empty, blocked, not_found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/voice": {
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "Upload a voice message (multipart).",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/attachments": {
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "Upload photos, video or documents (multipart). The server decides the type by the bytes.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/media/{id}": {
+   "get": {
+    "tags": [
+     "media"
+    ],
+    "summary": "GET /api/media/:id",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/media": {
+   "get": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "GET /api/circles/:id/media",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/messages/{mid}/audio": {
+   "get": {
+    "tags": [
+     "messages"
+    ],
+    "summary": "GET /api/messages/:mid/audio",
+    "parameters": [
+     {
+      "name": "mid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/albums": {
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "Create an album (managers of a family circle): the place for photos and voices kept from an old chat.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "title": {
+          "type": "string",
+          "description": "string"
+         },
+         "source": {
+          "description": "string: whatsapp | manual"
+         },
+         "from": {
+          "description": "string: first day, YYYY-MM-DD"
+         },
+         "to": {
+          "description": "string: last day, YYYY-MM-DD"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "id": {
+           "type": "integer",
+           "description": "integer"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: forbidden, name_required, not_a_circle, archive_readonly",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "get": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "The circle's albums with, for each, how many photos, voices and videos per year.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/albums/{aid}/items": {
+   "post": {
+    "tags": [
+     "albums"
+    ],
+    "summary": "Add one file to an album (multipart: file, optional thumb, takenAt 'YYYY-MM-DD HH:MM' as in the original chat, sender, w, h). Photos, voice recordings and videos only, judged by their bytes. Sending the same file again returns duplicate:true.",
+    "parameters": [
+     {
+      "name": "aid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "id": {
+           "type": "integer",
+           "description": "integer"
+          },
+          "kind": {
+           "description": "string: image | voice | video"
+          },
+          "duplicate": {
+           "type": "boolean",
+           "description": "boolean"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: forbidden, invalid_attachment, invalid_date, attachment_too_large, storage_full, archive_readonly, too_many_requests",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "get": {
+    "tags": [
+     "albums"
+    ],
+    "summary": "Items of an album, oldest first, a page at a time.",
+    "parameters": [
+     {
+      "name": "aid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "year",
+      "in": "query",
+      "required": false,
+      "description": "integer",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "kind",
+      "in": "query",
+      "required": false,
+      "description": "string: image | voice | video",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "after",
+      "in": "query",
+      "required": false,
+      "description": "integer: item id to continue after",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "description": "integer: up to 200",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/album-items/{id}/file": {
+   "get": {
+    "tags": [
+     "album-items"
+    ],
+    "summary": "The file of an album item (voices play inline, Range supported); `thumb=1` gives the small preview of a photo or video.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "thumb",
+      "in": "query",
+      "required": false,
+      "description": "string: 1 for the preview",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/album-items/{id}": {
+   "delete": {
+    "tags": [
+     "album-items"
+    ],
+    "summary": "Remove one item from its album (managers).",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/albums/{aid}": {
+   "delete": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "Remove a whole album and its files (managers).",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "aid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean",
+           "description": "boolean"
+          },
+          "removed": {
+           "type": "integer",
+           "description": "integer"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/search": {
+   "get": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "Arabic-aware search inside one chat.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "q",
+      "in": "query",
+      "required": false,
+      "description": "string",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/push/key": {
+   "get": {
+    "tags": [
+     "push"
+    ],
+    "summary": "GET /api/push/key",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/push/subscribe": {
+   "post": {
+    "tags": [
+     "push"
+    ],
+    "summary": "POST /api/push/subscribe",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "push"
+    ],
+    "summary": "DELETE /api/push/subscribe",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/push/status": {
+   "get": {
+    "tags": [
+     "push"
+    ],
+    "summary": "GET /api/push/status",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/sealed": {
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "Write a sealed letter (text, voice, video or photo) opened on a date, an occasion or after the author's death (event and death need the agent on).",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: agent_required, occasion_required, too_many_requests",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "get": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "GET /api/circles/:id/sealed",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/me/sealed": {
+   "get": {
+    "tags": [
+     "me"
+    ],
+    "summary": "GET /api/me/sealed",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/sealed/{id}": {
+   "delete": {
+    "tags": [
+     "sealed"
+    ],
+    "summary": "DELETE /api/sealed/:id",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/sealed-envelopes": {
+   "get": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "What the family sees: how many letters are waiting and how far the agent is from concluding, never titles or content.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "total": {
+           "type": "integer",
+           "description": "integer"
+          },
+          "events": {
+           "type": "array",
+           "description": "array"
+          },
+          "deaths": {
+           "type": "array",
+           "description": "array"
+          },
+          "waitHours": {
+           "type": "integer",
+           "description": "integer"
+          },
+          "agentActive": {
+           "type": "boolean",
+           "description": "boolean"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/sealed/{id}/open": {
+   "post": {
+    "tags": [
+     "sealed"
+    ],
+    "summary": "POST /api/sealed/:id/open",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/sealed/{id}/stop": {
+   "post": {
+    "tags": [
+     "sealed"
+    ],
+    "summary": "POST /api/sealed/:id/stop",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/sealed/death/{uid}/stop": {
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "POST /api/circles/:id/sealed/death/:uid/stop",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "uid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/users/{id}/block": {
+   "post": {
+    "tags": [
+     "users"
+    ],
+    "summary": "POST /api/users/:id/block",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/me/blocks": {
+   "get": {
+    "tags": [
+     "me"
+    ],
+    "summary": "GET /api/me/blocks",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/messages/{mid}/report": {
+   "post": {
+    "tags": [
+     "messages"
+    ],
+    "summary": "POST /api/messages/:mid/report",
+    "parameters": [
+     {
+      "name": "mid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/pins": {
+   "get": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "GET /api/circles/:id/pins",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/messages/{mid}/pin": {
+   "post": {
+    "tags": [
+     "messages"
+    ],
+    "summary": "POST /api/messages/:mid/pin",
+    "parameters": [
+     {
+      "name": "mid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "messages"
+    ],
+    "summary": "DELETE /api/messages/:mid/pin",
+    "parameters": [
+     {
+      "name": "mid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/me/export": {
+   "get": {
+    "tags": [
+     "me"
+    ],
+    "summary": "Download your data in an open format (zip).",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/book": {
+   "get": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "The yearly family book as a printable page.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "year",
+      "in": "query",
+      "required": false,
+      "description": "integer",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "lang",
+      "in": "query",
+      "required": false,
+      "description": "string: ar | en",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/story": {
+   "get": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "GET /api/circles/:id/story",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "POST /api/circles/:id/story",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/story/{year}/{idx}": {
+   "put": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "PUT /api/circles/:id/story/:year/:idx",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "year",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "idx",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/messages/{mid}/star": {
+   "post": {
+    "tags": [
+     "messages"
+    ],
+    "summary": "POST /api/messages/:mid/star",
+    "parameters": [
+     {
+      "name": "mid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/starred": {
+   "get": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "GET /api/circles/:id/starred",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/messages/{mid}/forward": {
+   "post": {
+    "tags": [
+     "messages"
+    ],
+    "summary": "POST /api/messages/:mid/forward",
+    "parameters": [
+     {
+      "name": "mid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/read": {
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "Mark messages read up to a sequence number.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "seq": {
+          "type": "integer",
+          "description": "integer"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/messages/{mid}/react": {
+   "post": {
+    "tags": [
+     "messages"
+    ],
+    "summary": "React with one of the allowed emoji.",
+    "parameters": [
+     {
+      "name": "mid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "emoji": {
+          "type": "string",
+          "description": "string"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/messages/{mid}": {
+   "patch": {
+    "tags": [
+     "messages"
+    ],
+    "summary": "Edit your own text message (15 minutes).",
+    "parameters": [
+     {
+      "name": "mid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "body": {
+          "type": "string",
+          "description": "string"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "messages"
+    ],
+    "summary": "Delete for everyone (member 48 hours, manager 7 days; an opened sealed letter only by its author).",
+    "parameters": [
+     {
+      "name": "mid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/messages/{mid}/hide": {
+   "post": {
+    "tags": [
+     "messages"
+    ],
+    "summary": "POST /api/messages/:mid/hide",
+    "parameters": [
+     {
+      "name": "mid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/deletions": {
+   "get": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "GET /api/circles/:id/deletions",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/messages/{mid}/archive": {
+   "post": {
+    "tags": [
+     "messages"
+    ],
+    "summary": "POST /api/messages/:mid/archive",
+    "parameters": [
+     {
+      "name": "mid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/archive": {
+   "get": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "GET /api/circles/:id/archive",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/me/memory": {
+   "get": {
+    "tags": [
+     "me"
+    ],
+    "summary": "The agent's archive across all your family circles, newest first.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/import": {
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "POST /api/circles/:id/import",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/archive/{eid}/decline": {
+   "post": {
+    "tags": [
+     "archive"
+    ],
+    "summary": "POST /api/archive/:eid/decline",
+    "parameters": [
+     {
+      "name": "eid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/archive/{eid}/resolve": {
+   "post": {
+    "tags": [
+     "archive"
+    ],
+    "summary": "POST /api/archive/:eid/resolve",
+    "parameters": [
+     {
+      "name": "eid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/archive/{eid}": {
+   "delete": {
+    "tags": [
+     "archive"
+    ],
+    "summary": "DELETE /api/archive/:eid",
+    "parameters": [
+     {
+      "name": "eid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/stats": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "Platform totals (no content).",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/reports": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "Reports sent by members, open first. The only place staff see message text (of reported messages); each look is written to the audit log.",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: forbidden, admin_requires_pin",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/reports/{id}/resolve": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "Older single action: resolve (dismiss) a report with a note.",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "resolution": {
+          "type": "string",
+          "description": "string"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/reports/{id}/action": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "A moderator's decision on a report: dismiss, warn, remove_message, suspend_user, ban, escalate. suspend_user and ban also need the user-moderation permission. Sealed letters cannot be removed by moderation.",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "description": "string: dismiss | warn | remove_message | suspend_user | ban | escalate"
+         },
+         "note": {
+          "description": "string: reason, up to 500 characters"
+         },
+         "days": {
+          "description": "integer: for suspend_user; omit for until lifted"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean",
+           "description": "boolean"
+          },
+          "status": {
+           "description": "string: resolved | escalated"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: invalid_action, not_found, already_resolved, message_gone, sealed_protected, user_gone, not_yourself, forbidden",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/offsite": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/offsite",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/backups": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/backups",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/backups",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/backups/{id}/verify": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/backups/:id/verify",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/metrics": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "Latency percentiles, counters and live connections of THIS node. No content, no names.",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/circles": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/circles",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/audit": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "The audit log of staff actions, newest first. Append-only. Never holds message text or a full phone number.",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "before",
+      "in": "query",
+      "required": false,
+      "description": "integer: id to page from",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "description": "integer: up to 200",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "action",
+      "in": "query",
+      "required": false,
+      "description": "string: only this action",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/users": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "Find people. By name, or by the last 4+ digits of a phone number. Numbers are always masked here.",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "q",
+      "in": "query",
+      "required": false,
+      "description": "string",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "before",
+      "in": "query",
+      "required": false,
+      "description": "integer: id to page from",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/users/{id}": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "One person's account facts (no message content). `reveal=1` shows the full number, needs the reveal permission, and is audited.",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "reveal",
+      "in": "query",
+      "required": false,
+      "description": "string: 1 to show the full phone number",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: not_found, forbidden",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/users/{id}/suspend": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "Suspend a person (sessions end at once; no sign-in, no live connection). With `days` it lifts itself.",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "reason": {
+          "type": "string",
+          "description": "string"
+         },
+         "days": {
+          "description": "integer: 0 or omitted = until lifted"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: not_found, not_yourself, forbidden",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/users/{id}/unsuspend": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "Lift a suspension.",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/users/{id}/revoke-sessions": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "Sign a person out everywhere.",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/staff": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "The people with an admin role.",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/users/{id}/role": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "Give or take a staff role. Owner only. The last owner cannot be removed.",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "role": {
+          "type": "string",
+          "description": "string | null: owner | moderator | support, or null to remove"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: invalid_role, not_found, last_owner",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/analytics": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "Usage without content: 30 daily series (sign-ups, active people, messages, new circles), weekly and monthly users, retention (day 1, 7, 30; only since activity tracking began), sealed-letter counts by status.",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "days": {
+           "type": "array",
+           "description": "array"
+          },
+          "wau": {
+           "type": "integer",
+           "description": "integer"
+          },
+          "mau": {
+           "type": "integer",
+           "description": "integer"
+          },
+          "trackingSince": {
+           "type": "string",
+           "description": "string"
+          },
+          "retention": {
+           "type": "object",
+           "description": "object"
+          },
+          "sealed": {
+           "type": "object",
+           "description": "object"
+          },
+          "archivedLast30": {
+           "type": "integer",
+           "description": "integer"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/sms": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "SMS operations (owner): provider, daily cap and use today, blocked calling codes, and per country (last 14 days) sent, failed, blocked, capped, verified and the completion rate. Only calling codes are stored, never numbers.",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "provider": {
+           "type": "string",
+           "description": "string"
+          },
+          "dailyCap": {
+           "type": "integer",
+           "description": "integer"
+          },
+          "usedToday": {
+           "type": "integer",
+           "description": "integer"
+          },
+          "blockedCodes": {
+           "type": "array",
+           "description": "array"
+          },
+          "countries": {
+           "type": "array",
+           "description": "array"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/sms/blocked": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "Replace the list of blocked country calling codes (owner). Blocked countries get no code. Audited.",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "codes": {
+          "description": "array: calling codes such as 966, up to 4 digits each"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean",
+           "description": "boolean"
+          },
+          "blockedCodes": {
+           "type": "array",
+           "description": "array"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/flags": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "Platform switches (owner): signups_open, agent_enabled, sealed_enabled, with their current value and what they do.",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "name": {
+           "type": "string",
+           "description": "string"
+          },
+          "on": {
+           "type": "boolean",
+           "description": "boolean"
+          },
+          "default": {
+           "type": "boolean",
+           "description": "boolean"
+          },
+          "description": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/flags/{name}": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "Turn a platform switch on or off (owner). Audited.",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "name",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "on": {
+          "type": "boolean",
+          "description": "boolean"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean",
+           "description": "boolean"
+          },
+          "name": {
+           "type": "string",
+           "description": "string"
+          },
+          "on": {
+           "type": "boolean",
+           "description": "boolean"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: not_found, invalid_value",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/families": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/families",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/families/{id}": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/families/:id",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/families/{id}/freeze": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/families/:id/freeze",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/families/{id}/remove-member": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/families/:id/remove-member",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/families/{id}/transfer": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/families/:id/transfer",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/notes": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/notes",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/users/{id}/ban": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/users/:id/ban",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/users/{id}/unban": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/users/:id/unban",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/users/{id}/delete": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/users/:id/delete",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/export/families": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/export/families",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/export/people": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/export/people",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/capacity": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/capacity",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/capacity/cost": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/capacity/cost",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/announcements": {
+   "get": {
+    "tags": [
+     "announcements"
+    ],
+    "summary": "GET /api/announcements",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/announcements/{id}/dismiss": {
+   "post": {
+    "tags": [
+     "announcements"
+    ],
+    "summary": "POST /api/announcements/:id/dismiss",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/announcements": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/announcements",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/announcements",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/announcements/{id}/cancel": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/announcements/:id/cancel",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/audience": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/audience",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/broadcasts": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/broadcasts",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/broadcasts",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/broadcasts/{id}/cancel": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/broadcasts/:id/cancel",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/maintenance": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/maintenance",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/maintenance",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/app-config": {
+   "get": {
+    "tags": [
+     "app-config"
+    ],
+    "summary": "GET /api/app-config",
+    "parameters": [],
+    "security": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     }
+    }
+   }
+  },
+  "/api/admin/ops": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/ops",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/ops/costs": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/ops/costs",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/ops/app-config": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/ops/app-config",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/backups/{id}/restore": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/backups/:id/restore",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/restore/cancel": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/restore/cancel",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/security/status": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/security/status",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/security/totp/start": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/security/totp/start",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/security/totp/enable": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/security/totp/enable",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/security/verify": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/security/verify",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/security/totp/disable": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/security/totp/disable",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/security/sessions": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/security/sessions",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/security/sessions/{id}/revoke": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/security/sessions/:id/revoke",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/audit/export": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/audit/export",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/me/data-requests": {
+   "post": {
+    "tags": [
+     "me"
+    ],
+    "summary": "POST /api/me/data-requests",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "get": {
+    "tags": [
+     "me"
+    ],
+    "summary": "GET /api/me/data-requests",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/data-requests": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/data-requests",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/data-requests/{id}/resolve": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/data-requests/:id/resolve",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/checkout": {
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "POST /api/circles/:id/checkout",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/billing-portal": {
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "POST /api/circles/:id/billing-portal",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/stripe/webhook": {
+   "post": {
+    "tags": [
+     "stripe"
+    ],
+    "summary": "POST /api/stripe/webhook",
+    "parameters": [],
+    "security": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     }
+    }
+   }
+  },
+  "/api/admin/payments": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/payments",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/payments/{id}/refund": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/payments/:id/refund",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/circles/{id}/cancel-subscription": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/circles/:id/cancel-subscription",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/plans": {
+   "get": {
+    "tags": [
+     "plans"
+    ],
+    "summary": "GET /api/plans",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/storage-request": {
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "POST /api/circles/:id/storage-request",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/plans": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/plans",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/plans/{id}": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/plans/:id",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/storage": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/storage",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/circles/{id}/plan": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/circles/:id/plan",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/storage-requests/{id}/decide": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/storage-requests/:id/decide",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/today": {
+   "get": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "GET /api/circles/:id/today",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/support": {
+   "post": {
+    "tags": [
+     "support"
+    ],
+    "summary": "POST /api/support",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "get": {
+    "tags": [
+     "support"
+    ],
+    "summary": "GET /api/support",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/support/{id}/reply": {
+   "post": {
+    "tags": [
+     "support"
+    ],
+    "summary": "POST /api/support/:id/reply",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/support/templates": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/support/templates",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/support": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/support",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/support/{id}": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/support/:id",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/support/{id}/reply": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/support/:id/reply",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/support/{id}/close": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/support/:id/close",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/agent/digest": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/agent/digest",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/agent/ask": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/agent/ask",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/agent/proposals": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/agent/proposals",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/agent/proposals/{id}/approve": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/agent/proposals/:id/approve",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/agent/proposals/{id}/reject": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/agent/proposals/:id/reject",
+    "description": "Platform administrators only.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/agent/briefs": {
+   "get": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "GET /api/admin/agent/briefs",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/admin/agent/brief": {
+   "post": {
+    "tags": [
+     "admin"
+    ],
+    "summary": "POST /api/admin/agent/brief",
+    "description": "Platform administrators only.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  }
+ }
+}

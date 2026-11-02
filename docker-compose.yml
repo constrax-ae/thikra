@@ -1,0 +1,15 @@
+# One server and its data volume. NOT TESTED (no Docker where this was written).
+# Put the secrets in a .env file next to this one (never in git): THIKRA_ADMIN_PHONES, THIKRA_SMS_PROVIDER, TWILIO_*, ... (see docs/DEPLOY.md).
+services:
+  thikra:
+    build: .
+    ports: ["8787:8787"]
+    env_file: [.env]
+    environment:
+      NODE_ENV: production
+      THIKRA_TRUST_PROXY: "1"   # only when a load balancer / reverse proxy sits in front
+    volumes:
+      - thikra-data:/data
+    restart: unless-stopped
+volumes:
+  thikra-data:
