@@ -1,0 +1,50 @@
+{
+  "date": "2026-10-19",
+  "design": "polling every 3000 ms",
+  "environment": {
+    "node": "v24.18.0",
+    "platform": "darwin/x64",
+    "sqlite": "node:sqlite",
+    "network": "loopback (no real network)"
+  },
+  "receivers": 8,
+  "writes": {
+    "sequential": {
+      "n": 150,
+      "p50": 3.2894710000000487,
+      "p95": 4.199872000000028,
+      "p99": 4.586710000000039,
+      "max": 9.05465700000002
+    },
+    "concurrent20": {
+      "n": 200,
+      "p50": 15.846201999999948,
+      "p95": 38.068341000000146,
+      "p99": 44.15216099999998,
+      "max": 45.45529699999997
+    }
+  },
+  "delivery": {
+    "n": 192,
+    "p50": 1532.2180039999998,
+    "p95": 2883.0218699999996,
+    "p99": 2961.516126,
+    "max": 2991.3543589999995,
+    "missing": 0,
+    "requestsPerSecondPer1000IdleClients": 667
+  },
+  "checks": [
+    {
+      "name": "write p95 <= 50 ms",
+      "ok": true
+    },
+    {
+      "name": "delivery p95 <= 300 ms",
+      "ok": false
+    },
+    {
+      "name": "no lost message",
+      "ok": true
+    }
+  ]
+}

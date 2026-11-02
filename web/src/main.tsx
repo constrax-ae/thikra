@@ -1,0 +1,124 @@
+import { StrictMode, Suspense, lazy, useCallback, useEffect, useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import './styles.css';
+import './theme';
+import { api, type Me } from './api';
+import { I18nProvider, useI18n } from './i18n';
+import { Login } from './Login';
+import { ChatList } from './ChatList';
+import { Memory } from './Memory';
+import { You } from './You';
+
+import { CircleView } from './CircleView';
+import { Notices } from './Notices';
+import { Icon, Wordmark, type IconName } from './icons';
+// After an update, a browser that still holds the OLD app asks for a screen file the server no longer has ("Failed to fetch dynamically
+// imported module") and would show a blank page. Reload once to pick up the new app; the flag stops a loop if the file is really missing.
+const staleChunk = (m: string) => /dynamically imported module|Importing a module script failed|error loading dynamically imported/i.test(m);
+const reloadOnce = () => { try { if (sessionStorage.getItem('thikra_chunk_reload')) return; sessionStorage.setItem('thikra_chunk_reload', '1'); } catch { /* no storage: reload anyway once per page life */ } location.reload(); };
+window.addEventListener('vite:preloadError', () => reloadOnce());
+window.addEventListener('unhandledrejection', e => { if (staleChunk(String((e.reason as Error)?.message ?? e.reason))) reloadOnce(); });
+setTimeout(() => { try { sessionStorage.removeItem('thikra_chunk_reload'); } catch { /* ok */ } }, 15_000);   // a healthy page forgets the flag; a missing file cannot loop forever
+
+// Rarely used screens load on demand, so the first screen stays small and fast on a cheap phone.
+const Admin = lazy(() => import('./Admin').then(m => ({ default: m.Admin })));
+const SealedPage = lazy(() => import('./Sealed').then(m => ({ default: m.SealedPage })));
+
+type Route = { name: 'circles' } | { name: 'sealed' } | { name: 'memory' } | { name: 'you' } | { name: 'circle'; id: number; tab?: 'archive' | 'settings' } | { name: 'admin' } | { name: 'join'; code: string };
+
+function parseHash(): Route {
+  const h = location.hash.replace(/^#\/?/, '');
+  if (h === 'admin') return { name: 'admin' };
+  if (h === 'memory') return { name: 'memory' };
+  if (h === 'sealed') return { name: 'sealed' };
+  if (h === 'you') return { name: 'you' };
+  const j = h.match(/^join\/([A-Za-z0-9]{4,32})$/);
+  if (j) return { name: 'join', code: j[1] };
+  const m = h.match(/^circle\/(\d+)(?:\/(archive|settings))?$/);
+  return m ? { name: 'circle', id: Number(m[1]), tab: (m[2] as 'archive' | 'settings' | undefined) } : { name: 'circles' };
+}
+
+/** An invite link (/#/join/CODE): once signed in, the person joins that circle and lands in it. */
+function JoinByLink({ code, onDone }: { code: string; onDone: (id: number | null) => void }) {
+  const { t } = useI18n();
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { api<{ id: number }>('/circles/join', { body: { code } }).then(r => onDone(r.id)).catch(() => setFailed(true)); }, [code]);   // eslint-disable-line react-hooks/exhaustive-deps
+  return <div className="max-w-2xl mx-auto px-4 py-20 text-center">{failed ? <><p role="alert" className="text-danger">{t.errors.invalid_invite ?? t.errors.generic}</p><button className="btn mt-4" onClick={() => onDone(null)}>{t.back}</button></> : <p className="text-muted">…</p>}</div>;
+}
+
+function App() {
+  const { t } = useI18n();
+  const [me, setMe] = useState<Me | null | undefined>(undefined);
+  const [route, setRoute] = useState<Route>(parseHash);
+
+  const loadMe = useCallback(() => api<Me>('/me').then(setMe).catch(() => setMe(null)), []);
+  useEffect(() => { loadMe(); }, [loadMe]);
+  useEffect(() => {
+    const on = () => setRoute(parseHash());
+    window.addEventListener('hashchange', on);
+    return () => window.removeEventListener('hashchange', on);
+  }, []);
+
+  const go = (hash: string) => { location.hash = hash; };
+  const toCircles = useCallback(() => go('/'), []);
+
+  if (me === undefined) return null;
+  if (me === null) return <Login onDone={loadMe} />;
+  if (route.name === 'join') return <JoinByLink code={route.code} onDone={id => go(id ? `/circle/${id}` : '/')} />;
+
+  async function logout() { await api('/auth/logout', { method: 'POST', body: {} }); setMe(null); go('/'); }
+  async function deleteAccount() {
+    if (!confirm(t.confirmDelete)) return;
+    try { await api('/me', { method: 'DELETE' }); setMe(null); } catch (e: any) { alert(t.errors[e.code] ?? t.errors.generic); }
+  }
+
+  // The bottom tab bar is WhatsApp's: always there on the main screens, out of the way inside a chat.
+  const tabs: Array<[Route['name'], string, IconName, string]> = [
+    ['circles', t.tabChats, 'chats', '/'], ['memory', t.tabMemory, 'memory', '/memory'], ['you', t.tabYou, 'you', '/you'],
+  ];
+  const showTabs = route.name !== 'circle';   // the bottom bar stays on every screen outside a chat, so there is always a way back to the chat list
+
+  return (
+    <div className={`${route.name === 'admin' ? 'max-w-5xl' : 'max-w-2xl'} mx-auto px-4`}>
+      {route.name !== 'circle' && (
+        <header className="h-14 flex items-center gap-3">
+          <button onClick={toCircles} aria-label={t.appName}><Wordmark name={t.appName} /></button>
+          <span className="flex-1" />
+          {route.name === 'admin' && <button className="text-sm text-green underline" onClick={() => go('/you')}>{t.back}</button>}
+          {me.is_admin && route.name !== 'admin' && <button className="flex items-center gap-1.5 text-sm text-green rounded-full border border-line px-3 py-1" onClick={() => go('/admin')} aria-label={t.rowAdmin}><Icon name="tools" className="w-4 h-4" /><span>{t.rowAdmin}</span></button>}
+        </header>
+      )}
+      {route.name !== 'circle' && <Notices />}
+      <main className={showTabs ? 'pb-24' : ''}>
+        <Suspense fallback={null}>
+        {route.name === 'circles' && <ChatList onOpen={id => go(`/circle/${id}`)} />}
+        {route.name === 'memory' && <Memory onOpenArchive={id => go(`/circle/${id}/archive`)} />}
+        {route.name === 'sealed' && <SealedPage meId={me.id} onBack={() => go('/you')} />}
+        {route.name === 'you' && <You me={me} onLogout={logout} onDeleteAccount={deleteAccount} onAdmin={() => go('/admin')} onSealed={() => go('/sealed')} onChanged={loadMe} />}
+        {route.name === 'circle' && <CircleView key={route.id} id={route.id} me={me} initialTab={route.tab} onBack={toCircles} onLeft={toCircles} />}
+        {route.name === 'admin' && (me.is_admin ? <Admin /> : null)}
+        </Suspense>
+      </main>
+      {showTabs && (
+        <nav aria-label={t.appName} className="fixed bottom-0 inset-x-0 z-20 bg-paper/95 backdrop-blur border-t border-line pb-[env(safe-area-inset-bottom)]">
+          <ul className="max-w-2xl mx-auto grid grid-cols-3">
+            {tabs.map(([name, label, icon, hash]) => (
+              <li key={name}>
+                <button onClick={() => go(hash)} aria-current={route.name === name ? 'page' : undefined}
+                  className={`w-full py-2 flex flex-col items-center gap-0.5 text-xs ${route.name === name ? 'text-green font-bold' : 'text-muted'}`}>
+                  <span aria-hidden className={`px-4 py-1 rounded-full ${route.name === name ? 'bg-green-soft' : ''}`}><Icon name={icon} className="w-6 h-6" /></span>{label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      )}
+    </div>
+  );
+}
+
+if ('serviceWorker' in navigator && import.meta.env.PROD) navigator.serviceWorker.register('/sw.js').catch(() => {});
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode><I18nProvider><App /></I18nProvider></StrictMode>,
+);

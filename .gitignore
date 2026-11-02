@@ -1,0 +1,7 @@
+node_modules
+dist
+data
+.env
+design-package/
+design-package.zip
+backups/

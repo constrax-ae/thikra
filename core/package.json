@@ -1,0 +1,19 @@
+{
+  "name": "@thikra/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Thekra's shared rules: agent engine, AI gate, moments, WhatsApp import, phone helpers, sequence timeline. Pure TypeScript with no server or UI dependency, so the server, the web client and the future mobile app run the same code.",
+  "exports": {
+    "./agent": "./agent.ts",
+    "./gate": "./gate.ts",
+    "./moments": "./moments.ts",
+    "./whatsapp": "./whatsapp.ts",
+    "./importer": "./importer.ts",
+    "./phone": "./phone.ts",
+    "./timeline": "./timeline.ts"
+  },
+  "dependencies": {
+    "libphonenumber-js": "^1.13.15"
+  }
+}

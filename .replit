@@ -1,0 +1,24 @@
+# Thekra on Replit. For development and demos: do not keep real family data on Replit's disk.
+# Replit runs Node 20, which has no node:sqlite, so the app falls back to a WebAssembly SQLite automatically.
+modules = ["nodejs-20"]
+run = "pnpm install && pnpm build && pnpm start"
+
+# The Replit workspace shows the app in an iframe on replit.com, so it must be allowed to frame us here. Elsewhere the default is 'none'.
+[env]
+THIKRA_FRAME_ANCESTORS = "https://replit.com https://*.replit.com"
+# Replit puts a proxy in front of the app: read the caller's address from x-forwarded-for (otherwise everyone would share one address and one limit).
+THIKRA_TRUST_PROXY = "1"
+# The platform admin (set by the owner, 2026-10-19). Anyone else who registers is an ordinary user.
+THIKRA_ADMIN_PHONES = "+971557898998"
+
+[nix]
+channel = "stable-25_05"
+
+[[ports]]
+localPort = 8787
+externalPort = 80
+
+[deployment]
+deploymentTarget = "vm"
+build = ["sh", "-c", "pnpm install && pnpm build"]
+run = ["sh", "-c", "pnpm start"]
