@@ -1,25 +1,120 @@
 import { prepare } from './media';
 import { AlbumsSection } from './Album';
+import { Picker } from './Picker';
 import { chime, prefOn } from './prefs';
-import { useMemo, useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError, toDate, type Attachment, type GalleryItem, type ArchiveEntry, type Billing, type CircleDetail, type Me, type Message } from './api';
 import { useI18n, intlLocale, speechLocale, systemText } from './i18n';
 import { Dialog } from './Dialog';
 import { live } from './live';
 import { ImportPanel } from './Import';
 import { Icon } from './icons';
+import { QUICK_REACTIONS, ALL_REACTIONS } from '../../core/reactions';
+import { Spinner, GridSkeleton, Skeleton, Toggle } from './States';
 
 type Tab = 'chat' | 'archive' | 'settings';
+export type Panel = null | 'search' | 'starred' | 'media';
 
-export function CircleView({ id, me, initialTab, onBack, onLeft }: { id: number; me: Me; initialTab?: Tab; onBack: () => void; onLeft: () => void }) {
+/** Delivery state, drawn the way a chat app draws it: one check sent, two delivered,
+ *  two in the accent colour once everyone has read it. */
+function Ticks({ kind, t }: { kind: 'pending' | 'sent' | 'delivered' | 'read'; t: { tickPending: string; tickSent: string; tickDelivered: string; tickRead: string } }) {
+  const label = { pending: t.tickPending, sent: t.tickSent, delivered: t.tickDelivered, read: t.tickRead }[kind];
+  if (kind === 'pending') return <Icon name="clock" className="w-3.5 h-3.5" aria-label={label} />;
+  return (
+    <span role="img" aria-label={label} className={kind === 'read' ? 'text-[var(--bubble-tick)]' : undefined}>
+      <Icon name={kind === 'sent' ? 'check' : 'check-double'} className="w-4 h-4" />
+    </span>
+  );
+}
+
+/** The date a block of messages belongs to. Today and Yesterday are named rather than
+ *  dated, which is how people actually refer to them. */
+/** Reactions. WhatsApp hangs these off a button on the message rather than burying them
+ *  in the options sheet, and offers the whole set rather than a fixed six. The six stay as
+ *  a quick row; everything else is one scroll away. */
+// QUICK_REACTIONS / ALL_REACTIONS come from core/reactions.ts, the same list the server
+// validates against.
+
+function ReactionPicker({ onPick, onClose, t }: { onPick: (e: string) => void; onClose: () => void; t: { react: string; cancel: string } }) {
+  return (
+    <Dialog onClose={onClose} label={t.react}>
+      <h2 className="text-lg font-bold mb-3">{t.react}</h2>
+      <div className="flex gap-1 pb-3 mb-2 border-b border-line" role="group">
+        {QUICK_REACTIONS.map(e => (
+          <button key={e} type="button" aria-label={e} onClick={() => onPick(e)}
+            className="text-2xl w-11 h-11 rounded-xl hover:bg-green-soft transition-colors duration-[var(--dur-instant)]">{e}</button>
+        ))}
+      </div>
+      <div className="grid grid-cols-8 gap-0.5 max-h-64 overflow-y-auto" role="group">
+        {ALL_REACTIONS.map((e, i) => (
+          <button key={`${e}-${i}`} type="button" aria-label={e} onClick={() => onPick(e)}
+            className="text-xl w-9 h-9 rounded-lg hover:bg-green-soft transition-colors duration-[var(--dur-instant)]">{e}</button>
+        ))}
+      </div>
+      <button className="btn btn-ghost w-full mt-3" onClick={onClose}>{t.cancel}</button>
+    </Dialog>
+  );
+}
+
+function DayDivider({ iso, lang, t }: { iso: string; lang: string; t: { today: string; yesterday: string } }) {
+  const d = toDate(iso), now = new Date();
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(now) - day(d)) / 86_400_000);
+  const label = diff <= 0 ? t.today : diff === 1 ? t.yesterday
+    : d.toLocaleDateString(intlLocale(lang), { day: 'numeric', month: 'long', year: diff > 300 ? 'numeric' : undefined });
+  return (
+    <div className="flex justify-center my-3">
+      <span className="text-caption text-muted bg-card/90 border border-line rounded-full px-3 py-1 backdrop-blur-sm">{label}</span>
+    </div>
+  );
+}
+
+/** Three dots that breathe, the universal "someone is writing". Stops with reduced motion. */
+function TypingDots() {
+  return (
+    <span className="inline-flex items-center gap-0.5" aria-hidden>
+      {[0, 160, 320].map(d => (
+        <span key={d} className="w-1.5 h-1.5 rounded-full bg-current animate-pulse-soft" style={{ animationDelay: `${d}ms` }} />
+      ))}
+    </span>
+  );
+}
+
+// Opening a chat used to be two requests in a row (the chat, then its messages) with a blank
+// screen and then a false "no messages yet" in between. Now the messages are asked for at the
+// same moment as the chat, and the last page seen of each chat is kept for this session, so
+// reopening a chat paints at once and is then brought up to date.
+const circleCache = new Map<number, CircleDetail>();
+const pageCache = new Map<number, Message[]>();
+const firstPage = new Map<number, { at: number; page: Promise<Message[]> }>();
+function prefetchMessages(id: number) {
+  const held = firstPage.get(id);
+  if (!held || Date.now() - held.at > 10_000) firstPage.set(id, { at: Date.now(), page: api<Message[]>(`/circles/${id}/messages?after=0`) });
+  return firstPage.get(id)!.page;
+}
+
+export function CircleView({ id, me, initialTab, onBack, onLeft, docked }: { id: number; me: Me; initialTab?: Tab; onBack: () => void; onLeft: () => void; /** Desktop right-hand pane: edge to edge, no page padding. */ docked?: boolean }) {
   const { t } = useI18n();
-  const [circle, setCircle] = useState<CircleDetail | null>(null);
+  const [circle, setCircle] = useState<CircleDetail | null>(() => circleCache.get(id) ?? null);
   const [tab, setTab] = useState<Tab>(initialTab ?? 'chat');
+  // The same chat can be re-targeted while open: by a hash change (initialTab) or by the
+  // chat list's "Bring everyone closer" card, which asks for the invite.
+  useEffect(() => { if (initialTab) setTab(initialTab); }, [initialTab]);
+  useEffect(() => {
+    const on = (e: Event) => { if ((e as CustomEvent<number>).detail === id) setTab('settings'); };
+    window.addEventListener('thikra:invite', on);
+    return () => window.removeEventListener('thikra:invite', on);
+  }, [id]);
+  // Search / starred / media belong beside the chat's name, the way a chat app puts them,
+  // not in a toolbar sitting on top of the conversation. The state lives here so the
+  // header can drive the panel that Chat renders.
+  const [panel, setPanel] = useState<Panel>(null);
+  useEffect(() => { setPanel(null); }, [tab, id]);
   const [blocked, setBlocked] = useState(false);
   const [sealedTotal, setSealedTotal] = useState(0);
 
-  const loadCircle = useCallback(() => api<CircleDetail>(`/circles/${id}`).then(setCircle).catch(onBack), [id, onBack]);
-  useEffect(() => { loadCircle(); }, [loadCircle]);
+  const loadCircle = useCallback(() => api<CircleDetail>(`/circles/${id}`).then(c => { circleCache.set(id, c); setCircle(c); }).catch(onBack), [id, onBack]);
+  useEffect(() => { prefetchMessages(id).catch(() => {}); loadCircle(); }, [id, loadCircle]);
   useEffect(() => {
     if (circle?.kind !== 'circle') return;
     api<{ total: number }>(`/circles/${id}/sealed-envelopes`).then(r => setSealedTotal(r.total)).catch(() => {});
@@ -34,31 +129,51 @@ export function CircleView({ id, me, initialTab, onBack, onLeft }: { id: number;
     const on = !blocked; setBlocked(on);
     try { await api(`/users/${other.id}/block`, { body: { on } }); } catch { setBlocked(!on); }
   }
-  if (!circle) return null;
+  if (!circle) return <ChatSkeleton docked={docked} />;
 
   // A circle has everything; a plain group has no archive; a one-to-one chat is just the chat.
   const tabs: Tab[] = circle.kind === 'direct' ? ['chat'] : circle.kind === 'group' ? ['chat', 'settings'] : ['chat', 'archive', 'settings'];
   return (
-    <div className="flex flex-col h-[100dvh] py-2">
-      <div className="flex items-center gap-2 mb-3">
-        <button className="btn btn-ghost !px-3" onClick={onBack} aria-label={t.back}>←</button>
-        <h2 className="text-lg font-bold truncate flex-1">{circle.name}</h2>
+    <div className={docked ? 'chat-docked flex flex-col h-full' : 'flex flex-col h-[100dvh] py-2'}>
+      <div className="chat-head flex items-center gap-2 mb-3">
+        <button className="w-10 h-10 shrink-0 rounded-xl text-muted flex items-center justify-center hover:bg-green-soft hover:text-green transition-colors duration-[var(--dur-instant)]"
+          onClick={onBack} aria-label={t.back} title={t.back}><Icon name="arrow-back" className="w-5 h-5 rtl:-scale-x-100" /></button>
+        <span className={`w-10 h-10 shrink-0 flex items-center justify-center font-bold ${circle.kind === 'direct' ? 'rounded-full' : 'rounded-xl'}
+          ${circle.kind === 'circle' ? 'bg-brand text-white ring-2 ring-gold/50 ring-offset-2 ring-offset-card' : 'bg-green-soft text-green'}`} aria-hidden>
+          {circle.kind === 'group' ? <Icon name="group" className="w-5 h-5" /> : circle.name.slice(0, 1).toUpperCase()}
+        </span>
+        <span className="min-w-0 flex-1">
+          <h2 className="text-lg font-bold !text-ink truncate leading-tight"><bdi>{circle.name}</bdi></h2>
+          {circle.kind !== 'direct' && <span className="block text-caption text-muted truncate">{circle.members.length === 1 ? t.oneMember : `${circle.members.length} ${t.members}`}</span>}
+        </span>
+        {tab === 'chat' && (
+          <div className="flex items-center gap-1 shrink-0">
+            {([['search', 'search', t.search], ['starred', 'star', t.starred], ['media', 'image', t.media]] as const).map(([key, icon, label]) => (
+              <button key={key} aria-label={label} title={label} aria-pressed={panel === key}
+                onClick={() => setPanel(p => (p === key ? null : key))}
+                className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors duration-[var(--dur-instant)]
+                  ${panel === key ? 'bg-green-soft text-green' : 'text-muted hover:bg-green-soft/60 hover:text-green'}`}>
+                <Icon name={icon} className="w-[18px] h-[18px]" />
+              </button>
+            ))}
+          </div>
+        )}
         {other && <button className="btn btn-ghost !py-1 text-sm" onClick={toggleBlock}>{blocked ? t.unblock : t.block}</button>}
-        {circle.kind === 'circle' && sealedTotal > 0 && <span className="text-[11px] px-2 py-0.5 rounded-full bg-gold/20 text-gold-dark" title={t.sealedCount.replace('{n}', String(sealedTotal))}>✉️ {sealedTotal}</span>}
-        {circle.kind === 'circle' && !!circle.agentActive && <span className="text-[11px] px-2 py-0.5 rounded-full bg-gold/20 text-gold-dark" title={t.agentModeHelp}>🕯️ {t.agentOn}</span>}
+        {circle.kind === 'circle' && sealedTotal > 0 && <span className="hidden sm:inline-flex shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-gold/20 text-gold-dark" title={t.sealedCount.replace('{n}', String(sealedTotal))}><span className="inline-flex items-center gap-1"><Icon name="envelope" className="w-3.5 h-3.5" />{sealedTotal}</span></span>}
+        {circle.kind === 'circle' && !!circle.agentActive && <span className="hidden sm:inline-flex shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-gold/20 text-gold-dark" title={t.agentModeHelp}><span className="inline-flex items-center gap-1"><Icon name="sparkle" className="w-3.5 h-3.5" />{t.agentOn}</span></span>}
       </div>
       {blocked && <p role="status" className="text-xs text-gold-dark bg-gold/15 rounded-lg p-2 mb-2">{t.blockedNote}</p>}
-      {tabs.length > 1 && <div className="flex gap-1 mb-3 border-b border-line">
+      {tabs.length > 1 && <div className="chat-tabs flex gap-1 mb-3 border-b border-line">
         {tabs.map(k => (
           <button key={k} onClick={() => setTab(k)}
-            className={`px-4 py-2 -mb-px border-b-2 ${tab === k ? 'border-green text-green font-bold' : 'border-transparent text-muted'}`}>
+            className={`px-4 py-2.5 -mb-px border-b-2 transition-colors duration-[var(--dur-instant)] ${tab === k ? 'border-green text-green font-bold' : 'border-transparent text-muted hover:text-ink'}`}>
             {t[k]}
           </button>
         ))}
       </div>}
       {tab === 'chat' && circle.kind === 'circle' && <TodayBanner circleId={circle.id} onOpen={() => setTab('archive')} />}
       <div className="flex-1 min-h-0">
-        {tab === 'chat' && <Chat circle={circle} me={me} onOpenArchive={() => setTab('archive')} />}
+        {tab === 'chat' && <Chat circle={circle} me={me} panel={panel} setPanel={setPanel} onOpenArchive={() => setTab('archive')} />}
         {tab === 'archive' && <Archive circle={circle} />}
         {tab === 'settings' && <Settings circle={circle} me={me} reload={loadCircle} onLeft={onLeft} openArchive={() => setTab('archive')} />}
       </div>
@@ -82,7 +197,7 @@ function TodayBanner({ circleId, onOpen }: { circleId: number; onOpen: () => voi
     : t.todayMemory.replace('{n}', String(it.years)).replace('{title}', it.title);
   return (
     <div role="status" className="mb-2 flex items-center gap-2 rounded-xl border border-gold/40 bg-gold/10 px-3 py-2 text-sm">
-      <span aria-hidden>{it.type === 'birthday' ? '🎂' : '🕯️'}</span>
+      <Icon name={it.type === 'birthday' ? 'cake' : 'memory'} className="w-4 h-4 text-gold-dark shrink-0" />
       <button className="flex-1 min-w-0 text-start" onClick={it.type === 'memory' ? onOpen : undefined}><span className="line-clamp-2">{text}{more > 0 ? ` (+${more})` : ''}</span></button>
       <button aria-label={t.close} className="text-muted px-1" onClick={() => { setHidden(true); try { localStorage.setItem(`today:${circleId}`, data.day); } catch { /* ignore */ } }}>×</button>
     </div>
@@ -92,49 +207,110 @@ function TodayBanner({ circleId, onOpen }: { circleId: number; onOpen: () => voi
 const clock = (ms: number) => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
 /** A voice message player like WhatsApp's: play/pause, a seek bar, elapsed/length, and 1x/1.5x/2x speed. */
-function VoicePlayer({ id, ms, mine }: { id: number; ms: number | null; mine: boolean }) {
+export const MEMBER_COLOURS = ['#b0235a', '#00796b', '#5b3fc4', '#c2410c', '#1565c0', '#7b4a2a', '#2e7d32', '#8e24aa', '#9a6700', '#c0392b'];
+interface Person { id: number; name: string; userId: number | null; relation: string | null; birthDate: string | null; deathDate: string | null }
+const nameColour = (userId: number) => MEMBER_COLOURS[Math.abs(userId) % MEMBER_COLOURS.length];
+const fmtSize = (n: number) => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
+
+function VoicePlayer({ id, ms, mine, author, userId, meta }: { id: number; ms: number | null; mine: boolean; author?: string | null; userId?: number | null; meta?: React.ReactNode }) {
   const { t } = useI18n();
   const el = useRef<HTMLAudioElement>(null);
+  const wave = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
   const [pos, setPos] = useState(0);
   const [len, setLen] = useState(ms ?? 0);
   const [speed, setSpeed] = useState(1);
-  // A stable pseudo-waveform from the message id (the real audio is not analysed): the same message always draws the same shape.
-  const bars = useMemo(() => Array.from({ length: 32 }, (_, i) => 22 + Math.round(((Math.sin(id * 12.9898 + i * 78.233) * 43758.5453) % 1 + 1) % 1 * 70)), [id]);
+  const bars = useMemo(() => Array.from({ length: 34 }, (_, i) => 30 + Math.round(((Math.sin(id * 12.9898 + i * 78.233) * 43758.5453) % 1 + 1) % 1 * 60)), [id]);
   const progress = len > 0 ? Math.min(1, pos / len) : 0;
+
+  // `timeupdate` only fires about four times a second, which is why the bar moved in steps.
+  // While it is playing we read the clock each frame instead, and stop as soon as it pauses.
+  useEffect(() => {
+    if (!playing) return;
+    let raf = 0;
+    const loop = () => { const a = el.current; if (a) setPos(a.currentTime * 1000); raf = requestAnimationFrame(loop); };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [playing]);
+
   const toggle = () => { const a = el.current; if (!a) return; if (a.paused) a.play().catch(() => {}); else a.pause(); };
   const cycle = () => { const next = speed === 1 ? 1.5 : speed === 1.5 ? 2 : 1; setSpeed(next); if (el.current) el.current.playbackRate = next; };
+  const seekTo = (clientX: number) => {
+    const box = wave.current?.getBoundingClientRect(); if (!box) return;
+    const v = Math.max(0, Math.min(1, (clientX - box.left) / box.width)) * Math.max(len, 1);
+    setPos(v); if (el.current) el.current.currentTime = v / 1000;
+  };
+  // Dragging the knob scrubs; the listeners live on the window so the pointer can leave the bar.
+  const drag = (e: React.PointerEvent) => {
+    e.preventDefault(); seekTo(e.clientX);
+    const move = (ev: PointerEvent) => seekTo(ev.clientX);
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+  };
+
   return (
-    <div className="flex items-center gap-2 min-w-[14rem]">
+    <div className="flex items-center gap-2.5 min-w-[14rem] py-0.5">
       <audio ref={el} preload={prefOn('saver') ? 'none' : 'metadata'} src={`/api/messages/${id}/audio`}
         onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => { setPlaying(false); setPos(0); }}
-        onTimeUpdate={e => setPos(e.currentTarget.currentTime * 1000)}
+        onTimeUpdate={e => { if (!playing) setPos(e.currentTarget.currentTime * 1000); }}
         onLoadedMetadata={e => { const d = e.currentTarget.duration; if (!ms && Number.isFinite(d)) setLen(d * 1000); }} />
+
+      {/* Who recorded it — and, once it is playing, the speed control takes the same slot
+          instead of floating in a grey disc of its own. */}
+      {playing || speed !== 1 ? (
+        <button type="button" onClick={cycle} aria-label={t.playbackSpeed} title={t.playbackSpeed}
+          className={`w-9 h-9 rounded-full shrink-0 text-xs font-bold flex items-center justify-center
+            transition-colors duration-[var(--dur-instant)] ${mine ? 'bg-current/15' : 'bg-green-soft text-green'}`}>
+          {speed}x
+        </button>
+      ) : (
+        <span className="relative shrink-0">
+          <span className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-white text-sm"
+            style={{ background: userId != null ? nameColour(userId) : 'var(--color-brand)' }} aria-hidden>
+            {(author ?? '').trim().slice(0, 1) || '•'}
+          </span>
+          <span className="absolute -bottom-0.5 -end-0.5 w-4 h-4 rounded-full bg-card text-green flex items-center justify-center" aria-hidden>
+            <Icon name="mic" className="w-2.5 h-2.5" />
+          </span>
+        </span>
+      )}
+
       <button type="button" onClick={toggle} aria-label={playing ? t.pauseVoice : t.playVoice}
-        className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 bg-gold text-[#2b3832]`}>{playing ? '❚❚' : '▶'}</button>
-      <div className="flex-1 relative h-9 flex items-center gap-[2px]" dir="ltr" aria-hidden
-        onClick={e => { const r = e.currentTarget.getBoundingClientRect(); const v = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * Math.max(len, 1); setPos(v); if (el.current) el.current.currentTime = v / 1000; }}>
-        {bars.map((h, i) => <span key={i} className="w-[3px] rounded-full shrink-0" style={{ height: `${h}%`, background: i / bars.length <= progress ? 'var(--color-gold)' : 'currentColor', opacity: i / bars.length <= progress ? 1 : 0.3 }} />)}
+        className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-transform duration-[var(--dur-fast)] active:scale-90 hover:bg-current/10">
+        <Icon name={playing ? 'pause' : 'play'} className="w-5 h-5" />
+      </button>
+
+      <div className="flex-1 min-w-0">
+        <div ref={wave} onPointerDown={drag}
+          className="relative h-7 flex items-center gap-[2px] cursor-pointer touch-none" dir="ltr"
+          role="slider" aria-label={t.playVoice} aria-valuemin={0} aria-valuemax={Math.round(len / 1000)} aria-valuenow={Math.round(pos / 1000)}
+          tabIndex={0}
+          onKeyDown={e => {
+            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+            e.preventDefault();
+            const next = Math.max(0, Math.min(len, pos + (e.key === 'ArrowRight' ? 5000 : -5000)));
+            setPos(next); if (el.current) el.current.currentTime = next / 1000;
+          }}>
+          {bars.map((h, i) => (
+            <span key={i} className="flex-1 min-w-[2px] max-w-[3px] rounded-full shrink-0"
+              style={{ height: `${h}%`, background: 'currentColor', opacity: i / bars.length <= progress ? 0.95 : 0.28 }} />
+          ))}
+          {/* The knob rides the same value as the bars, moved with a transform so it animates
+              per frame rather than relaying out the row. */}
+          <span aria-hidden className="absolute top-1/2 w-3 h-3 rounded-full bg-current shadow-e1 pointer-events-none"
+            style={{ insetInlineStart: `${progress * 100}%`, transform: 'translate(-50%, -50%)' }} />
+        </div>
+        {/* Duration on the left, the message's own time and ticks on the right: one line
+            under the wave, the way a voice note reads in any chat app. */}
+        <div className="flex items-center justify-between gap-2 -mt-1">
+          <span className="text-[11px] tabular-nums opacity-70" dir="ltr">{clock(playing || pos > 0 ? pos : len)}</span>
+          {meta}
+        </div>
       </div>
-      <input type="range" min={0} max={Math.max(len, pos, 1)} value={pos} aria-label={t.playVoice} className="sr-only"
-        onChange={e => { const v = Number(e.target.value); setPos(v); if (el.current) el.current.currentTime = v / 1000; }} />
-      <span className="text-[11px] tabular-nums shrink-0" dir="ltr">{clock(playing || pos > 0 ? pos : len)}</span>
-      <button type="button" onClick={cycle} aria-label={t.playbackSpeed} className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${mine ? 'bg-current/20' : 'bg-green-soft text-green'}`}>{speed}x</button>
     </div>
   );
 }
 
-// Each member has their own colour for their NAME only (messages stay white), like WhatsApp. All reach 4.5:1 on white.
-export const MEMBER_COLOURS = ['#b0235a', '#00796b', '#5b3fc4', '#c2410c', '#1565c0', '#7b4a2a', '#2e7d32', '#8e24aa', '#9a6700', '#c0392b'];
-const nameColour = (userId: number) => MEMBER_COLOURS[Math.abs(userId) % MEMBER_COLOURS.length];
-
-const fmtSize = (n: number) => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
-
-// ---- people: the family record ----------------------------------------------------------------
-
-interface Person { id: number; name: string; userId: number | null; relation: string | null; birthDate: string | null; deathDate: string | null }
-
-/** The family record: people outlive accounts (the living and the departed). Managers edit; everyone reads. */
 function PeoplePanel({ circle, manager }: { circle: CircleDetail; manager: boolean }) {
   const { t } = useI18n();
   const [people, setPeople] = useState<Person[]>([]);
@@ -169,7 +345,7 @@ function PeoplePanel({ circle, manager }: { circle: CircleDetail; manager: boole
           </li>
         ))}
       </ul>
-      {manager && editing === null && <button className="btn btn-ghost w-full" onClick={() => open('new')}>＋ {t.addPerson}</button>}
+      {manager && editing === null && <button className="btn btn-ghost w-full" onClick={() => open('new')}><Icon name="plus" className="w-4 h-4" />{t.addPerson}</button>}
       {editing !== null && (
         <form onSubmit={save} className="space-y-2 border-t border-line pt-2">
           <input className="field" required maxLength={60} placeholder={t.personName} value={f.name} onChange={e => setF({ ...f, name: e.target.value })} />
@@ -186,9 +362,13 @@ function PeoplePanel({ circle, manager }: { circle: CircleDetail; manager: boole
 
 // ---- chat ------------------------------------------------------------------
 
-function Chat({ circle, me, onOpenArchive }: { circle: CircleDetail; me: Me; onOpenArchive: () => void }) {
+function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDetail; me: Me; panel: Panel; setPanel: React.Dispatch<React.SetStateAction<Panel>>; onOpenArchive: () => void }) {
   const { t, lang } = useI18n();
-  const [msgs, setMsgs] = useState<Message[]>([]);
+  const [msgs, setMsgs] = useState<Message[]>(() => pageCache.get(circle.id) ?? []);
+  // False until the first page has arrived: an empty list before that means "loading",
+  // not "this chat has no messages", and must not say so.
+  const [loaded, setLoaded] = useState(() => pageCache.has(circle.id));
+  useEffect(() => { pageCache.set(circle.id, msgs.filter(m => !m.pending)); }, [circle.id, msgs]);
   // Drafts (M-13): what you were typing survives leaving the chat and closing the app. Per circle, on this device.
   const draftKey = `thikra_draft_${circle.id}`;
   const [text, setText] = useState(() => { try { return localStorage.getItem(draftKey) ?? ''; } catch { return ''; } });
@@ -196,6 +376,9 @@ function Chat({ circle, me, onOpenArchive }: { circle: CircleDetail; me: Me; onO
   const [recording, setRecording] = useState(false);
   const [open, setOpen] = useState<number | null>(null);
   const [del, setDel] = useState<Message | null>(null);
+  const [reacting, setReacting] = useState<Message | null>(null);
+  // A machine transcript is a tool, not part of the message: shown only when asked for.
+  const [transcribed, setTranscribed] = useState<Set<number>>(new Set());
   const [marks, setMarks] = useState(circle.members);                 // each member's delivered/read "up to here"
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
@@ -206,7 +389,6 @@ function Chat({ circle, me, onOpenArchive }: { circle: CircleDetail; me: Me; onO
   const marksRef = useRef(circle.members);
   useEffect(() => { marksRef.current = marks; }, [marks]);
   const [starredIds, setStarredIds] = useState<Set<number>>(new Set());
-  const [panel, setPanel] = useState<null | 'search' | 'starred' | 'media'>(null);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Message[]>([]);
   const [fwd, setFwd] = useState<Message | null>(null);
@@ -220,6 +402,13 @@ function Chat({ circle, me, onOpenArchive }: { circle: CircleDetail; me: Me; onO
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
   const [light, setLight] = useState<Attachment | null>(null);
   const [uploading, setUploading] = useState(0);
+  const [pending, setPending] = useState<File[]>([]);           // chosen, not sent yet
+  const [previews, setPreviews] = useState<string[]>([]);
+  useEffect(() => {
+    const urls = pending.map(f => (f.type.startsWith('image/') ? URL.createObjectURL(f) : ''));
+    setPreviews(urls);
+    return () => urls.forEach(u => u && URL.revokeObjectURL(u));
+  }, [pending]);
   const fileInput = useRef<HTMLInputElement>(null);
   const [recMs, setRecMs] = useState(0);
   const recStart = useRef(0);
@@ -233,6 +422,27 @@ function Chat({ circle, me, onOpenArchive }: { circle: CircleDetail; me: Me; onO
   const lastTypingSent = useRef(0);
   const reportedRead = useRef(0);
   const bottom = useRef<HTMLDivElement>(null);
+  // Auto-scrolling on every new message yanks you away from what you were reading.
+  // We only follow the conversation while you are already at the bottom; otherwise a
+  // button appears and you decide when to jump.
+  const scroller = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLDivElement>(null);
+  // `stick` is the live value the scroll handlers read; `atBottom` is the same thing for
+  // rendering. A ref is needed because the ResizeObserver below fires outside React.
+  const stick = useRef(true);
+  const [atBottom, setAtBottom] = useState(true);
+  const onScroll = () => {
+    const el = scroller.current; if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    stick.current = nearBottom;
+    setAtBottom(nearBottom);
+  };
+  // Scroll the container itself rather than a sentinel element: scrollIntoView stops at the
+  // sentinel's box, which left the newest message tucked under the composer.
+  const toBottom = (smooth = true) => {
+    const el = scroller.current; if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+  };
   const lastSeq = useRef(0);
   const lastRev = useRef(0);
   const unsent = useRef(new Map<string, { body: string; replyTo: number | null }>()); // client_msg_id -> what to resend, until acknowledged
@@ -277,7 +487,19 @@ function Chat({ circle, me, onOpenArchive }: { circle: CircleDetail; me: Me; onO
   }, [circle.id, merge]);
 
   useEffect(() => {
-    refresh(true).catch(() => {});
+    // The first page was already requested alongside the chat itself (prefetchMessages);
+    // use that answer instead of asking again. Later full reloads always go to the server.
+    const held = firstPage.get(circle.id);
+    firstPage.delete(circle.id);
+    const first = held && Date.now() - held.at < 10_000 ? held.page : null;   // an old, unused prefetch is not trusted
+    (first
+      ? first.then(page => {
+          setMsgs(page);
+          lastSeq.current = Math.max(0, ...page.map(m => m.seq ?? 0));
+          lastRev.current = Math.max(0, ...page.map(m => m.rev ?? 0));
+        })
+      : refresh(true)
+    ).catch(() => refresh(true)).catch(() => {}).finally(() => setLoaded(true));
     // Live: new messages arrive as pushed frames. Polling stays as the safety net: fast while the socket is down, rare while it is up.
     const off = live.on(f => {
       if (f.t === 'open') {
@@ -367,10 +589,23 @@ function Chat({ circle, me, onOpenArchive }: { circle: CircleDetail; me: Me; onO
     document.addEventListener('visibilitychange', on);
     return () => document.removeEventListener('visibilitychange', on);
   }, []);
-  useEffect(() => { bottom.current?.scrollIntoView({ block: 'end' }); }, [msgs.length]);
+  useEffect(() => { if (stick.current) toBottom(false); }, [msgs.length]);
+  // A photo that finishes decoding, or a bubble that rewraps, grows the thread after the
+  // scroll has already run. Watching the content keeps the latest message in view instead
+  // of leaving it hidden behind the composer.
+  useEffect(() => {
+    const el = content.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => { if (stick.current) toBottom(false); });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
+    // Your own message always brings you back down, even if you had scrolled up.
+    stick.current = true; setAtBottom(true);
+    if (pending.length) { const list = pending, cap = text; await upload(list, cap); return; }
     const body = text.trim(); if (!body) return;
     setError('');
     if (editing) {   // saving an edit: the text goes back to the same message
@@ -402,20 +637,28 @@ function Chat({ circle, me, onOpenArchive }: { circle: CircleDetail; me: Me; onO
     }
   }
 
-  async function attach(files: FileList | null) {
+  // Picking files no longer sends them. They wait in a tray above the composer so the
+  // message box can be used as a caption first, which is what people expect when they
+  // attach a photo — the server has always accepted one, it was just unreachable.
+  function attach(files: FileList | null) {
     if (!files?.length) return;
+    setPending(p => [...p, ...files].slice(0, 10));
+    if (fileInput.current) fileInput.current.value = '';
+  }
+
+  async function upload(list: File[], caption: string) {
+    stick.current = true; setAtBottom(true);
     setError(''); setUploading(n => n + 1);
     try {
-      const list = [...files].slice(0, 10);
       const prepared = await Promise.all(list.map(prepare));
       const fd = new FormData();
       prepared.forEach(p => { fd.append('file', p.file); fd.append('thumb', p.thumb ?? new Blob([]), 't.jpg'); if (p.w) fd.append('w', String(p.w)); if (p.h) fd.append('h', String(p.h)); });
-      const caption = text.trim(); const quote = replyTo;
-      if (caption) fd.append('caption', caption);
+      const quote = replyTo;
+      if (caption.trim()) fd.append('caption', caption.trim());
       if (quote) fd.append('reply_to', String(quote.id));
       fd.append('client_msg_id', crypto.randomUUID());
       await api(`/circles/${circle.id}/attachments`, { form: fd });
-      setText(''); setReplyTo(null);
+      setText(''); setReplyTo(null); setPending([]);
       await refresh();
     } catch (err) { setError(t.errors[err instanceof ApiError ? err.code : 'generic'] ?? t.errors.generic); }
     finally { setUploading(n => n - 1); if (fileInput.current) fileInput.current.value = ''; }
@@ -444,7 +687,15 @@ function Chat({ circle, me, onOpenArchive }: { circle: CircleDetail; me: Me; onO
     return 'sent';
   };
   const typing = Object.entries(typers).filter(([id, until]) => until > Date.now() && Number(id) !== me.id).map(([id]) => marks.find(x => x.id === Number(id))?.name ?? '');
-  const jumpTo = (id: number) => document.getElementById(`m${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  // Jumping to a message scrolls it to the middle and flashes a ring round it, so after
+  // the gallery or a search result closes you can see where you landed.
+  const jumpTo = (id: number) => {
+    const el = document.getElementById(`m${id}`);
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 1600);
+  };
 
   async function startRec() {
     setError('');
@@ -513,113 +764,225 @@ function Chat({ circle, me, onOpenArchive }: { circle: CircleDetail; me: Me; onO
   };
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center gap-2 pb-2">
-        <button className={`btn btn-ghost !py-1 text-sm ${panel === 'search' ? '!border-green' : ''}`} onClick={() => { setQuery(''); setPanel(p => p === 'search' ? null : 'search'); }}><Icon name="search" className="w-4 h-4 inline-block align-[-2px] me-1" />{t.search}</button>
-        <button className={`btn btn-ghost !py-1 text-sm ${panel === 'starred' ? '!border-green' : ''}`} onClick={() => setPanel(p => p === 'starred' ? null : 'starred')}><Icon name="star" className="w-4 h-4 inline-block align-[-2px] me-1" />{t.starred}</button>
-        <button className={`btn btn-ghost !py-1 text-sm ${panel === 'media' ? '!border-green' : ''}`} onClick={() => setPanel(p => p === 'media' ? null : 'media')}><Icon name="image" className="w-4 h-4 inline-block align-[-2px] me-1" />{t.media}</button>
-      </div>
+    <div className="chat-root flex flex-col h-full">
+      {/* The search / starred / media tools now live in the header, beside the name. */}
       {pins.length > 0 && (() => { const p = pins[Math.min(pinIdx, pins.length - 1)]; return (
         <button type="button" className="flex items-center gap-2 w-full text-start rounded-lg bg-gold/15 text-ink px-3 py-1.5 mb-2 text-sm"
           onClick={() => { jumpTo(p.id); setPinIdx(i => (i + 1) % pins.length); }}>
-          <span aria-hidden>📌</span>
+          <Icon name="pin" className="w-4 h-4 shrink-0" />
           <span className="min-w-0 flex-1"><b className="text-xs text-gold-dark">{t.pinnedLabel}{pins.length > 1 ? ` ${Math.min(pinIdx, pins.length - 1) + 1}/${pins.length}` : ''}</b>
-            <span className="block truncate">{p.kind === 'voice' ? `🎙 ${t.voiceWord}` : p.attachments?.length && !p.body ? `📎 ${p.attachments[0].name ?? ''}` : p.body}</span></span>
+            <span className="block truncate">{p.kind === 'voice' ? <span className="inline-flex items-center gap-1"><Icon name="mic" className="w-3.5 h-3.5" />{t.voiceWord}</span> : p.attachments?.length && !p.body ? <span className="inline-flex items-center gap-1"><Icon name="attach" className="w-3.5 h-3.5" />{p.attachments[0].name ?? ''}</span> : p.body}</span></span>
         </button>
       ); })()}
-      {panel && (
+      {/* Media is a gallery, not a strip wedged above the conversation. Picking a photo
+          closes the gallery and scrolls the chat to the message it came from. */}
+      {panel === 'media' && (
+        <Dialog onClose={() => setPanel(null)} label={t.media}>
+          <h2 className="text-lg font-bold mb-3">{t.media}</h2>
+          {gallery.length === 0
+            ? <p className="text-sm text-muted py-6 text-center">{t.noResults}</p>
+            : (
+              <ul className="grid grid-cols-3 gap-1.5 max-h-[60vh] overflow-y-auto">
+                {gallery.map(g => (
+                  <li key={g.id}>
+                    {g.kind === 'file'
+                      ? <a className="flex flex-col justify-center h-full p-2 rounded-lg border border-line text-xs break-words hover:bg-green-soft" href={`/api/media/${g.id}`} download={g.name ?? 'file'}>
+                          <span className="flex items-center gap-1"><Icon name="file" className="w-3.5 h-3.5 shrink-0" />{g.name}</span>
+                          <span className="block text-muted">{fmtSize(g.size)}</span>
+                        </a>
+                      : <button type="button" title={g.name ?? ''} className="block w-full aspect-square overflow-hidden rounded-lg bg-line hover:opacity-90 transition-opacity duration-[var(--dur-instant)]"
+                          onClick={() => { setPanel(null); setTimeout(() => jumpTo(g.messageId), 120); }}>
+                          <img alt={g.name ?? ''} loading="lazy" decoding="async" className="w-full h-full object-cover" {...sharpSrc(g, '(min-width: 1024px) 12vw, 33vw')} />
+                        </button>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          <button className="btn btn-ghost w-full mt-3" onClick={() => setPanel(null)}>{t.closePanel}</button>
+        </Dialog>
+      )}
+
+      {panel && panel !== 'media' && (
         <div className="card p-3 mb-2 max-h-72 overflow-y-auto">
-          {panel === 'media' && (gallery.length === 0 ? <p className="text-sm text-muted">{t.noResults}</p> : (
-            <ul className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-              {gallery.map(g => (
-                <li key={g.id}>
-                  {g.kind === 'file'
-                    ? <a className="block p-2 rounded-lg border border-line text-xs break-words hover:bg-green-soft" href={`/api/media/${g.id}`} download={g.name ?? 'file'}>📄 {g.name}<span className="block text-muted">{fmtSize(g.size)}</span></a>
-                    : <button type="button" className="block w-full aspect-square overflow-hidden rounded-lg bg-line" onClick={() => { setPanel(null); setTimeout(() => jumpTo(g.messageId), 50); }}>
-                        <img alt={g.name ?? ''} loading="lazy" className="w-full h-full object-cover" src={`/api/media/${g.thumb ?? g.id}`} />
-                      </button>}
-                </li>
-              ))}
-            </ul>
-          ))}
           {panel === 'search' && <input autoFocus className="field mb-2" value={query} placeholder={t.searchPlaceholder} onChange={e => setQuery(e.target.value)} />}
-          {panel !== 'media' && (results.length === 0 ? <p className="text-sm text-muted">{panel === 'search' && query.trim().length < 2 ? '' : t.noResults}</p> : (
+          {results.length === 0 ? <p className="text-sm text-muted">{panel === 'search' && query.trim().length < 2 ? '' : t.noResults}</p> : (
             <ul className="divide-y divide-line">
               {results.map(r => (
                 <li key={r.id}>
-                  <button className="w-full text-start py-2" onClick={() => { setPanel(null); setTimeout(() => jumpTo(r.id), 50); }}>
+                  <button className="row-interactive w-full text-start py-2 px-1 rounded-lg" onClick={() => { setPanel(null); setTimeout(() => jumpTo(r.id), 120); }}>
                     <span className="text-xs text-muted">{r.author} · {toDate(r.createdAt).toLocaleString(intlLocale(lang), { dateStyle: 'medium', timeStyle: 'short' })}</span>
                     <span className="block whitespace-pre-wrap break-words">{r.kind === 'voice' ? r.transcript : r.body}</span>
                   </button>
                 </li>
               ))}
             </ul>
-          ))}
+          )}
         </div>
       )}
-      <div className="chat-wall flex-1 overflow-y-auto space-y-2 pb-2">
-        {msgs.map(m => {
-          if (m.kind === 'system') return <p key={m.id} className="agent-note text-center text-xs text-muted py-1.5 px-3 mx-auto w-fit max-w-full">✦ {systemText(m.body, t)}</p>;
+      <div ref={scroller} onScroll={onScroll} className="chat-wall flex-1 overflow-y-auto pb-3">
+        {/* Messages start at the top of the thread. (Bottom-anchoring was tried and
+            reverted: on a tall desktop window it left a large void above a short chat.) */}
+        <div ref={content} className="flex flex-col min-h-full">
+        {/* An empty conversation was a large patterned void. Say what the space is for. */}
+        {!loaded && msgs.length === 0 && <MessagesSkeleton />}
+        {loaded && msgs.length === 0 && (
+          <div className="flex-1 flex flex-col items-center justify-center text-center gap-2 px-6 animate-fade-in">
+            <span className="w-14 h-14 rounded-full bg-green-soft text-green flex items-center justify-center">
+              <Icon name="chats" className="w-7 h-7" />
+            </span>
+            <b className="text-green">{t.chatEmptyTitle}</b>
+            <p className="text-sm text-muted max-w-xs">{t.chatEmptyBody}</p>
+            {circle.kind === 'circle' && (
+              <p className="text-caption text-muted max-w-xs flex items-center gap-1.5 mt-1">
+                <Icon name="memory" className="w-3.5 h-3.5 shrink-0" />{t.chatEmptyCircle}
+              </p>
+            )}
+          </div>
+        )}
+        {msgs.map((m, i) => {
+          if (m.kind === 'system') return <p key={m.id} className="agent-note text-center text-xs text-muted py-1.5 px-3 mx-auto w-fit max-w-full my-2 flex items-center gap-1.5"><Icon name="sparkle" className="w-3.5 h-3.5 shrink-0 text-gold-dark" />{systemText(m.body, t)}</p>;
+          // (the day divider below needs `prev`, so it is computed after the system case)
           const mine = m.userId === me.id;
+          // Consecutive messages from the same person within five minutes are one block:
+          // the name is written once and the bubbles sit close, the way a conversation reads.
+          const prev = msgs[i - 1];
+          const grouped = !!prev && prev.kind !== 'system' && prev.userId === m.userId && !prev.deleted && !m.deleted
+            && toDate(m.createdAt).getTime() - toDate(prev.createdAt).getTime() < 5 * 60_000;
+          const next = msgs[i + 1];
+          const lastOfGroup = !(next && next.kind !== 'system' && next.userId === m.userId && !next.deleted && !m.deleted
+            && toDate(next.createdAt).getTime() - toDate(m.createdAt).getTime() < 5 * 60_000);
+          const gap = grouped ? 'mt-0.5' : 'mt-2';
+          // A new calendar day gets a divider, so scrolling back has landmarks.
+          const newDay = !prev || toDate(prev.createdAt).toDateString() !== toDate(m.createdAt).toDateString();
+          const withDay = (node: React.ReactNode) => newDay
+            ? <Fragment key={`d${m.id}`}><DayDivider iso={m.createdAt} lang={lang} t={t} />{node}</Fragment>
+            : node;
+          // The square corner is the tail: only the last bubble of a block has one, on the
+          // side the bubble is anchored to. Logical corners, so it mirrors in Arabic.
+          const tail = lastOfGroup ? (mine ? 'rounded-ee-md' : 'rounded-es-md') : '';
           if (m.deleted) {
-            return (
-              <div key={m.id} id={`m${m.id}`} className={`flex ${mine ? 'justify-start' : 'justify-end'}`}>
-                <p className="rounded-2xl px-3 py-2 border border-dashed border-line text-muted italic text-sm">
-                  🚫 {m.deletedBy === m.userId ? t.deletedMsg : t.deletedByManager}
+            return withDay(
+              <div key={m.id} id={`m${m.id}`} className={`flex ${gap} ${mine ? 'justify-end' : 'justify-start'}`}>
+                <p className="rounded-2xl px-3 py-2 border border-dashed border-line text-muted italic text-sm flex items-center gap-1.5">
+                  <Icon name="ban" className="w-3.5 h-3.5 shrink-0" />
+                  {m.deletedBy === m.userId ? t.deletedMsg : t.deletedByManager}
                 </p>
-              </div>
+              </div>,
             );
           }
           const b = badge(m);
-          const shown = m.kind === 'voice' ? m.transcript : m.body;
-          return (
-            <div key={m.id} id={`m${m.id}`} className={`flex ${mine ? 'justify-start' : 'justify-end'}`}>
-              <div className={`max-w-[85%] rounded-2xl px-3 py-2 ${mine ? 'bubble-mine' : 'bubble-other'} ${m.pending ? 'opacity-60' : ''}`}>
-                {!mine && <div className="text-xs font-bold mb-0.5" style={{ color: nameColour(m.userId ?? 0) }}>{m.author}</div>}
-                {m.sealedOn && <div className={`text-[11px] mb-0.5 ${mine ? 'opacity-80' : 'text-gold-dark'}`}>🔒 {t.sealedOnLabel} {m.sealedOn}</div>}
-                {!!m.forwardCount && <div className={`text-[11px] italic mb-0.5 ${mine ? 'opacity-80' : 'text-muted'}`}>↪ {m.forwardCount >= 5 ? t.forwardedMany : t.forwarded}</div>}
-                {starredIds.has(m.id) && <span aria-label={t.starred} className={`float-end text-xs ${mine ? 'opacity-80' : 'text-gold-dark'}`}>★</span>}
+          const shown = m.kind === 'voice' ? (transcribed.has(m.id) ? m.transcript : '') : m.body;
+          // The controls live beside the bubble, never on top of it: floating them inside
+          // covered the author's name and the start of the text.
+          const actions = !m.pending && (
+            <span className="self-center flex items-center gap-0.5 shrink-0 px-1 text-muted opacity-0
+              group-hover/row:opacity-100 focus-within:opacity-100 transition-opacity duration-[var(--dur-instant)]">
+              <button onClick={() => setReacting(m)} aria-label={t.react} title={t.react}
+                className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-green-soft hover:text-green">
+                <Icon name="smile" className="w-4 h-4" />
+              </button>
+              <button onClick={() => setDel(m)} aria-label={t.messageMenu} title={t.messageMenu}
+                className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-green-soft hover:text-green">
+                <Icon name="chevron" className="w-4 h-4" />
+              </button>
+            </span>
+          );
+          return withDay(
+            <div key={m.id} id={`m${m.id}`} className={`group/row flex ${gap} animate-slide-up ${mine ? 'justify-end' : 'justify-start'}`}>
+              {mine && actions}
+              <div className={`group/msg relative max-w-[85%] rounded-2xl ${tail} px-3 py-2 ${mine ? 'bubble-mine' : 'bubble-other'} ${m.pending ? 'opacity-60' : ''}
+                transition-opacity duration-[var(--dur-base)] ease-[var(--ease-standard)]`}>
+                {!mine && !grouped && <div className="text-xs font-bold mb-0.5" style={{ color: nameColour(m.userId ?? 0) }}>{m.author}</div>}
+                {m.sealedOn && <div className={`text-[11px] mb-0.5 flex items-center gap-1 ${mine ? 'opacity-80' : 'text-gold-dark'}`}><Icon name="lock" className="w-3 h-3" />{t.sealedOnLabel} {m.sealedOn}</div>}
+                {!!m.forwardCount && <div className={`text-[11px] italic mb-0.5 flex items-center gap-1 ${mine ? 'opacity-80' : 'text-muted'}`}><Icon name="forward" className="w-3 h-3" />{m.forwardCount >= 5 ? t.forwardedMany : t.forwarded}</div>}
+
                 {m.replyTo && (
                   <button type="button" onClick={() => jumpTo(m.replyTo!.id)}
                     className={`block w-full text-start mb-1 rounded-lg border-s-4 px-2 py-1 text-xs ${mine ? 'bg-current/15 border-current/60' : 'bg-green-soft border-green'}`}>
                     <b className="block">{m.replyTo.author ?? ''}</b>
-                    <span className="line-clamp-2">{m.replyTo.deleted ? `🚫 ${t.quotedDeleted}` : m.replyTo.text}</span>
+                    <span className="line-clamp-2">{m.replyTo.deleted ? <span className="inline-flex items-center gap-1 italic"><Icon name="ban" className="w-3 h-3" />{t.quotedDeleted}</span> : m.replyTo.text}</span>
                   </button>
                 )}
-                {!!m.attachments?.length && (
-                  <div className={`mb-1 grid gap-1 ${m.attachments.filter(x => x.kind !== 'file').length > 1 ? 'grid-cols-2' : ''}`}>
+                {!!m.attachments?.length && (() => {
+                  // A photo should reach the edge of its bubble; padding around it reads as a
+                  // document attachment rather than an image someone sent.
+                  const flush = (mine || grouped) && !m.replyTo && !m.sealedOn && !m.forwardCount
+                    && m.attachments!.every(x => x.kind !== 'file');
+                  return (
+                  <div className={`${flush ? '-mx-3 -mt-2 mb-1.5 overflow-hidden rounded-t-2xl' : 'mb-1'} grid gap-1 ${m.attachments!.filter(x => x.kind !== 'file').length > 1 ? 'grid-cols-2' : ''}`}>
                     {m.attachments.map(x => x.kind === 'image' ? (
                       <button key={x.id} type="button" onClick={() => setLight(x)} className="block overflow-hidden rounded-lg bg-black/10"
                         style={x.w && x.h ? { aspectRatio: `${x.w} / ${x.h}`, maxHeight: '22rem' } : undefined}>
-                        <img alt={x.name ?? ''} loading="lazy" className="w-full h-full object-cover" src={`/api/media/${x.thumb ?? x.id}`} />
+                        <img alt={x.name ?? ''} loading="lazy" decoding="async" className="w-full h-full object-cover" {...sharpSrc(x, '(min-width: 1024px) 28rem, 80vw')} />
                       </button>
                     ) : x.kind === 'video' ? (
                       <video key={x.id} controls preload={prefOn('saver') ? 'none' : 'metadata'} playsInline className="w-full rounded-lg max-h-96 bg-black" poster={x.thumb ? `/api/media/${x.thumb}` : undefined} src={`/api/media/${x.id}`} />
                     ) : (
                       <a key={x.id} href={`/api/media/${x.id}`} download={x.name ?? 'file'} className={`flex items-center gap-2 rounded-lg px-2 py-2 text-sm ${mine ? 'bg-current/15' : 'bg-green-soft'}`}>
-                        <span aria-hidden>📄</span><span className="min-w-0 flex-1 truncate">{x.name}</span><span className="text-xs opacity-80">{fmtSize(x.size)}</span>
+                        <Icon name="file" className="w-4 h-4 shrink-0" /><span className="min-w-0 flex-1 truncate">{x.name}</span><span className="text-xs opacity-80">{fmtSize(x.size)}</span>
                       </a>
                     ))}
                   </div>
-                )}
-                {m.kind === 'voice' && m.hasAudio ? <VoicePlayer id={m.id} ms={m.audioMs ?? null} mine={mine} /> : null}
-                {shown && <p className="whitespace-pre-wrap break-words">{shown}</p>}
-                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
-                  <span className={mine ? 'opacity-70' : 'text-muted'}>
-                    {toDate(m.createdAt).toLocaleTimeString(intlLocale(lang), { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                  {m.editedAt && <span className={mine ? 'opacity-70' : 'text-muted'}>{t.edited}</span>}
-                  {mine && (() => { const k = tick(m); return (
-                    <span role="img" aria-label={{ pending: t.tickPending, sent: t.tickSent, delivered: t.tickDelivered, read: t.tickRead }[k]}
-                      className={k === 'read' ? 'text-[var(--bubble-tick)] font-bold' : 'opacity-80'}>{k === 'pending' ? '🕓' : k === 'sent' ? '✓' : '✓✓'}</span>
                   ); })()}
-                  {b && <button onClick={() => setOpen(open === m.id ? null : m.id)} className={`px-1.5 rounded-full ${b[1]}`}>{b[0]}</button>}
-                  {!m.pending && <button onClick={() => setDel(m)} aria-label={t.messageMenu} className={`ms-auto px-1 text-base leading-none ${mine ? 'opacity-70' : 'text-muted'}`}>⋯</button>}
-                </div>
+                {m.kind === 'voice' && m.hasAudio ? (
+                  <VoicePlayer id={m.id} ms={m.audioMs ?? null} mine={mine} author={m.author} userId={m.userId}
+                    meta={
+                      <span className={`inline-flex items-center gap-1 text-[11px] ${mine ? 'opacity-70' : 'text-muted'}`}>
+                        {starredIds.has(m.id) && <Icon name="star" className="w-3 h-3 shrink-0" aria-label={t.starred} />}
+                        <span className="tabular-nums">{toDate(m.createdAt).toLocaleTimeString(intlLocale(lang), { hour: '2-digit', minute: '2-digit' })}</span>
+                        {mine && <Ticks kind={tick(m)} t={t} />}
+                      </span>
+                    } />
+                ) : null}
+                {(() => {
+                  const starred = starredIds.has(m.id);
+                  // Voice notes carry the meta inside the player, on the duration line.
+                  if (m.kind === 'voice') return shown
+                    ? <p dir="auto" className="whitespace-pre-wrap break-words text-sm opacity-75 mt-1.5 pt-1.5 border-t border-current/15">{shown}</p>
+                    : null;
+                  const meta = (
+                    <span className={`inline-flex items-center gap-1 text-[11px] align-bottom ${mine ? 'opacity-70' : 'text-muted'}`}>
+                      {/* A star belongs beside the time, not floated into the text, where it
+                          pushed the words around and forced the meta onto its own line. */}
+                      {starred && <Icon name="star" className="w-3 h-3 shrink-0" aria-label={t.starred} />}
+                      <span className="tabular-nums">{toDate(m.createdAt).toLocaleTimeString(intlLocale(lang), { hour: '2-digit', minute: '2-digit' })}</span>
+                      {m.editedAt && <span>{t.edited}</span>}
+                      {mine && <Ticks kind={tick(m)} t={t} />}
+                    </span>
+                  );
+                  // A plain text message carries its time and ticks on the last line, the way a
+                  // chat app does it: an invisible spacer reserves the room, and the meta is
+                  // placed in it. Anything richer (media, voice, an edit, an agent badge) keeps
+                  // the meta on its own row, where it does not have to fight for space.
+                  // (voice has already returned above, so it cannot reach here)
+                  const inline = !!shown && !m.attachments?.length && !m.editedAt && !b;
+                  if (inline) return (
+                    <p dir="auto" className="relative whitespace-pre-wrap break-words">
+                      {shown}
+                      {/* The gap the meta sits in. It has to cover everything the meta can
+                          contain — a star adds width, and too small a reservation means the
+                          time lands on top of the text. */}
+                      <span aria-hidden className="inline-block" style={{ width: `${(mine ? 4.6 : 3.2) + (starred ? 1 : 0)}rem` }} />
+                      <span className="absolute bottom-0 end-0 leading-none pb-[0.1rem]">{meta}</span>
+                    </p>
+                  );
+                  return (
+                    <>
+                      {shown && <p dir="auto" className="whitespace-pre-wrap break-words">{shown}</p>}
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        {meta}
+                        {b && <button onClick={() => setOpen(open === m.id ? null : m.id)} className={`text-[11px] px-1.5 rounded-full ${b[1]}`}>{b[0]}</button>}
+                      </div>
+                    </>
+                  );
+                })()}
+                {/* The message menu sits in the bubble's corner on hover, rather than taking
+                    permanent space in the meta row. */}
+
                 {m.archiveStatus === 'archived' && circle.kind === 'circle' && (
                   <div className="agent-card mt-2 p-2 flex items-center gap-2">
-                    <span className="agent-orb !w-8 !h-8 !text-base" aria-hidden>🕯️</span>
-                    <span className="flex-1 text-sm text-ink"><b className="text-gold-dark">{t.agentCardTitle} ✦</b> <span>{t.archivedBadge}</span></span>
+                    <span className="agent-orb !w-8 !h-8 text-gold-dark" aria-hidden><Icon name="sparkle" className="w-4 h-4" /></span>
+                    <span className="flex-1 text-sm text-ink"><b className="text-gold-dark">{t.agentCardTitle}</b> <span>{t.archivedBadge}</span></span>
                     <button type="button" className="btn !py-1 !px-2 text-xs" onClick={onOpenArchive}>{t.viewInArchive}</button>
                   </div>
                 )}
@@ -637,10 +1000,22 @@ function Chat({ circle, me, onOpenArchive }: { circle: CircleDetail; me: Me; onO
                   </p>
                 )}
               </div>
-            </div>
+              {!mine && actions}
+            </div>,
           );
         })}
+        </div>
         <div ref={bottom} />
+        {/* Scrolled up: a way back to the newest message, rather than silently missing it.
+            Sticky inside the scroller so it floats above the conversation. */}
+        {!atBottom && (
+          <button type="button" onClick={() => toBottom()} aria-label={t.jumpToLatest} title={t.jumpToLatest}
+            className="sticky bottom-2 float-end me-2 z-10 w-10 h-10 rounded-full bg-card border border-line elevated-2 text-green
+              flex items-center justify-center animate-scale-in hover:bg-green-soft
+              transition-colors duration-[var(--dur-instant)]">
+            <Icon name="down" className="w-5 h-5" />
+          </button>
+        )}
       </div>
       {error && <p role="alert" className="text-sm text-danger py-1">{error}</p>}
       {pinning && (
@@ -702,35 +1077,85 @@ function Chat({ circle, me, onOpenArchive }: { circle: CircleDetail; me: Me; onO
           </div>
         </Dialog>
       )}
-      {typing.length > 0 && <p aria-live="polite" className="text-xs text-muted py-0.5">{typing.length === 1 ? `${typing[0]}${t.typingOne}` : t.typingMany}</p>}
+      {typing.length > 0 && (
+        <p aria-live="polite" className="text-xs text-muted py-0.5 flex items-center gap-1.5 animate-fade-in">
+          <TypingDots />
+          {typing.length === 1 ? `${typing[0]}${t.typingOne}` : t.typingMany}
+        </p>
+      )}
       {(replyTo || editing) && (
         <div className="flex items-center gap-2 rounded-lg bg-green-soft border-s-4 border-green px-3 py-1.5 text-xs mt-1">
           <span className="min-w-0 flex-1">
             <b className="block">{editing ? t.editingMsg : `${t.replyingTo} ${replyTo!.author ?? ''}`}</b>
             <span className="block truncate">{(editing ?? replyTo)!.kind === 'voice' ? (editing ?? replyTo)!.transcript : (editing ?? replyTo)!.body}</span>
           </span>
-          <button type="button" aria-label={t.cancel} className="px-2 text-base" onClick={() => { setReplyTo(null); setEditing(null); if (editing) setText(''); }}>✕</button>
+          <button type="button" aria-label={t.cancel} className="px-2 text-base" onClick={() => { setReplyTo(null); setEditing(null); if (editing) setText(''); }}><Icon name="x" className="w-4 h-4" /></button>
         </div>
       )}
-      {uploading > 0 && <p role="status" className="text-xs text-muted py-0.5">{t.uploading}</p>}
-      <form onSubmit={send} className="flex gap-2 pt-2">
+      {uploading > 0 && (
+        <p role="status" className="text-xs text-muted py-1 flex items-center gap-2 animate-fade-in">
+          <Spinner className="w-3.5 h-3.5" />
+          {t.uploading}{uploading > 1 ? ` (${uploading})` : ''}
+        </p>
+      )}
+      {/* One pill holding attach, the text and the microphone, with the send button
+          separate and round: the shape people already know from every chat app. */}
+      {/* Files waiting to be sent, with the composer acting as the caption box. */}
+      {pending.length > 0 && (
+        <div className="card p-2 mt-1 flex items-center gap-2 overflow-x-auto animate-slide-up">
+          {pending.map((f, i) => (
+            <div key={`${f.name}-${i}`} className="relative shrink-0">
+              {previews[i]
+                ? <img src={previews[i]} alt="" className="w-16 h-16 object-cover rounded-lg border border-line" />
+                : <div className="w-16 h-16 rounded-lg border border-line flex flex-col items-center justify-center gap-1 p-1 text-center">
+                    <Icon name="file" className="w-5 h-5 text-muted" />
+                    <span className="text-[10px] text-muted truncate w-full">{f.name}</span>
+                  </div>}
+              <button type="button" aria-label={t.cancel} title={t.cancel}
+                onClick={() => setPending(p => p.filter((_, n) => n !== i))}
+                className="absolute -top-1.5 -end-1.5 w-5 h-5 rounded-full bg-card border border-line text-muted
+                  flex items-center justify-center text-xs leading-none hover:text-danger"><Icon name="x" className="w-3 h-3" /></button>
+            </div>
+          ))}
+          <button type="button" className="btn btn-ghost !px-3 shrink-0" onClick={() => fileInput.current?.click()} aria-label={t.attach} title={t.attach}>
+            <Icon name="attach" className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+      <form onSubmit={send} className="flex items-end gap-2 pt-2">
         <input ref={fileInput} type="file" multiple hidden accept="image/*,video/*,.pdf,.txt,.csv,.zip,.docx,.xlsx,.pptx" onChange={e => attach(e.target.files)} />
-        <button type="button" className="btn btn-ghost" aria-label={t.attach} title={t.attach} onClick={() => fileInput.current?.click()}>📎</button>
-        <input className="field" value={text} maxLength={4000} placeholder={t.typeMessage} onChange={e => typed(e.target.value)} />
-        <button type="button" className={`btn ${recording ? '!bg-red-700' : 'btn-ghost'}`} onClick={recording ? stopRec : startRec}
-          aria-label={recording ? t.stop : t.record}>{recording ? '■' : '🎙'}</button>
-        {recording && <span role="status" aria-label={t.recordingNow} className="self-center text-sm text-danger tabular-nums" dir="ltr">● {clock(recMs)}</span>}
-        <button className="btn" disabled={!text.trim()}>{editing ? t.save : t.send}</button>
+        <div className="field-group !rounded-full flex-1 items-center">
+          <button type="button" className="field-prefix !border-0 !px-3 text-muted hover:text-green" aria-label={t.attach} title={t.attach} onClick={() => fileInput.current?.click()}>
+            <Icon name="attach" className="w-5 h-5" />
+          </button>
+          <input className="!px-1" value={text} maxLength={4000}
+            placeholder={pending.length ? t.addCaption : t.typeMessage}
+            onChange={e => typed(e.target.value)} />
+          {recording
+            ? <span role="status" aria-label={t.recordingNow} className="flex items-center gap-1.5 pe-3 text-sm text-danger tabular-nums" dir="ltr">
+                <span aria-hidden className="w-2 h-2 rounded-full bg-danger animate-pulse-soft" />{clock(recMs)}
+              </span>
+            : null}
+          <button type="button" className={`px-3 self-center transition-colors duration-[var(--dur-instant)] ${recording ? 'text-danger' : 'text-muted hover:text-green'}`}
+            onClick={recording ? stopRec : startRec} aria-label={recording ? t.stop : t.record} title={recording ? t.stop : t.record}>
+            <Icon name={recording ? 'stop' : 'mic'} className="w-5 h-5" />
+          </button>
+        </div>
+        <button className="btn !rounded-full !w-11 !px-0 shrink-0 flex items-center justify-center" disabled={!text.trim() && !pending.length} aria-label={editing ? t.save : t.send} title={editing ? t.save : t.send}>
+          <Icon name="send" className="w-5 h-5" />
+        </button>
       </form>
+      {reacting && <ReactionPicker t={t} onClose={() => setReacting(null)} onPick={e => { const m = reacting; setReacting(null); react(m, e); }} />}
       {del && (
         <Dialog onClose={() => setDel(null)} label={t.messageMenu}>
           <h2 className="text-lg font-bold">{t.messageMenu}</h2>
-          {!del.deleted && (
-            <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label={t.react}>
-              {['👍', '❤️', '😂', '😮', '😢', '🙏'].map(e => <button key={e} type="button" className="text-2xl px-2 py-1 rounded-xl hover:bg-green-soft" aria-label={e} onClick={() => react(del, e)}>{e}</button>)}
-            </div>
-          )}
+
           <div className="mt-3 flex flex-col gap-2">
+            {del.kind === 'voice' && !!del.transcript && (
+              <button className="btn btn-ghost" onClick={() => { const id = del.id; setTranscribed(p => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; }); setDel(null); }}>
+                {transcribed.has(del.id) ? t.hideTranscript : t.showTranscript}
+              </button>
+            )}
             <button className="btn btn-ghost" onClick={() => { setReplyTo(del); setEditing(null); setDel(null); }}>{t.reply}</button>
             {del.kind === 'text' && !del.deleted && <button className="btn btn-ghost" onClick={() => openForward(del)}>{t.forward}</button>}
             {del.userId !== me.id && del.kind !== 'system' && !del.deleted && <button className="btn btn-ghost" onClick={() => { setReporting(del); setReported(false); setDel(null); }}>{t.report}</button>}
@@ -780,56 +1205,150 @@ function Archive({ circle }: { circle: CircleDetail }) {
   const groups = rows.reduce<Record<string, ArchiveEntry[]>>((acc, r) => { (acc[r.eventDate.slice(0, 7)] ??= []).push(r); return acc; }, {});
   const month = (ym: string) => new Date(`${ym}-01T00:00:00Z`).toLocaleDateString(intlLocale(lang), { month: 'long', year: 'numeric', timeZone: 'UTC' });
 
+  const manager = circle.role === 'owner' || circle.role === 'admin';
+  const years = Array.from({ length: 12 }, (_, i) => new Date().getFullYear() - i);
+  const chip = 'text-caption px-2 py-0.5 rounded-full';
+  const small = 'inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-bold transition-colors duration-[var(--dur-instant)]';
   return (
-    <div className="h-full overflow-y-auto space-y-4 pb-4">
-      <div className="flex gap-2">
-        <input className="field" type="search" placeholder={t.searchArchive} value={q} onChange={e => setQ(e.target.value)} />
-        {(circle.role === 'owner' || circle.role === 'admin') && (
-          <button className="btn btn-ghost whitespace-nowrap" onClick={() => setImporting(v => !v)}>{t.importButton}</button>
+    <div className="tab-scroll h-full overflow-y-auto space-y-6 pb-6 pt-1">
+      {/* Toolbar: the same search box as the chat list, with the import beside it. */}
+      <div className="flex flex-col sm:flex-row gap-2">
+        <label className="w-full sm:flex-1 shrink-0 flex items-center gap-2.5 h-11 px-4 rounded-xl bg-card border border-line elevated-1
+          transition-[border-color,box-shadow] duration-[var(--dur-fast)]
+          focus-within:border-green focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-focus)_16%,transparent)]">
+          <Icon name="search" className="w-[18px] h-[18px] text-muted shrink-0" />
+          <input className="bare-input flex-1 min-w-0 bg-transparent text-ink placeholder:text-muted" type="search"
+            placeholder={t.searchArchive} aria-label={t.searchArchive} value={q} onChange={e => setQ(e.target.value)} />
+        </label>
+        {manager && (
+          <button aria-pressed={importing} onClick={() => setImporting(v => !v)}
+            className={`h-11 px-4 rounded-xl border inline-flex items-center justify-center gap-2 font-bold whitespace-nowrap elevated-1
+              transition-colors duration-[var(--dur-instant)]
+              ${importing ? 'bg-green-soft border-green text-green' : 'bg-card border-line text-green hover:border-green/40 hover:bg-green-soft/50'}`}>
+            <Icon name="upload" className="w-[18px] h-[18px]" />{t.importButton}
+          </button>
         )}
       </div>
-      <div className="flex items-center gap-2">
-        <select aria-label={t.bookYear} className="field !w-auto" value={bookYear} onChange={e => setBookYear(Number(e.target.value))}>
-          {Array.from({ length: 12 }, (_, i) => new Date().getFullYear() - i).map(y => <option key={y} value={y}>{y}</option>)}
-        </select>
-        <a className="btn btn-ghost" target="_blank" rel="noopener" href={`/api/circles/${circle.id}/book?year=${bookYear}&lang=${lang}`}>📖 {t.bookButton}</a>
-      </div>
-      {importing && <ImportPanel circle={circle} onDone={load} />}
+
+      {importing && <div className="animate-slide-up"><ImportPanel circle={circle} onDone={load} /></div>}
+
+      {/* The family story: the year picker and the reader belong together, so they share a card. */}
+      <section className="rounded-2xl bg-card border border-line elevated-1 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center gap-4">
+        <div className="flex items-center gap-3.5 flex-1 min-w-0">
+          <span className="w-12 h-12 rounded-2xl bg-green-soft text-green flex items-center justify-center shrink-0"><Icon name="book" className="w-6 h-6" /></span>
+          <span className="flex-1 min-w-0">
+            <b className="block text-ink">{circle.storyTitle || t.storyHead}</b>
+            <span className="block text-sm text-muted mt-0.5">{t.archStoryBody}</span>
+          </span>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <Picker label={t.bookYear} icon="calendar" value={bookYear} onChange={setBookYear} columns={3} align="end" className="flex-1 sm:flex-none sm:w-32"
+            options={years.map(y => ({ value: y, label: String(y) }))} />
+          <a className="btn h-11 !rounded-xl !px-5 flex-1 sm:flex-none" target="_blank" rel="noopener" href={`/api/circles/${circle.id}/book?year=${bookYear}&lang=${lang}`}>
+            {t.archRead}<Icon name="arrow-out" className="w-4 h-4 rtl:-scale-x-100" />
+          </a>
+        </div>
+      </section>
+
       <AlbumsSection circle={circle} />
-      {rows.length === 0 && <p className="text-muted text-center py-8">{t.emptyArchive}</p>}
-      {Object.entries(groups).map(([ym, list]) => (
-        <section key={ym}>
-          <h3 className="text-sm font-bold text-green mb-2">{month(ym)}</h3>
-          <ol className="border-s-2 border-gold/50 ps-4 space-y-3">
-            {list.map(e => (
-              <li key={e.id} className="card p-3">
-                <div className="flex items-center gap-2 text-xs text-muted">
-                  <span className="px-2 py-0.5 rounded-full bg-green-soft text-green">{label(e)}</span>
-                  {e.pending && <span className="px-2 py-0.5 rounded-full bg-gold/20 text-gold-dark">{t.pendingBadge2}</span>}
-                  <span>{e.eventDate}</span>
-                  <span>· {e.source === 'manual' ? t.manual : t.auto}</span>
-                </div>
-                <p className="mt-1 whitespace-pre-wrap break-words">{e.summary}</p>
-                {!!e.media?.length && (
-                  <div className="mt-2 space-y-1">
-                    <div className="flex gap-1 overflow-x-auto">{e.media.filter(m => m.kind !== 'voice').map(m => <a key={m.id} href={`/api/album-items/${m.id}/file`} target="_blank" rel="noopener" className="shrink-0"><img alt="" loading="lazy" className="w-16 h-16 object-cover rounded-lg bg-line" src={`/api/album-items/${m.id}/file?thumb=1`} /></a>)}</div>
-                    {e.media.filter(m => m.kind === 'voice').map(m => <audio key={m.id} controls preload="none" className="w-full h-8" src={`/api/album-items/${m.id}/file`} />)}
-                    <p className="text-[11px] text-muted">{t.albumEventNote}</p>
-                  </div>
-                )}
-                {e.pending && <p className="mt-1 text-xs text-muted">{t.pendingNote}</p>}
-                {e.canAct && (
-                  <div className="mt-1 flex gap-3 text-xs">
-                    {e.pending && <button onClick={() => act(e.id, 'decline')} className="text-danger underline">{t.decline}</button>}
-                    {e.status === 'open' && <button onClick={() => act(e.id, 'resolve')} className="text-green underline">{t.markResolved}</button>}
-                  </div>
-                )}
-                {(circle.role === 'owner' || circle.role === 'admin') && !e.protected && <button onClick={() => remove(e.id)} className="mt-1 text-xs text-danger underline">{t.deleteEntry}</button>}
-              </li>
-            ))}
-          </ol>
-        </section>
+
+      {rows.length === 0 ? (
+        <div className="rounded-3xl border border-dashed border-line bg-paper/50 px-6 py-12 flex flex-col items-center text-center gap-4 animate-fade-in">
+          <div aria-hidden className="relative w-24 h-24 animate-scale-in">
+            <span className="absolute inset-0 rounded-[1.75rem] rotate-6 bg-line/70 border border-line" />
+            <span className="absolute inset-2 rounded-[1.4rem] bg-brand text-white flex items-center justify-center elevated-3"><Icon name="archive" className="w-9 h-9" /></span>
+            <span className="absolute -top-2 -start-2 text-gold-dark animate-pulse-soft"><Icon name="sparkle" className="w-5 h-5" /></span>
+          </div>
+          <h3 className="text-lg font-bold text-ink">{q.trim() ? t.chatNoMatch : t.archEmptyTitle}</h3>
+          {!q.trim() && <p className="text-sm text-muted leading-relaxed max-w-xl">{t.emptyArchive}</p>}
+          {!q.trim() && manager && !importing && (
+            <button className="btn btn-ghost h-11 !rounded-xl" onClick={() => setImporting(true)}><Icon name="upload" className="w-[18px] h-[18px]" />{t.importButton}</button>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-6">
+          <h3 className="text-caption font-bold uppercase tracking-[0.12em] text-muted">{t.archEntries}</h3>
+          {Object.entries(groups).map(([ym, list]) => (
+            <section key={ym} className="space-y-3">
+              <h4><span className="timeline-month">{month(ym)}</span></h4>
+              <ol className="timeline space-y-3">
+                {list.map(e => (
+                  <li key={e.id} className="timeline-item animate-slide-up">
+                    <article className="rounded-2xl bg-card border border-line elevated-1 p-4">
+                      <div className="flex flex-wrap items-center gap-2 text-caption text-muted">
+                        <span className={`${chip} bg-green-soft text-green font-bold`}>{label(e)}</span>
+                        {e.pending && <span className={`${chip} bg-gold/20 text-gold-dark font-bold`}>{t.pendingBadge2}</span>}
+                        <span className="inline-flex items-center gap-1 tabular-nums" dir="ltr"><Icon name="calendar" className="w-3.5 h-3.5" />{e.eventDate}</span>
+                        <span>· {e.source === 'manual' ? t.manual : t.auto}</span>
+                      </div>
+                      <p className="mt-2 text-ink leading-relaxed whitespace-pre-wrap break-words">{e.summary}</p>
+                      {!!e.media?.length && (
+                        <div className="mt-3 space-y-2">
+                          <div className="flex gap-2 overflow-x-auto">{e.media.filter(m => m.kind !== 'voice').map(m => <a key={m.id} href={`/api/album-items/${m.id}/file`} target="_blank" rel="noopener" className="shrink-0"><img alt="" loading="lazy" className="w-20 h-20 object-cover rounded-xl bg-line" src={`/api/album-items/${m.id}/file?thumb=1`} /></a>)}</div>
+                          {e.media.filter(m => m.kind === 'voice').map(m => <audio key={m.id} controls preload="none" className="w-full h-9" src={`/api/album-items/${m.id}/file`} />)}
+                          <p className="text-caption text-muted">{t.albumEventNote}</p>
+                        </div>
+                      )}
+                      {e.pending && <p className="mt-2 text-xs text-muted">{t.pendingNote}</p>}
+                      {(e.canAct || (manager && !e.protected)) && (
+                        <div className="mt-3 pt-3 border-t border-line flex flex-wrap gap-2">
+                          {e.canAct && e.status === 'open' && <button onClick={() => act(e.id, 'resolve')} className={`${small} bg-green-soft text-green hover:bg-green-soft/70`}><Icon name="check" className="w-3.5 h-3.5" />{t.markResolved}</button>}
+                          {e.canAct && e.pending && <button onClick={() => act(e.id, 'decline')} className={`${small} text-danger hover:bg-danger-soft`}><Icon name="ban" className="w-3.5 h-3.5" />{t.decline}</button>}
+                          {manager && !e.protected && <button onClick={() => remove(e.id)} className={`${small} text-danger hover:bg-danger-soft ms-auto`}><Icon name="trash" className="w-3.5 h-3.5" />{t.deleteEntry}</button>}
+                        </div>
+                      )}
+                    </article>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A thumbnail is 320px wide: fine in a small tile, visibly soft when a tile or bubble is
+ *  larger than that (or on a retina screen). srcSet lets the browser take the full photo
+ *  only when the slot needs it. Videos keep the poster frame. */
+function sharpSrc(x: { id: number; kind: string; thumb: number | null }, sizes: string) {
+  if (x.kind === 'image' && x.thumb) return { src: `/api/media/${x.thumb}`, srcSet: `/api/media/${x.thumb} 320w, /api/media/${x.id} 1600w`, sizes };
+  return { src: `/api/media/${x.thumb ?? x.id}` };
+}
+
+/** Message bubbles while the first page loads: alternating sides and widths, so the
+ *  screen already has the shape of a conversation instead of a false empty state. */
+function MessagesSkeleton() {
+  const { t } = useI18n();
+  const rows: Array<[boolean, string, string]> = [[false, 'w-48', 'h-10'], [true, 'w-40', 'h-10'], [false, 'w-64', 'h-16'], [true, 'w-56', 'h-24'], [false, 'w-36', 'h-10'], [true, 'w-44', 'h-10']];
+  return (
+    <div role="status" aria-busy="true" className="flex flex-col gap-3 py-4">
+      <span className="sr-only">{t.loading}</span>
+      {rows.map(([mine, w, h], i) => (
+        <div key={i} aria-hidden className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+          <Skeleton className={`${w} ${h} max-w-[75%] !rounded-2xl ${mine ? '!rounded-br-md' : '!rounded-bl-md'}`} />
+        </div>
       ))}
+    </div>
+  );
+}
+
+/** The whole chat screen before the chat itself has loaded: header, tabs, bubbles, composer. */
+function ChatSkeleton({ docked }: { docked?: boolean }) {
+  return (
+    <div className={docked ? 'chat-docked flex flex-col h-full' : 'flex flex-col h-[100dvh] py-2'}>
+      <div className="chat-head flex items-center gap-3 mb-3" aria-hidden>
+        <Skeleton className="w-10 h-10 !rounded-xl" />
+        <Skeleton className="w-10 h-10 !rounded-xl" />
+        <span className="flex-1 space-y-1.5"><Skeleton className="h-4 w-40" /><Skeleton className="h-3 w-24" /></span>
+      </div>
+      <div className="flex-1 min-h-0 flex flex-col">
+        <div className="chat-root flex flex-col h-full">
+          <div className="chat-wall flex-1 overflow-hidden"><MessagesSkeleton /></div>
+          <div className="pt-2" aria-hidden><Skeleton className="h-12 !rounded-full" /></div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -865,8 +1384,8 @@ function ContactInvite({ circle }: { circle: CircleDetail }) {
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap gap-2">
-        <button className="btn btn-ghost" onClick={share}>🔗 {t.inviteShare}</button>
-        {canPick && <button className="btn" onClick={pick}>👥 {t.inviteContacts}</button>}
+        <button className="btn btn-ghost !rounded-xl" onClick={share}><Icon name="link" className="w-4 h-4" />{t.inviteShare}</button>
+        {canPick && <button className="btn !rounded-xl" onClick={pick}><Icon name="group" className="w-4 h-4" />{t.inviteContacts}</button>}
       </div>
       {!canPick && <p className="text-xs text-muted">{t.inviteNoPicker}</p>}
       {picked.length > 0 && (
@@ -903,14 +1422,15 @@ function StoryEditor({ circle, onClose }: { circle: CircleDetail; onClose: () =>
     <Dialog onClose={onClose} label={t.storyEdit}>
       <h2 className="text-lg font-bold">{t.storyEdit} · {year}</h2>
       <p className="text-xs text-muted mt-1">{t.storyEditNote}</p>
-      {chapters === null ? null : chapters.length === 0 ? <p className="text-sm text-muted mt-3">{t.storyNoChapters}</p> : (
+      {chapters === null ? <div className="mt-3 space-y-2"><Skeleton className="h-4 w-40" /><Skeleton className="h-3" /><Skeleton className="h-3 w-2/3" /></div>
+        : chapters.length === 0 ? <p className="text-sm text-muted mt-3">{t.storyNoChapters}</p> : (
         <ul className="mt-3 space-y-4 max-h-[60vh] overflow-y-auto">
           {chapters.map(ch => (
             <li key={ch.idx} className="space-y-1">
               <div className="flex items-center gap-2"><input className="field !py-1 flex-1" value={ch.title} maxLength={120} onChange={e => set(ch.idx, { title: e.target.value })} />
                 <span className="text-[11px] px-2 py-0.5 rounded-full bg-line text-muted shrink-0">{t.storySource[ch.source] ?? ch.source}</span></div>
               <textarea className="field min-h-40" value={ch.text} onChange={e => set(ch.idx, { text: e.target.value })} />
-              <div className="flex items-center gap-2"><button className="btn btn-ghost !py-1" onClick={() => save(ch)}>{t.save}</button>{saved === ch.idx && <span role="status" className="text-xs text-green">✓ {t.saved}</span>}</div>
+              <div className="flex items-center gap-2"><button className="btn btn-ghost !py-1" onClick={() => save(ch)}>{t.save}</button>{saved === ch.idx && <span role="status" className="text-xs text-green inline-flex items-center gap-1"><Icon name="check" className="w-3.5 h-3.5" /> {t.saved}</span>}</div>
             </li>
           ))}
         </ul>
@@ -939,16 +1459,19 @@ function StoryCard({ circle, reload }: { circle: CircleDetail; reload: () => voi
     } catch (e) { setMsg(t.errors[e instanceof ApiError ? e.code : 'generic'] ?? t.errors.generic); } finally { setBusy(false); }
   }
   return (
-    <section className="card p-4 space-y-2">
-      <h3 className="font-bold text-green">{t.storyHead}</h3>
+    <section className="rounded-2xl bg-card border border-line elevated-1 p-4 sm:p-5 space-y-3">
+      <div className="flex items-center gap-3">
+        <span className="w-10 h-10 rounded-xl bg-green-soft text-green flex items-center justify-center shrink-0"><Icon name="book" className="w-5 h-5" /></span>
+        <h3 className="font-bold text-ink">{t.storyHead}</h3>
+      </div>
       <label className="block text-sm font-medium">{t.storyName}
         <input className="field mt-1" value={title} maxLength={80} placeholder={t.storyNamePh} onChange={e => setTitle(e.target.value)} onBlur={save} />
       </label>
       <p className="text-xs text-muted">{t.storyNote}</p>
       <div className="flex flex-wrap gap-2">
-        <a className="btn btn-ghost" target="_blank" rel="noopener" href={`/api/circles/${circle.id}/book?year=${new Date().getFullYear()}&lang=${lang}`}>📖 {t.bookButton}</a>
-        <button className="btn" disabled={busy} onClick={write}>✍️ {t.storyWrite}</button>
-        <button className="btn btn-ghost" onClick={() => setEditing(true)}>✏️ {t.storyEdit}</button>
+        <a className="btn btn-ghost !rounded-xl" target="_blank" rel="noopener" href={`/api/circles/${circle.id}/book?year=${new Date().getFullYear()}&lang=${lang}`}><Icon name="book" className="w-4 h-4" />{t.bookButton}</a>
+        <button className="btn !rounded-xl" disabled={busy} onClick={write}><Icon name="sparkle" className="w-4 h-4" />{t.storyWrite}</button>
+        <button className="btn btn-ghost !rounded-xl" onClick={() => setEditing(true)}><Icon name="pen" className="w-4 h-4" />{t.storyEdit}</button>
       </div>
       {editing && <StoryEditor circle={circle} onClose={() => setEditing(false)} />}
       {msg && <p role="status" className="text-sm text-muted">{msg}</p>}
@@ -991,8 +1514,11 @@ function StorageCard({ circle, bill, manager, onChanged }: { circle: CircleDetai
   }
   const price = (p: { priceMonthly: number; priceYearly: number; currency: string }) => p.priceMonthly === 0 ? t.storFreeLine : `${p.priceMonthly} ${p.currency} ${t.storPerMonth} · ${p.priceYearly} ${p.currency} ${t.storPerYear}`;
   return (
-    <section className="card p-4 space-y-2">
-      <h3 className="font-bold">{t.storage}</h3>
+    <section className="rounded-2xl bg-card border border-line elevated-1 p-4 sm:p-5 space-y-2">
+      <div className="flex items-center gap-3">
+        <span className="w-10 h-10 rounded-xl bg-green-soft text-green flex items-center justify-center shrink-0"><Icon name="storage" className="w-5 h-5" /></span>
+        <h3 className="font-bold text-ink">{t.storage}</h3>
+      </div>
       <div className="h-2 rounded-full bg-line overflow-hidden" role="progressbar" aria-valuenow={bill.archivedBytes} aria-valuemax={bill.quotaBytes}>
         <div className={`h-full ${full ? 'bg-danger' : almost ? 'bg-gold' : 'bg-brand'}`} style={{ width: `${pct}%` }} />
       </div>
@@ -1003,7 +1529,7 @@ function StorageCard({ circle, bill, manager, onChanged }: { circle: CircleDetai
       <p className="text-xs text-muted">{t.storageNote}</p>
       {bill.status === 'readonly' && <p role="status" className="text-sm text-gold-dark bg-gold/15 rounded-lg p-2">{t.readonlyNote}</p>}
       {bill.request?.status === 'open' && <p role="status" className="text-sm text-green">{t.storRequestSent}</p>}
-      {bill.request?.status === 'granted' && <p className="text-xs text-green">✓ {t.storGranted}</p>}
+      {bill.request?.status === 'granted' && <p className="text-xs text-green inline-flex items-center gap-1"><Icon name="check" className="w-3.5 h-3.5" />{t.storGranted}</p>}
       {bill.request?.status === 'declined' && <p className="text-xs text-muted">{t.storDeclined}</p>}
       {paidMsg && <p role="status" className="text-sm text-green bg-green-soft rounded-lg p-2">{t.payPaidThanks}</p>}
       {bill.periodEnd && bill.plan !== 'free' && <p className="text-xs text-muted">{t.payRenews}: <bdi dir="ltr">{bill.periodEnd.slice(0, 10)}</bdi></p>}
@@ -1075,6 +1601,24 @@ function Settings({ circle, me, reload, onLeft, openArchive }: { circle: CircleD
   }
 
   const [sub, setSub] = useState<'members' | 'media' | 'settings'>('members');
+  const inviteRef = useRef<HTMLElement>(null);
+  // Asked for the invite (from the chat list): show Members and bring the invite card into view.
+  useEffect(() => {
+    const on = (e: Event) => {
+      if ((e as CustomEvent<number>).detail !== circle.id) return;
+      setSub('members');
+      setTimeout(() => {
+        const el = inviteRef.current;
+        if (!el) return;
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        el.classList.remove('flash-ring'); void el.offsetWidth; el.classList.add('flash-ring');
+      }, 60);
+    };
+    window.addEventListener('thikra:invite', on);
+    // Mounted by that same request (the chat was not open yet): run it once now.
+    if (location.hash.endsWith('/settings')) on(new CustomEvent('thikra:invite', { detail: circle.id }));
+    return () => window.removeEventListener('thikra:invite', on);
+  }, [circle.id]);
   const [muteOpen, setMuteOpen] = useState(false);
   const [photos, setPhotos] = useState<GalleryItem[] | null>(null);
   useEffect(() => { if (sub === 'media' && photos === null) api<GalleryItem[]>(`/circles/${circle.id}/media`).then(setPhotos).catch(() => setPhotos([])); }, [sub, photos, circle.id]);
@@ -1086,43 +1630,74 @@ function Settings({ circle, me, reload, onLeft, openArchive }: { circle: CircleD
   const show = (k: string, extra = 'space-y-4') => (sub === k ? extra : 'hidden');
 
   return (
-    <div className="h-full overflow-y-auto flex flex-col gap-4 pb-4">
-      <section className="text-center space-y-2 pt-1">
-        <div className="mx-auto w-20 h-20 rounded-full bg-green-soft text-green flex items-center justify-center text-3xl font-bold" aria-hidden>{[...circle.name][0]}</div>
-        <h3 className="text-xl font-bold break-words">{circle.name}</h3>
-        <p className="text-sm text-muted">{circle.kind === 'circle' ? t.infoKindCircle : circle.kind === 'group' ? t.infoKindGroup : ''}{circle.kind !== 'direct' && ' · '}{circle.members.length === 1 ? t.oneMember : t.infoMembersCount.replace('{n}', String(circle.members.length))}</p>
-        <div className="grid grid-cols-3 gap-2 pt-1">
-          <button className="card p-2 text-sm min-w-0" aria-pressed={!!circle.muted} onClick={() => circle.muted ? setPref({ muted: false }) : setMuteOpen(true)}>{circle.muted ? '🔕' : '🔔'}<span className="block">{circle.muted ? t.infoMuted : t.infoMute}</span></button>
-          <button className="card p-2 text-sm min-w-0" aria-pressed={!!circle.favourite} onClick={() => setPref({ favourite: !circle.favourite })}>{circle.favourite ? '★' : '☆'}<span className="block">{t.infoFavourite}</span></button>
-          {circle.kind !== 'direct' && <button className="card p-2 text-sm min-w-0" onClick={() => setSub('members')}>＋<span className="block">{t.infoInvite}</span></button>}
+    <div className="tab-scroll h-full overflow-y-auto flex flex-col gap-4 pb-4">
+      <section className="text-center pt-2 flex flex-col items-center">
+        <div aria-hidden className={`w-20 h-20 flex items-center justify-center text-3xl font-bold ${circle.kind === 'direct' ? 'rounded-full' : 'rounded-3xl'}
+          ${circle.kind === 'circle' ? 'bg-brand text-white ring-2 ring-gold/50 ring-offset-4 ring-offset-card' : 'bg-green-soft text-green'}`}>
+          {circle.kind === 'group' ? <Icon name="group" className="w-9 h-9" /> : [...circle.name][0]?.toUpperCase()}
+        </div>
+        <h3 className="mt-4 text-2xl font-bold !text-ink tracking-tight break-words">{circle.name}</h3>
+        <p className="mt-1 text-sm text-muted">{circle.kind === 'circle' ? t.infoKindCircle : circle.kind === 'group' ? t.infoKindGroup : ''}{circle.kind !== 'direct' && ' · '}{circle.members.length === 1 ? t.oneMember : t.infoMembersCount.replace('{n}', String(circle.members.length))}</p>
+        <div className={`mt-5 w-full max-w-md grid gap-2 ${circle.kind !== 'direct' ? 'grid-cols-3' : 'grid-cols-2'}`}>
+          {([
+            [circle.muted ? 'mute' : 'bell', circle.muted ? t.infoMuted : t.infoMute, !!circle.muted, () => circle.muted ? setPref({ muted: false }) : setMuteOpen(true)],
+            [circle.favourite ? 'star-fill' : 'star', t.infoFavourite, !!circle.favourite, () => setPref({ favourite: !circle.favourite })],
+            ...(circle.kind !== 'direct' ? [['plus', t.infoInvite, false, () => setSub('members')] as const] : []),
+          ] as const).map(([ic, label, on, fn]) => (
+            <button key={label} aria-pressed={on} onClick={fn}
+              className={`group/qa flex flex-col items-center gap-1.5 py-3 rounded-2xl border text-sm transition-[background-color,border-color,box-shadow] duration-[var(--dur-fast)]
+                ${on ? 'bg-green-soft border-green/40 text-green font-bold' : 'bg-card border-line text-ink hover:border-green/40 hover:shadow-[var(--shadow-e2)]'} elevated-1`}>
+              <span className={`w-9 h-9 rounded-xl flex items-center justify-center ${on ? 'bg-brand text-white' : 'bg-green-soft text-green'}`}><Icon name={ic} className="w-[18px] h-[18px]" /></span>
+              {label}
+            </button>
+          ))}
         </div>
       </section>
       {bill && circle.kind === 'circle' && bill.archivedBytes / bill.quotaBytes >= 0.8 && (
-        <button className="text-sm rounded-lg p-2 bg-gold/15 text-gold-dark text-start" onClick={() => setSub('media')}>{bill.archivedBytes >= bill.quotaBytes ? t.storFullMsg : t.storAlmost}</button>
+        <button className="text-sm rounded-xl p-3 bg-gold/15 text-gold-dark text-start flex items-center gap-2" onClick={() => setSub('media')}><Icon name="alert" className="w-4 h-4 shrink-0" />{bill.archivedBytes >= bill.quotaBytes ? t.storFullMsg : t.storAlmost}</button>
       )}
-      <div role="tablist" className="flex justify-center gap-1">
-        {sections.map(k => (
-          <button key={k} role="tab" aria-selected={sub === k} onClick={() => setSub(k)}
-            className={`px-4 py-1.5 rounded-full border text-sm ${sub === k ? 'bg-card border-green text-green font-bold' : 'border-transparent text-muted'}`}>
-            {k === 'members' ? t.infoMembers : k === 'media' ? t.infoMedia : t.infoSettings}
-          </button>
-        ))}
-      </div>
-      <section className={show('settings', 'card p-0 divide-y divide-line')}>
-        <button className="w-full flex items-center gap-3 p-4 text-start" onClick={() => setMuteOpen(true)}>
-          <span aria-hidden>{circle.muted ? '🔕' : '🔔'}</span><span className="flex-1">{t.infoNotifications}</span><span className="text-sm text-muted">{muteLabel}</span>
+      {sections.length > 1 && (
+        <div role="tablist" className="self-center inline-flex p-1 gap-1 rounded-2xl bg-paper border border-line">
+          {sections.map(k => (
+            <button key={k} role="tab" aria-selected={sub === k} onClick={() => setSub(k)}
+              className={`px-5 h-9 rounded-xl text-sm transition-[background-color,color,box-shadow] duration-[var(--dur-fast)]
+                ${sub === k ? 'bg-card text-green font-bold elevated-1' : 'text-muted hover:text-ink'}`}>
+              {k === 'members' ? t.infoMembers : k === 'media' ? t.infoMedia : t.infoSettings}
+            </button>
+          ))}
+        </div>
+      )}
+      <section className={show('settings', 'rounded-2xl bg-card border border-line elevated-1 overflow-hidden')}>
+        <button className="row-interactive w-full flex items-center gap-3 p-4 text-start" onClick={() => setMuteOpen(true)}>
+          <span className="w-10 h-10 rounded-xl bg-green-soft text-green flex items-center justify-center shrink-0"><Icon name={circle.muted ? 'mute' : 'bell'} className="w-5 h-5" /></span>
+          <span className="flex-1 min-w-0"><b className="block text-ink">{t.infoNotifications}</b><span className="block text-xs text-muted">{t.infoNotifNote}</span></span>
+          <span className="text-sm text-muted shrink-0">{muteLabel}</span>
+          <Icon name="chevron" className="w-4 h-4 text-muted -rotate-90 rtl:rotate-90 shrink-0" />
         </button>
-        <p className="px-4 py-2 text-xs text-muted">{t.infoNotifNote}</p>
       </section>
       {circle.kind === 'circle' && manager && <div className={show('settings')}><StoryCard circle={circle} reload={reload} /></div>}
       {circle.kind === 'circle' && (
-        <section className={show('settings', 'card p-0 divide-y divide-line')}>
-          <h3 className="px-4 pt-3 font-bold text-green">{t.thekraHead}</h3>
-          <button className="w-full flex items-center gap-3 p-4 text-start" onClick={openArchive}><span aria-hidden>🗂</span><span className="flex-1">{t.thekraArchive}</span><span className="text-sm text-muted">{circle.agentActive ? t.agentOn : t.agentOff}</span></button>
-          <button className="w-full flex items-center gap-3 p-4 text-start" onClick={openArchive}><span aria-hidden>📔</span><span className="flex-1">{t.thekraAlbums}</span></button>
-          <a className="flex items-center gap-3 p-4" target="_blank" rel="noopener" href={`/api/circles/${circle.id}/book?year=${new Date().getFullYear()}&lang=${lang}`}><span aria-hidden>📖</span><span className="flex-1">{t.bookButton}</span></a>
-          <a className="flex items-center gap-3 p-4" href="#/sealed"><span aria-hidden>✉️</span><span className="flex-1">{t.thekraSealed}</span></a>
-          <p className="px-4 py-2 text-xs text-muted">{t.thekraNote}</p>
+        <section className={show('settings', 'rounded-2xl bg-card border border-line elevated-1 overflow-hidden')}>
+          <h3 className="px-4 pt-4 pb-1 text-caption font-bold uppercase tracking-[0.12em] text-muted">{t.thekraHead}</h3>
+          <ul className="divide-y divide-line">
+            {([
+              ['archive', t.thekraArchive, circle.agentActive ? t.agentOn : t.agentOff, openArchive, null],
+              ['album', t.thekraAlbums, '', openArchive, null],
+              ['book', t.bookButton, '', null, `/api/circles/${circle.id}/book?year=${new Date().getFullYear()}&lang=${lang}`],
+              ['envelope', t.thekraSealed, '', null, '#/sealed'],
+            ] as const).map(([ic, label, note, fn, href]) => {
+              const inner = <>
+                <span className="w-10 h-10 rounded-xl bg-green-soft text-green flex items-center justify-center shrink-0"><Icon name={ic} className="w-5 h-5" /></span>
+                <span className="flex-1 min-w-0 text-ink">{label}</span>
+                {note && <span className="text-sm text-muted shrink-0">{note}</span>}
+                <Icon name={href && href.startsWith('/api') ? 'arrow-out' : 'chevron'} className={`w-4 h-4 text-muted shrink-0 ${href && href.startsWith('/api') ? 'rtl:-scale-x-100' : '-rotate-90 rtl:rotate-90'}`} />
+              </>;
+              return <li key={label}>{href
+                ? <a className="row-interactive flex items-center gap-3 px-4 py-3" href={href} {...(href.startsWith('/api') ? { target: '_blank', rel: 'noopener' } : {})}>{inner}</a>
+                : <button className="row-interactive w-full flex items-center gap-3 px-4 py-3 text-start" onClick={fn!}>{inner}</button>}</li>;
+            })}
+          </ul>
+          <p className="px-4 py-3 text-xs text-muted border-t border-line">{t.thekraNote}</p>
         </section>
       )}
       <div className={show('settings')}>
@@ -1132,71 +1707,75 @@ function Settings({ circle, me, reload, onLeft, openArchive }: { circle: CircleD
           <p className="text-sm text-muted">{t.convertNote}</p>
         </section>
       )}
-      <section className="card p-4">
-        <label className="flex items-start gap-3">
-          <input type="checkbox" className="mt-1" checked={receipts} onChange={e => setReceiptsOn(e.target.checked)} />
-          <span><b>{t.readReceipts}</b><span className="block text-sm text-muted">{t.readReceiptsNote}</span></span>
-        </label>
+      <section className="rounded-2xl bg-card border border-line elevated-1 px-4 py-2">
+        <Toggle checked={receipts} onChange={setReceiptsOn} label={t.readReceipts} note={<span className="text-sm">{t.readReceiptsNote}</span>} />
       </section>
       {circle.kind === 'circle' && (
-        <section className="card p-4 space-y-2">
-          <h3 className="font-bold">{t.agentInfoTitle}</h3>
-          <p className="text-sm font-bold">✦ {t.agentReadsTitle}</p>
-          <ul className="text-sm space-y-1">{t.agentReads.map(x => <li key={x}>✓ {x}</li>)}</ul>
-          <p className="text-sm font-bold pt-1">🔒 {t.agentNeverTitle}</p>
-          <ul className="text-sm space-y-1">{t.agentNever.map(x => <li key={x}>✕ {x}</li>)}</ul>
+        <section className="rounded-2xl bg-card border border-line elevated-1 p-4 sm:p-5 space-y-4">
+          <div className="flex items-center gap-3">
+            <span className="w-10 h-10 rounded-xl bg-green-soft text-green flex items-center justify-center shrink-0"><Icon name="shield" className="w-5 h-5" /></span>
+            <h3 className="font-bold text-ink">{t.agentInfoTitle}</h3>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="rounded-xl bg-green-soft/50 border border-line p-3.5 space-y-2">
+              <p className="text-sm font-bold text-green flex items-center gap-1.5"><Icon name="sparkle" className="w-4 h-4" />{t.agentReadsTitle}</p>
+              <ul className="text-sm space-y-1.5">{t.agentReads.map(x => <li key={x} className="flex items-start gap-2"><Icon name="check" className="w-4 h-4 text-green shrink-0 mt-0.5" /><span>{x}</span></li>)}</ul>
+            </div>
+            <div className="rounded-xl bg-danger-soft/60 border border-line p-3.5 space-y-2">
+              <p className="text-sm font-bold text-danger flex items-center gap-1.5"><Icon name="lock" className="w-4 h-4" />{t.agentNeverTitle}</p>
+              <ul className="text-sm space-y-1.5">{t.agentNever.map(x => <li key={x} className="flex items-start gap-2"><Icon name="x" className="w-4 h-4 text-danger shrink-0 mt-0.5" /><span>{x}</span></li>)}</ul>
+            </div>
+          </div>
         </section>
       )}
       {manager && (
-        <section className="card p-4 space-y-3">
-          {circle.kind === 'circle' && <label className="flex items-start gap-3">
-            <input type="checkbox" className="mt-1.5 w-5 h-5 accent-[var(--color-gold)]" checked={!!circle.agentActive}
-              onChange={e => patch({ agentActive: e.target.checked })} />
-            <span><b>{t.agentMode}</b><span className="block text-sm text-muted">{t.agentModeHelp}</span></span>
-          </label>}
-          {circle.kind === 'circle' && <div>
-            <label className="block text-sm font-medium mb-1">{t.sensitivity}</label>
-            <select className="field" value={circle.sensitivity} onChange={e => patch({ sensitivity: e.target.value })}>
-              {(['strict', 'medium', 'lenient'] as const).map(s => <option key={s} value={s}>{t.sens[s]}</option>)}
-            </select>
-          </div>}
-          <div>
-            <label className="block text-sm font-medium mb-1">{t.invitePolicy}</label>
-            <select className="field" value={circle.invitePolicy} onChange={e => patch({ invitePolicy: e.target.value })}>
-              {(['admins', 'members'] as const).map(p => <option key={p} value={p}>{t.invitePolicies[p]}</option>)}
-            </select>
+        <section className="rounded-2xl bg-card border border-line elevated-1 p-4 sm:p-5 space-y-4">
+          {circle.kind === 'circle' && <Toggle checked={!!circle.agentActive} onChange={v => patch({ agentActive: v })} label={t.agentMode} note={<span className="text-sm">{t.agentModeHelp}</span>} />}
+          <div className="grid gap-4 md:grid-cols-2">
+            {circle.kind === 'circle' && <div>
+              <span className="block text-sm font-medium mb-1.5">{t.sensitivity}</span>
+              <Picker label={t.sensitivity} value={circle.sensitivity} onChange={v => patch({ sensitivity: v })}
+                options={(['strict', 'medium', 'lenient'] as const).map(v => ({ value: v, label: t.sens[v] }))} />
+            </div>}
+            <div>
+              <span className="block text-sm font-medium mb-1.5">{t.invitePolicy}</span>
+              <Picker label={t.invitePolicy} value={circle.invitePolicy} onChange={v => patch({ invitePolicy: v })}
+                options={(['admins', 'members'] as const).map(v => ({ value: v, label: t.invitePolicies[v] }))} />
+            </div>
           </div>
-          <label className="flex items-center gap-3">
-            <input type="checkbox" className="w-5 h-5 accent-[var(--color-gold)]" checked={circle.inviteEnabled}
-              onChange={e => patch({ inviteEnabled: e.target.checked })} />
-            <span>{t.inviteEnabled}</span>
-          </label>
+          <Toggle checked={circle.inviteEnabled} onChange={v => patch({ inviteEnabled: v })} label={t.inviteEnabled} />
         </section>
       )}
 
       </div>
       <div className={show('members')}>
       {circle.inviteCode ? (
-        <section className="card p-4 space-y-2">
-          <h3 className="font-bold">{t.invite}</h3>
-          <p className="text-sm text-muted">{t.shareCode}</p>
+        <section ref={inviteRef} className="scroll-mt-4 rounded-2xl bg-card border border-line elevated-1 p-4 sm:p-5 space-y-3">
+          <div className="flex items-center gap-3">
+            <span className="w-10 h-10 rounded-xl bg-green-soft text-green flex items-center justify-center shrink-0"><Icon name="plus" className="w-5 h-5" /></span>
+            <span className="min-w-0"><b className="block text-ink">{t.invite}</b><span className="block text-sm text-muted">{t.shareCode}</span></span>
+          </div>
           <div className="flex gap-2">
-            <code className="field !bg-paper text-center select-all" dir="ltr">{circle.inviteCode}</code>
-            <button className="btn btn-ghost" onClick={copy}>{t.copy}</button>
+            <code className="flex-1 h-12 rounded-xl bg-paper border border-dashed border-line flex items-center justify-center text-lg tracking-[0.2em] font-bold text-ink select-all" dir="ltr">{circle.inviteCode}</code>
+            <button className="btn btn-ghost h-12 !rounded-xl" onClick={copy}><Icon name="copy" className="w-4 h-4" />{t.copy}</button>
           </div>
           <ContactInvite circle={circle} />
-          {manager && <button className="text-xs text-green underline" onClick={regenerate}>{t.regenerate}</button>}
+          {manager && <button className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-bold text-green hover:bg-green-soft transition-colors duration-[var(--dur-instant)]" onClick={regenerate}><Icon name="refresh" className="w-3.5 h-3.5" />{t.regenerate}</button>}
         </section>
       ) : !circle.inviteEnabled && <p className="text-sm text-muted text-center">{t.inviteOff}</p>}
 
       </div>
       <div className={show('media')}>
-        {photos === null ? null : photos.length === 0 ? <p className="text-sm text-muted text-center">{t.infoMediaNone}</p> : (
-          <ul className="grid grid-cols-3 sm:grid-cols-4 gap-1">
+        {photos === null ? <GridSkeleton tiles={6} className="grid-cols-3 gap-1" />
+          : photos.length === 0 ? <p className="text-sm text-muted text-center">{t.infoMediaNone}</p> : (
+          <ul className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-1.5">
             {photos.map(g => (
               <li key={g.id}>{g.kind === 'file'
-                ? <a className="block p-2 rounded-lg border border-line text-xs break-words" href={`/api/media/${g.id}`} download={g.name ?? 'file'}>📄 {g.name}</a>
-                : <a className="block aspect-square overflow-hidden rounded-lg bg-line" href={`/api/media/${g.id}`} target="_blank" rel="noopener"><img alt={g.name ?? ''} loading="lazy" className="w-full h-full object-cover" src={`/api/media/${g.thumb ?? g.id}`} /></a>}</li>
+                ? <a className="h-full min-h-24 flex flex-col items-center justify-center gap-1.5 p-2 rounded-xl border border-line bg-card text-xs text-center break-all hover:bg-green-soft transition-colors duration-[var(--dur-instant)]" href={`/api/media/${g.id}`} download={g.name ?? 'file'}><Icon name="file" className="w-6 h-6 text-green" /><span className="line-clamp-2">{g.name}</span></a>
+                : <a className="group/m relative block aspect-square overflow-hidden rounded-xl bg-line" href={`/api/media/${g.id}`} target="_blank" rel="noopener">
+                    <img alt={g.name ?? ''} loading="lazy" decoding="async" className="w-full h-full object-cover transition-transform duration-[var(--dur-slow)] ease-[var(--ease-standard)] group-hover/m:scale-105" {...sharpSrc(g, '(min-width: 1280px) 14vw, (min-width: 1024px) 18vw, (min-width: 640px) 25vw, 33vw')} />
+                    {g.kind === 'video' && <span className="absolute bottom-1.5 start-1.5 w-6 h-6 rounded-full bg-black/60 text-white flex items-center justify-center"><Icon name="play" className="w-3 h-3" /></span>}
+                  </a>}</li>
             ))}
           </ul>
         )}

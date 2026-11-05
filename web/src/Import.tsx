@@ -6,6 +6,7 @@ import { buildDraft } from '../../core/importer';
 import { defaultAlbumTitle, planAlbum, zipResolver, type AlbumKind } from '../../core/album';
 import { openZip, type Zip } from './zip';
 import { prepare } from './media';
+import { Icon } from './icons';
 
 const MIME: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', opus: 'audio/ogg', ogg: 'audio/ogg', m4a: 'audio/mp4', mp3: 'audio/mpeg', aac: 'audio/aac', wav: 'audio/wav', mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm' };
 const mb = (n: number) => `${Math.max(1, Math.round(n / 1048576))} MB`;
@@ -32,6 +33,7 @@ export function ImportPanel({ circle, onDone }: { circle: CircleDetail; onDone: 
   const wanted = useMemo(() => (plan ? plan.items.filter(i => years.has(i.year) && kinds[i.kind]) : []), [plan, years, kinds]);
   const bytes = useMemo(() => wanted.reduce((n, i) => n + (zip?.entries.get(i.entry)?.usize ?? 0), 0), [wanted, zip]);
 
+  const [fileName, setFileName] = useState('');
   async function pick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -112,11 +114,24 @@ export function ImportPanel({ circle, onDone }: { circle: CircleDetail; onDone: 
 
   const hasMedia = !!plan && (plan.items.length > 0);
   return (
-    <section className="card p-4 space-y-3">
-      <h3 className="font-bold">{t.importWhatsapp}</h3>
-      <p className="text-sm text-muted">{t.importPrivacy}</p>
-      <p className="text-xs text-muted">{t.importHow}</p>
-      <input type="file" accept=".txt,.zip,text/plain,application/zip" onChange={pick} className="block w-full text-sm" aria-label={t.importPick} disabled={busy} />
+    <section className="rounded-2xl bg-card border border-line elevated-1 p-4 sm:p-5 space-y-4">
+      <div className="flex items-start gap-3.5">
+        <span className="w-11 h-11 rounded-xl bg-green-soft text-green flex items-center justify-center shrink-0"><Icon name="upload" className="w-5 h-5" /></span>
+        <div className="min-w-0 space-y-1">
+          <h3 className="font-bold text-ink">{t.importWhatsapp}</h3>
+          <p className="text-sm text-muted">{t.importPrivacy}</p>
+          <p className="text-xs text-muted leading-relaxed">{t.importHow}</p>
+        </div>
+      </div>
+      {/* The browser's own file control ("Choose file · No file chosen") ignores the theme;
+          the real input stays, hidden, inside a drop-zone styled label. */}
+      <label className={`group/drop flex flex-col items-center justify-center gap-2 text-center rounded-2xl border-2 border-dashed px-4 py-7
+        transition-colors duration-[var(--dur-fast)] ${busy ? 'opacity-60 cursor-default border-line' : 'cursor-pointer border-line hover:border-green/50 hover:bg-green-soft/40'}`}>
+        <input type="file" accept=".txt,.zip,text/plain,application/zip" onChange={e => { setFileName(e.target.files?.[0]?.name ?? ''); pick(e); }} className="sr-only" aria-label={t.importPick} disabled={busy} />
+        <span className="w-12 h-12 rounded-full bg-green-soft text-green flex items-center justify-center transition-transform duration-[var(--dur-fast)] group-hover/drop:-translate-y-0.5"><Icon name="file" className="w-6 h-6" /></span>
+        <b className="text-sm text-green">{fileName || t.importPick}</b>
+        <span className="text-caption text-muted" dir="ltr">.txt · .zip</span>
+      </label>
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
       {result && <p role="status" className="text-sm text-green">{result}</p>}
 

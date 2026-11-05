@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { MachineNote } from './LangPicker';
 import { api, ApiError, toDate, type CircleDetail, type CircleSummary } from './api';
 import { useI18n, intlLocale } from './i18n';
+import { Icon } from './icons';
 
 type Trigger = 'date' | 'event' | 'death';
 interface Sealed { id: number; circleId: number; circleName: string; trigger: Trigger; occasion: string | null; kind: 'text' | 'voice' | 'video' | 'image'; body: string; fileName: string | null; unlockAt: string | null; yearly: boolean; status: 'sealed' | 'waiting' | 'stopped'; releaseAt: string | null; note: string | null; recipient: string | null }
@@ -99,35 +100,36 @@ export function SealedPage({ meId, onBack }: { meId: number; onBack: () => void 
   const hasContent = !!file || !!body.trim();
   const canSeal = hasContent && circle !== '' && (trigger !== 'date' || dates.every(Boolean)) && (trigger !== 'event' || !!occasion.trim());
   const dt = (iso: string) => toDate(iso).toLocaleString(intlLocale(lang), { dateStyle: 'long', timeStyle: 'short' });
-  const icon = (k: string) => ({ voice: '🎙', video: '🎥', image: '📷', text: '✉️' } as Record<string, string>)[k] ?? '✉️';
+  const icon = (k: string) => <Icon name={({ voice: 'mic', video: 'video', image: 'image' } as const)[k as 'voice' | 'video' | 'image'] ?? 'file'} className="w-3.5 h-3.5 inline-block align-[-2px]" />;
   const trigLabel = (s: Sealed) => s.trigger === 'date' ? (s.unlockAt ? dt(s.unlockAt) : '') : s.trigger === 'event' ? `${t.trigEvent}: ${s.occasion ?? ''}` : t.trigDeath;
 
   return (
     <div className="space-y-4 pb-6">
       <div className="flex items-center gap-2">
-        <button className="btn btn-ghost !px-3" onClick={onBack} aria-label={t.back}>←</button>
-        <h2 className="text-xl font-bold text-green">🔒 {t.sealedTitle}</h2>
+        <button className="w-10 h-10 rounded-xl text-muted flex items-center justify-center hover:bg-green-soft hover:text-green transition-colors duration-[var(--dur-instant)]" onClick={onBack} aria-label={t.back} title={t.back}><Icon name="arrow-back" className="w-5 h-5 rtl:-scale-x-100" /></button>
+        <span className="w-10 h-10 rounded-xl bg-green-soft text-green flex items-center justify-center"><Icon name="lock" className="w-5 h-5" /></span>
+        <h2 className="text-2xl font-bold !text-ink tracking-tight">{t.sealedTitle}</h2>
       </div>
       <p className="text-sm text-muted">{t.sealedIntro}</p>
       <p role="note" className="text-sm rounded-lg bg-gold/15 text-ink p-3 border border-gold/50">{t.sealedDisclosure}</p>
       <MachineNote />
 
       {/* The family's side: envelopes waiting for an event or for sad news. Never any content. The agent decides; here is how far it has got. */}
-      {env && env.total > 0 && <p className="text-sm text-gold-dark">✉️ {t.sealedCount.replace('{n}', String(env.total))}</p>}
+      {env && env.total > 0 && <p className="text-sm text-gold-dark inline-flex items-center gap-1.5"><Icon name="envelope" className="w-4 h-4" />{t.sealedCount.replace('{n}', String(env.total))}</p>}
       {env && (env.events.length > 0 || env.deaths.length > 0) && (
         <section className="card p-4 space-y-3">
           <h3 className="font-bold text-green">{t.envelopesTitle}</h3>
           {!env.agentActive && <p className="text-sm text-danger">{t.agentOffWarning}</p>}
           {env.events.map(ev => (
             <div key={ev.id} className="text-sm space-y-1">
-              <div>✉️ <b>{ev.author}</b> — {t.trigEvent}</div>
+              <div className="flex items-center gap-1.5"><Icon name="envelope" className="w-4 h-4 text-gold-dark" /><b>{ev.author}</b> — {t.trigEvent}</div>
               <p className="text-muted">{ev.waiting ? `${t.countdownEvent.replace('{h}', String(env.waitHours / 24))} ${ev.releaseAt ? dt(ev.releaseAt) : ''}` : `${t.evidenceSoFar}: ${ev.evidence.messages}/${ev.evidence.needMessages} ${t.evMessages} · ${ev.evidence.members}/${ev.evidence.needMembers} ${t.evMembers}`}</p>
               {ev.canStop && <button className="btn !py-1 text-sm" onClick={() => act(`/sealed/${ev.id}/stop`)}>{t.stopCountdown}</button>}
             </div>
           ))}
           {env.deaths.map(d => (
             <div key={d.authorId} className="text-sm space-y-1 border-t border-line pt-2">
-              <div>✉️ <b>{d.author}</b> — {d.count} {t.afterDeathLetters}</div>
+              <div className="flex items-center gap-1.5"><Icon name="envelope" className="w-4 h-4 text-gold-dark" /><b>{d.author}</b> — {d.count} {t.afterDeathLetters}</div>
               <p className={d.waiting ? 'text-danger' : 'text-muted'}>{d.waiting ? `${t.deathCountdown.replace('{h}', String(env.waitHours / 24))} ${d.releaseAt ? dt(d.releaseAt) : ''}` : `${t.evidenceSoFar}: ${d.evidence.messages}/${d.evidence.needMessages} ${t.evMessages} · ${d.evidence.members}/${d.evidence.needMembers} ${t.evMembers}`}</p>
               {d.canStop && <button className="btn !py-1 text-sm" onClick={() => act(`/circles/${circle}/sealed/death/${d.authorId}/stop`)}>{d.authorId === meId ? t.imAlive : t.stopCountdown}</button>}
             </div>
@@ -160,7 +162,7 @@ export function SealedPage({ meId, onBack }: { meId: number; onBack: () => void 
                   {dates.length > 1 && <button type="button" className="btn btn-ghost !px-3" aria-label={t.sealedRemoveDate} onClick={() => setDates(p => p.filter((_, j) => j !== i))}>×</button>}
                 </div>
               ))}
-              {dates.length < 12 && <button type="button" className="text-sm text-green underline" onClick={() => setDates(p => [...p, ''])}>＋ {t.sealedAddDate}</button>}
+              {dates.length < 12 && <button type="button" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-sm font-bold text-green hover:bg-green-soft transition-colors duration-[var(--dur-instant)]" onClick={() => setDates(p => [...p, ''])}><Icon name="plus" className="w-4 h-4" />{t.sealedAddDate}</button>}
             </div>
             {dates.length === 1 && <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={yearly} onChange={e => setYearly(e.target.checked)} />{t.sealedYearly}</label>}
             <label className="block text-sm font-medium">{t.sealedTo}
@@ -176,11 +178,11 @@ export function SealedPage({ meId, onBack }: { meId: number; onBack: () => void 
           <div className="text-sm font-medium">{t.letterContent}</div>
           <div className="flex flex-wrap gap-2">
             {recording
-              ? <button type="button" className="btn !bg-red-700" onClick={stopRec}>■ {t.stop} <span dir="ltr" className="tabular-nums">{clock(recMs)}</span></button>
+              ? <button type="button" className="btn !bg-red-700" onClick={stopRec}><Icon name="stop" className="w-4 h-4" />{t.stop} <span dir="ltr" className="tabular-nums">{clock(recMs)}</span></button>
               : <>
-                  <button type="button" className="btn btn-ghost" onClick={() => startRec('voice')}>🎙 {t.recordVoice}</button>
-                  <button type="button" className="btn btn-ghost" onClick={() => startRec('video')}>🎥 {t.recordVideo}</button>
-                  <button type="button" className="btn btn-ghost" onClick={() => picker.current?.click()}>📎 {t.chooseFile}</button>
+                  <button type="button" className="btn btn-ghost" onClick={() => startRec('voice')}><Icon name="mic" className="w-4 h-4" />{t.recordVoice}</button>
+                  <button type="button" className="btn btn-ghost" onClick={() => startRec('video')}><Icon name="video" className="w-4 h-4" />{t.recordVideo}</button>
+                  <button type="button" className="btn btn-ghost" onClick={() => picker.current?.click()}><Icon name="attach" className="w-4 h-4" />{t.chooseFile}</button>
                 </>}
             <input ref={picker} type="file" hidden accept="audio/*,video/*,image/*" onChange={e => chooseFile(e.target.files?.[0])} />
           </div>
@@ -198,7 +200,7 @@ export function SealedPage({ meId, onBack }: { meId: number; onBack: () => void 
         <p className="text-xs text-muted">{t.openedForever}</p>
         {error && <p role="alert" className="text-sm text-danger">{error}</p>}
         {msg && <p role="status" className="text-sm text-green">{msg}</p>}
-        <button className="btn w-full" disabled={!canSeal || !!recording}>🔒 {t.sealedSeal}</button>
+        <button className="btn w-full" disabled={!canSeal || !!recording}><Icon name="lock" className="w-4 h-4" />{t.sealedSeal}</button>
       </form>
 
       <section className="space-y-2">
@@ -206,19 +208,29 @@ export function SealedPage({ meId, onBack }: { meId: number; onBack: () => void 
         {mine.length === 0 ? <p className="card p-4 text-muted">{t.sealedNone}</p> : (
           <ul className="space-y-3">
             {mine.map(s => (
-              <li key={s.id} className="card envelope p-3 space-y-1">
-                <div className="text-xs text-muted flex flex-wrap gap-x-2">
-                  <span>{icon(s.kind)} {s.circleName}</span><span>→ {s.recipient ?? t.sealedWhole}</span><span>{trigLabel(s)}</span>
-                  {s.yearly && <span className="px-1.5 rounded-full bg-green-soft text-green">{t.sealedYearlyTag}</span>}
-                  {s.status === 'waiting' && <span className="px-1.5 rounded-full bg-danger-soft text-danger">{t.deathWaiting}</span>}
-                  {s.status === 'stopped' && <span className="px-1.5 rounded-full bg-danger-soft text-danger">{t.sealedStopped}</span>}
-                </div>
-                {s.occasion && s.trigger !== 'event' && <b className="block">{s.occasion}</b>}
-                {s.kind !== 'text' && <p className="text-sm">{s.fileName}</p>}
-                {s.body && <p className="whitespace-pre-wrap break-words">{s.body}</p>}
-                <div className="flex gap-3 text-sm">
-                  {s.trigger !== 'death' && s.status === 'sealed' && <button className="text-green underline" onClick={() => act(`/sealed/${s.id}/open`)}>{t.openNow}</button>}
-                  {s.status !== 'waiting' && <button className="text-danger underline" onClick={() => act(`/sealed/${s.id}`, { method: 'DELETE' })}>{t.sealedCancel}</button>}
+              <li key={s.id} className={`card envelope p-3 flex gap-3 ${s.status === 'stopped' ? 'envelope-open' : ''}`}>
+                {/* The seal carries the state: gold and unbroken while it waits, red while
+                    the family's waiting period runs, flat and spent once it is stopped. */}
+                <span aria-hidden className={`wax-seal ${s.status === 'waiting' ? 'wax-seal-waiting' : s.status === 'stopped' ? 'wax-seal-open' : ''}`}>
+                  <Icon name={s.status === 'stopped' ? 'ban' : 'lock'} className="w-4 h-4" />
+                </span>
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="text-caption text-muted flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span>{icon(s.kind)} {s.circleName}</span><span>→ {s.recipient ?? t.sealedWhole}</span><span>{trigLabel(s)}</span>
+                    {s.yearly && <span className="px-1.5 rounded-full bg-green-soft text-green">{t.sealedYearlyTag}</span>}
+                    {s.status === 'waiting' && <span className="px-1.5 rounded-full bg-danger-soft text-danger font-bold">{t.deathWaiting}</span>}
+                    {s.status === 'stopped' && <span className="px-1.5 rounded-full bg-danger-soft text-danger">{t.sealedStopped}</span>}
+                  </div>
+                  {s.occasion && s.trigger !== 'event' && <b className="block">{s.occasion}</b>}
+                  {/* How long this letter still has to wait, in plain words. */}
+                  {s.status === 'sealed' && <Countdown at={s.unlockAt} />}
+                  {s.status === 'waiting' && s.releaseAt && <Countdown at={s.releaseAt} urgent />}
+                  {s.kind !== 'text' && <p className="text-sm">{s.fileName}</p>}
+                  {s.body && <p className="whitespace-pre-wrap break-words">{s.body}</p>}
+                  <div className="flex gap-3 text-sm pt-0.5">
+                    {s.trigger !== 'death' && s.status === 'sealed' && <button className="text-green underline" onClick={() => act(`/sealed/${s.id}/open`)}>{t.openNow}</button>}
+                    {s.status !== 'waiting' && <button className="text-danger underline" onClick={() => act(`/sealed/${s.id}`, { method: 'DELETE' })}>{t.sealedCancel}</button>}
+                  </div>
                 </div>
               </li>
             ))}
@@ -226,5 +238,24 @@ export function SealedPage({ meId, onBack }: { meId: number; onBack: () => void 
         )}
       </section>
     </div>
+  );
+}
+
+/** How long a letter still has to wait, in the reader's own language.
+ *  Intl.RelativeTimeFormat handles the plural rules and the wording for every language
+ *  we ship, so this needs no translated strings of its own beyond the verb. */
+function Countdown({ at, urgent }: { at: string | null; urgent?: boolean }) {
+  const { t, lang } = useI18n();
+  if (!at) return null;
+  const ms = toDate(at).getTime() - Date.now();
+  if (ms <= 0) return null;
+  const rtf = new Intl.RelativeTimeFormat(intlLocale(lang), { numeric: 'auto' });
+  const days = Math.round(ms / 86_400_000);
+  const hours = Math.round(ms / 3_600_000);
+  const when = days >= 1 ? rtf.format(days, 'day') : rtf.format(hours, 'hour');
+  return (
+    <p className={`text-caption ${urgent ? 'text-danger font-bold' : 'text-gold-dark'}`}>
+      {t.opensLabel} {when}
+    </p>
   );
 }

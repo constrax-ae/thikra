@@ -5,7 +5,7 @@ import './theme';
 import { api, type Me } from './api';
 import { I18nProvider, useI18n } from './i18n';
 import { Login } from './Login';
-import { ChatList } from './ChatList';
+import { ChatList, ChatWelcome } from './ChatList';
 import { Memory } from './Memory';
 import { You } from './You';
 
@@ -46,6 +46,19 @@ function JoinByLink({ code, onDone }: { code: string; onDone: (id: number | null
   return <div className="max-w-2xl mx-auto px-4 py-20 text-center">{failed ? <><p role="alert" className="text-danger">{t.errors.invalid_invite ?? t.errors.generic}</p><button className="btn mt-4" onClick={() => onDone(null)}>{t.back}</button></> : <p className="text-muted">…</p>}</div>;
 }
 
+/** True while the window is at least `px` wide; follows resizes. */
+function useWide(px = 1024) {
+  const q = `(min-width: ${px}px)`;
+  const [wide, setWide] = useState(() => typeof matchMedia !== 'undefined' && matchMedia(q).matches);
+  useEffect(() => {
+    const m = matchMedia(q);
+    const on = () => setWide(m.matches);
+    m.addEventListener('change', on);
+    return () => m.removeEventListener('change', on);
+  }, [q]);
+  return wide;
+}
+
 function App() {
   const { t } = useI18n();
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -59,6 +72,7 @@ function App() {
     return () => window.removeEventListener('hashchange', on);
   }, []);
 
+  const wide = useWide();
   const go = (hash: string) => { location.hash = hash; };
   const toCircles = useCallback(() => go('/'), []);
 
@@ -78,14 +92,69 @@ function App() {
   ];
   const showTabs = route.name !== 'circle';   // the bottom bar stays on every screen outside a chat, so there is always a way back to the chat list
 
+  // Wide screens get the messenger layout: the list stays in a sidebar and the open chat
+  // (or a welcome) fills the rest, so opening a chat never throws the list away.
+  // Memory, You and Sealed open in the same shell, in the right-hand pane, so moving between
+  // them never drops you out of the desktop layout.
+  if (wide && ['circles', 'circle', 'memory', 'you', 'sealed'].includes(route.name)) {
+    const iconBtn = (on: boolean) => `w-10 h-10 rounded-xl flex items-center justify-center transition-colors duration-[var(--dur-instant)] ${on ? 'bg-green-soft text-green' : 'text-muted hover:bg-green-soft hover:text-green'}`;
+    const page = (node: React.ReactNode) => <div key={route.name} className="h-full overflow-y-auto animate-fade-in"><div className="px-8 xl:px-10 py-8">{node}</div></div>;
+    const openId = route.name === 'circle' ? route.id : undefined;
+    return (
+      <div className="h-[100dvh] flex bg-paper overflow-clip">
+        <aside className="w-[380px] xl:w-[420px] shrink-0 flex flex-col border-e border-line">
+          <header className="h-20 shrink-0 px-5 flex items-center gap-3">
+            <button onClick={toCircles} aria-label={t.appName}><Wordmark name={t.appName} /></button>
+            <span className="flex-1" />
+            {!!me.is_admin && <button className={iconBtn(false)} onClick={() => go('/admin')} aria-label={t.rowAdmin} title={t.rowAdmin}><Icon name="tools" className="w-5 h-5" /></button>}
+            <button className={iconBtn(route.name === 'memory')} aria-current={route.name === 'memory' ? 'page' : undefined} onClick={() => go('/memory')} aria-label={t.tabMemory} title={t.tabMemory}><Icon name="memory" className="w-5 h-5" /></button>
+          </header>
+          <div className="px-5"><Notices /></div>
+          <div className="flex-1 min-h-0 overflow-y-auto px-5 pb-4">
+            <ChatList onOpen={id => go(`/circle/${id}`)} activeId={openId} />
+          </div>
+          <footer className="shrink-0 border-t border-line p-3">
+            <button onClick={() => go('/you')} data-selected={route.name === 'you' || route.name === 'sealed' || undefined} className="row-interactive w-full flex items-center gap-3 p-2 rounded-2xl text-start">
+              <span className="w-11 h-11 rounded-full bg-brand text-white flex items-center justify-center font-bold text-lg shrink-0">{(me.name || '?').slice(0, 1).toUpperCase()}</span>
+              <span className="min-w-0 flex-1">
+                <b className="block truncate text-ink">{me.name || t.tabYou}</b>
+                <span className="block text-sm text-muted truncate" dir="ltr">{me.phone}</span>
+              </span>
+              <Icon name="chevron" className="w-5 h-5 text-muted -rotate-90 rtl:rotate-90" />
+            </button>
+          </footer>
+        </aside>
+        <section className="flex-1 min-w-0 bg-card">
+          <Suspense fallback={null}>
+            {route.name === 'circle' ? <div key={route.id} className="h-full animate-fade-in"><CircleView docked id={route.id} me={me} initialTab={route.tab} onBack={toCircles} onLeft={toCircles} /></div>
+              : route.name === 'memory' ? page(<Memory onOpenArchive={id => go(`/circle/${id}/archive`)} />)
+              : route.name === 'you' ? page(<You me={me} onLogout={logout} onDeleteAccount={deleteAccount} onAdmin={() => go('/admin')} onSealed={() => go('/sealed')} onChanged={loadMe} />)
+              : route.name === 'sealed' ? page(<SealedPage meId={me.id} onBack={() => go('/you')} />)
+              : <ChatWelcome />}
+          </Suspense>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className={`${route.name === 'admin' ? 'max-w-5xl' : 'max-w-2xl'} mx-auto px-4`}>
       {route.name !== 'circle' && (
-        <header className="h-14 flex items-center gap-3">
+        <header className="h-16 pt-1 flex items-center gap-3">
           <button onClick={toCircles} aria-label={t.appName}><Wordmark name={t.appName} /></button>
           <span className="flex-1" />
           {route.name === 'admin' && <button className="text-sm text-green underline" onClick={() => go('/you')}>{t.back}</button>}
-          {me.is_admin && route.name !== 'admin' && <button className="flex items-center gap-1.5 text-sm text-green rounded-full border border-line px-3 py-1" onClick={() => go('/admin')} aria-label={t.rowAdmin}><Icon name="tools" className="w-4 h-4" /><span>{t.rowAdmin}</span></button>}
+          {/* !! matters: is_admin is a number, and `0 && <jsx>` renders a literal "0"
+              in the header for every non-admin. */}
+          {!!me.is_admin && route.name !== 'admin' && <button className="flex items-center gap-1.5 text-sm text-green rounded-full border border-line px-3 py-1.5 transition-colors duration-[var(--dur-instant)] hover:bg-green-soft" onClick={() => go('/admin')} aria-label={t.rowAdmin}><Icon name="tools" className="w-4 h-4" /><span>{t.rowAdmin}</span></button>}
+          {/* Same Memory shortcut as the desktop sidebar header, so the two layouts match. */}
+          {route.name !== 'admin' && (
+            <button onClick={() => go('/memory')} aria-label={t.tabMemory} title={t.tabMemory} aria-current={route.name === 'memory' ? 'page' : undefined}
+              className={`w-11 h-11 rounded-xl flex items-center justify-center transition-colors duration-[var(--dur-instant)]
+                ${route.name === 'memory' ? 'bg-green-soft text-green' : 'text-muted hover:bg-green-soft hover:text-green'}`}>
+              <Icon name="memory" className="w-5 h-5" />
+            </button>
+          )}
         </header>
       )}
       {route.name !== 'circle' && <Notices />}

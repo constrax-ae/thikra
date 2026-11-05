@@ -9,6 +9,7 @@ import { useInstall } from './install';
 import { LangPicker, MachineNote } from './LangPicker';
 import { useChatTheme, WALLPAPERS, BUBBLES } from './chattheme';
 import { Icon, type IconName } from './icons';
+import { Toggle } from './States';
 
 type Row = 'install' | 'starred' | 'account' | 'privacy' | 'chats' | 'appearance' | 'notifications' | 'storage' | 'rights' | 'help' | null;
 
@@ -253,10 +254,13 @@ export function You({ me, onLogout, onDeleteAccount, onAdmin, onSealed, onChange
 
   const row = (k: Exclude<Row, null>, icon: IconName, label: string, body: React.ReactNode) => (
     <li key={k}>
-      <button className="w-full p-3 flex items-center gap-3 text-start hover:bg-green-soft/50" aria-expanded={open === k} onClick={() => setOpen(open === k ? null : k)}>
-        <span className="w-8 flex justify-center text-green"><Icon name={icon} /></span><span className="flex-1">{label}</span><span aria-hidden className="text-muted">{open === k ? '⌃' : '›'}</span>
+      <button className="row-interactive w-full p-3 flex items-center gap-3 text-start" aria-expanded={open === k} onClick={() => setOpen(open === k ? null : k)}>
+        <span className="w-8 flex justify-center text-green"><Icon name={icon} /></span>
+        <span className="flex-1">{label}</span>
+        {/* One chevron that turns, rather than two different glyphs swapping. */}
+        <Icon name="down" className={`w-4 h-4 text-muted transition-transform duration-[var(--dur-fast)] ease-[var(--ease-standard)] ${open === k ? 'rotate-180' : '-rotate-90 rtl:rotate-90'}`} />
       </button>
-      {open === k && <div className="px-4 pb-4 space-y-2 text-sm">{body}</div>}
+      {open === k && <div className="px-4 pb-4 space-y-2 text-sm animate-slide-up">{body}</div>}
     </li>
   );
   const sizes: Array<[TextSize, string]> = [['normal', 'A'], ['large', 'A+'], ['xlarge', 'A++']];
@@ -270,26 +274,30 @@ export function You({ me, onLogout, onDeleteAccount, onAdmin, onSealed, onChange
       <MachineNote />
 
       <ul className="card divide-y divide-line overflow-hidden">
-        {row('starred', 'star', t.rowStarred, <p className="text-muted">{t.starred}: ★ {t.search}…</p>)}
+        {row('starred', 'star', t.rowStarred, <p className="text-muted inline-flex items-center gap-1.5">{t.starred}: <Icon name="star-fill" className="w-4 h-4 text-gold-dark" /> {t.search}…</p>)}
         {row('account', 'key', t.rowAccount, (
           <>
             <TwoStep has={!!me.has_pin} onDone={onChanged} />
             <ChangeNumber onDone={onChanged} />
             <a className="btn btn-ghost block text-center" href="/api/me/export" download>{t.exportData}</a>
             <p className="text-muted">{t.exportNote}</p>
-            <button className="btn !bg-red-700" onClick={onDeleteAccount}>{t.deleteAccount}</button>
+            {/* Set apart by a rule: nothing destructive should sit flush against the
+                ordinary actions where it can be hit by accident. */}
+            <div className="pt-3 mt-1 border-t border-line">
+              <button className="btn btn-danger w-full" onClick={onDeleteAccount}>{t.deleteAccount}</button>
+            </div>
           </>
         ))}
         {row('privacy', 'lock', t.rowPrivacy, (
-          <label className="flex items-start gap-3">
-            <input type="checkbox" className="mt-1" checked={receipts} onChange={e => setReceiptsOn(e.target.checked)} />
-            <span><b>{t.readReceipts}</b><span className="block text-muted">{t.readReceiptsNote}</span></span>
-          </label>
+          <Toggle checked={receipts} onChange={setReceiptsOn} label={t.readReceipts} note={t.readReceiptsNote} />
         ))}
         {row('chats', 'chats', t.rowChats, <p className="text-muted">{t.chatsNote}</p>)}
         {row('appearance', 'palette', t.rowAppearance, (
           <>
-            <div className="flex items-center gap-2"><span className="flex-1">{t.language}</span><LangPicker onPick={saveLang} /></div>
+            {/* t.language holds the OTHER language's name ("العربية" when you are in English).
+                That read as a prompt beside the old dropdown; beside a picker that already shows
+                the current language it just looked wrong, so the row is labelled plainly. */}
+            <div className="flex items-center gap-2"><span className="flex-1">{t.languageTitle}</span><LangPicker onPick={saveLang} /></div>
             <MachineNote />
             <div role="group" aria-label={t.themeLabel} className="flex items-center gap-2 flex-wrap">
               <span className="flex-1">{t.themeLabel}</span>
@@ -317,14 +325,8 @@ export function You({ me, onLogout, onDeleteAccount, onAdmin, onSealed, onChange
                 ))}
               </div>
             </div>
-            <label className="flex items-start gap-3">
-              <input type="checkbox" className="mt-1" checked={motion} onChange={e => setMotion(e.target.checked)} />
-              <span><b>{t.animations}</b><span className="block text-sm text-muted">{t.animationsNote}</span></span>
-            </label>
-            <label className="flex items-start gap-3">
-              <input type="checkbox" className="mt-1" checked={saver} onChange={e => setSaver(e.target.checked)} />
-              <span><b>{t.dataSaver}</b><span className="block text-sm text-muted">{t.dataSaverNote}</span></span>
-            </label>
+            <Toggle checked={motion} onChange={setMotion} label={t.animations} note={t.animationsNote} />
+            <Toggle checked={saver} onChange={setSaver} label={t.dataSaver} note={t.dataSaverNote} />
             <div role="group" aria-label={t.uploadQuality} className="space-y-1">
               <span>{t.uploadQuality}</span>
               <div className="flex gap-2 items-center flex-wrap">
@@ -341,19 +343,13 @@ export function You({ me, onLogout, onDeleteAccount, onAdmin, onSealed, onChange
         ))}
         {row('notifications', 'bell', t.rowNotifications, (
           <>
-            <label className="flex items-start gap-3">
-              <input type="checkbox" className="mt-1" checked={sound} onChange={e => setSound(e.target.checked)} />
-              <span><b>{t.inAppSound}</b><span className="block text-sm text-muted">{t.inAppSoundNote}</span></span>
-            </label>
+            <Toggle checked={sound} onChange={setSound} label={t.inAppSound} note={t.inAppSoundNote} />
             {push === 'unsupported' && <p className="text-muted">{t.pushUnsupported}</p>}
             {push === 'denied' && <p className="text-muted">{t.pushDenied}</p>}
             {push === 'off' && <button className="btn" onClick={enablePush}>{t.pushEnable}</button>}
-            {push === 'on' && (<><p className="text-green">✓ {t.pushOn}</p><button className="btn btn-ghost" onClick={disablePush}>{t.pushDisable}</button></>)}
+            {push === 'on' && (<><p className="text-green inline-flex items-center gap-1.5"><Icon name="check" className="w-4 h-4" />{t.pushOn}</p><button className="btn btn-ghost" onClick={disablePush}>{t.pushDisable}</button></>)}
             {pushMsg && <p role="alert" className="text-danger">{pushMsg}</p>}
-            <label className="flex items-start gap-3 pt-2">
-              <input type="checkbox" className="mt-1" checked={preview} onChange={e => setPreviewOn(e.target.checked)} />
-              <span><b>{t.pushPreview}</b><span className="block text-muted">{t.pushPreviewNote}</span></span>
-            </label>
+            <div className="pt-2"><Toggle checked={preview} onChange={setPreviewOn} label={t.pushPreview} note={t.pushPreviewNote} /></div>
             <p className="text-muted">{t.notificationsSoon}</p>
           </>
         ))}
@@ -381,7 +377,7 @@ export function You({ me, onLogout, onDeleteAccount, onAdmin, onSealed, onChange
         <li><button className="w-full p-3 flex items-center gap-3 text-start hover:bg-green-soft/50" onClick={invite}>
           <span className="w-8 flex justify-center text-green"><Icon name="heart" /></span><span className="flex-1">{t.rowInvite}</span>{copied && <span className="text-xs text-green">{t.inviteCopied}</span>}
         </button></li>
-        <li><button className="w-full p-3 flex items-center gap-3 text-start hover:bg-green-soft/50" onClick={onSealed}><span className="w-8 flex justify-center text-green"><Icon name="lock" /></span><span className="flex-1">{t.rowSealed}</span><span aria-hidden className="text-muted">›</span></button></li>
+        <li><button className="w-full p-3 flex items-center gap-3 text-start hover:bg-green-soft/50" onClick={onSealed}><span className="w-8 flex justify-center text-green"><Icon name="lock" /></span><span className="flex-1">{t.rowSealed}</span><Icon name="chevron" className="w-4 h-4 text-muted -rotate-90 rtl:rotate-90" /></button></li>
         {me.is_admin ? <li><button className="w-full p-3 flex items-center gap-3 text-start hover:bg-green-soft/50" onClick={onAdmin}><span className="w-8 flex justify-center text-green"><Icon name="tools" /></span><span className="flex-1">{t.rowAdmin}</span></button></li> : null}
       </ul>
 

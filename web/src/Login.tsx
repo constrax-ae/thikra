@@ -4,6 +4,8 @@ import { api, ApiError } from './api';
 import { LangPicker, MachineNote } from './LangPicker';
 import { useI18n, intlLocale } from './i18n';
 import { Dialog } from './Dialog';
+import { BusyButton } from './States';
+import { Icon } from './icons';
 import { callingCode, flagEmoji, formatTyped, guessCountry, listCountries, type CountryCode } from '../../core/phone';
 
 const CODE_LENGTH = 6;
@@ -43,6 +45,9 @@ export function Login({ onDone }: { onDone: () => void }) {
   const international = text.trim().startsWith('+');
   const parsed = useMemo(() => parsePhoneNumberFromString(text, international ? undefined : country), [text, country, international]);
   const e164 = parsed?.isPossible() ? parsed.number : null;
+  // Only complain once enough digits are in to judge: warning while someone is still typing
+  // the third digit is noise, not help.
+  const invalid = text.replace(/\D/g, '').length >= 7 && !e164;
 
   useEffect(() => {
     if (international && parsed?.country && parsed.country !== country) setCountry(parsed.country);
@@ -121,25 +126,35 @@ export function Login({ onDone }: { onDone: () => void }) {
           <p className="mt-2 text-muted">{t.tagline}</p>
         </div>
 
-        <div className="card p-5 space-y-4">
+        <div className="card elevated-2 p-5 space-y-4">
+          {/* Keyed on the step so React remounts it: each stage slides in from the inline
+              start instead of the card swapping its contents with no sense of moving forward. */}
+          <div key={step} className="animate-slide-in space-y-4">
           {step === 'phone' && (
             <form onSubmit={e => { e.preventDefault(); if (e164) setConfirming(true); }} className="space-y-4">
               <div>
-                <h2 className="text-lg font-bold">{t.loginTitle}</h2>
-                <p className="text-sm text-muted mt-1">{t.loginSubtitle}</p>
+                <h2 className="text-xl font-bold">{t.loginTitle}</h2>
+                <p className="text-sm text-muted mt-1.5 leading-relaxed">{t.loginSubtitle}</p>
               </div>
-              <div className="flex gap-2" dir="ltr">
-                <button type="button" onClick={() => setPicker(true)} aria-label={t.country}
-                  className="field !w-auto flex items-center gap-2 whitespace-nowrap cursor-pointer">
-                  <span className="text-xl leading-none">{flagEmoji(country)}</span>
-                  <span className="font-medium">+{callingCode(country)}</span>
-                  <span aria-hidden className="text-muted text-xs">▾</span>
-                </button>
-                <input className="field text-lg tracking-wide" type="tel" inputMode="tel" autoComplete="tel-national" autoFocus
-                  aria-label={t.phone} placeholder={t.phoneHint} value={text} onChange={e => onPhoneChange(e.target.value)} />
+              {/* A visible label, not a placeholder standing in for one: the placeholder
+                  disappears the moment you type, leaving the field unlabelled. */}
+              <div className="space-y-1.5">
+                <label htmlFor="login-phone" className="block text-sm font-medium">{t.phone}</label>
+                <div className="field-group" dir="ltr">
+                  <button type="button" onClick={() => setPicker(true)} aria-label={t.country} className="field-prefix">
+                    <span className="text-xl leading-none">{flagEmoji(country)}</span>
+                    <span className="font-medium tabular-nums">+{callingCode(country)}</span>
+                    <Icon name="chevron" className="w-4 h-4 text-muted" />
+                  </button>
+                  {/* No placeholder: the label above already names the field, and an empty
+                      box reads cleaner than a repeat of the same words. */}
+                  <input id="login-phone" type="tel" inputMode="tel" autoComplete="tel-national" autoFocus
+                    className="text-lg tracking-wide" aria-describedby={invalid ? 'login-phone-error' : undefined}
+                    value={text} onChange={e => onPhoneChange(e.target.value)} />
+                </div>
+                {invalid && <p id="login-phone-error" role="alert" className="text-sm text-danger animate-fade-in">{t.invalidNumber}</p>}
               </div>
-              {text.replace(/\D/g, '').length >= 7 && !e164 && <p role="alert" className="text-sm text-danger">{t.invalidNumber}</p>}
-              <button className="btn w-full" disabled={!e164 || busy}>{t.next}</button>
+              <BusyButton className="btn w-full !h-12" busy={busy} disabled={!e164}>{t.next}</BusyButton>
             </form>
           )}
 
@@ -152,7 +167,7 @@ export function Login({ onDone }: { onDone: () => void }) {
                   <button className="text-green underline" onClick={() => { setStep('phone'); setError(''); }}>{t.wrongNumber}</button>
                 </p>
               </div>
-              <CodeBoxes value={code} onChange={onCodeChange} disabled={busy} label={t.code} />
+              <CodeBoxes value={code} onChange={onCodeChange} disabled={busy} invalid={!!error} label={t.code} />
               {devCode && (
                 <p className="text-xs text-gold-dark bg-gold/10 rounded-lg p-2 flex items-center gap-2">
                   <span className="flex-1">{t.devCode}: <b dir="ltr">{devCode}</b></span>
@@ -188,11 +203,12 @@ export function Login({ onDone }: { onDone: () => void }) {
                 <p className="text-sm text-muted mt-1">{t.nameBody}</p>
               </div>
               <input className="field text-lg" autoFocus maxLength={60} aria-label={t.yourName} value={name} onChange={e => setName(e.target.value)} />
-              <button className="btn w-full" disabled={!name.trim() || busy}>{t.start}</button>
+              <BusyButton className="btn w-full" busy={busy} disabled={!name.trim()}>{t.start}</BusyButton>
             </form>
           )}
 
-          {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+          </div>
+          {error && <p role="alert" className="text-sm text-danger animate-fade-in">{error}</p>}
         </div>
 
         <div className="flex justify-center mt-4"><LangPicker /></div>
@@ -207,7 +223,7 @@ export function Login({ onDone }: { onDone: () => void }) {
           <p className="text-xl font-bold my-4 text-center" dir="ltr">{parsed.formatInternational()}</p>
           <div className="flex gap-2">
             <button className="btn btn-ghost flex-1" onClick={() => setConfirming(false)}>{t.edit}</button>
-            <button className="btn flex-1" autoFocus onClick={requestCode} disabled={busy}>{t.ok}</button>
+            <BusyButton className="btn flex-1" autoFocus onClick={requestCode} busy={busy}>{t.ok}</BusyButton>
           </div>
         </Dialog>
       )}
@@ -215,19 +231,29 @@ export function Login({ onDone }: { onDone: () => void }) {
   );
 }
 
-/** Six boxes drawn over one real input, so paste, SMS autofill and the numeric keypad all just work. */
-function CodeBoxes({ value, onChange, disabled, label }: { value: string; onChange: (v: string) => void; disabled: boolean; label: string }) {
+/** Six boxes drawn over one real input, so paste, SMS autofill and the numeric keypad all just work.
+ *  Three states are distinguishable at a glance: the box waiting for the next digit is ringed,
+ *  a box that already has one is settled, and an empty box is quiet. Each digit scales in as it
+ *  lands, which is the only feedback that typing registered. */
+function CodeBoxes({ value, onChange, disabled, invalid, label }: { value: string; onChange: (v: string) => void; disabled: boolean; invalid?: boolean; label: string }) {
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => { ref.current?.focus(); }, []);
+  const cursor = Math.min(value.length, CODE_LENGTH - 1);
   return (
     <div className="relative" dir="ltr" onClick={() => ref.current?.focus()}>
       <div className="flex justify-between gap-2" aria-hidden>
-        {Array.from({ length: CODE_LENGTH }, (_, i) => (
-          <div key={i} className={`flex-1 h-14 rounded-xl border-2 flex items-center justify-center text-2xl font-bold bg-card
-            ${i === Math.min(value.length, CODE_LENGTH - 1) && !disabled ? 'border-green' : 'border-line'}`}>
-            {value[i] ?? ''}
-          </div>
-        ))}
+        {Array.from({ length: CODE_LENGTH }, (_, i) => {
+          const filled = value[i] !== undefined;
+          const active = i === cursor && !disabled && value.length < CODE_LENGTH;
+          return (
+            <div key={i} className={`flex-1 h-14 rounded-xl border-2 flex items-center justify-center text-2xl font-bold bg-card
+              transition-[border-color,box-shadow,background-color] duration-[var(--dur-fast)] ease-[var(--ease-standard)]
+              ${invalid ? 'border-danger' : active ? 'border-green shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-focus)_18%,transparent)]'
+                : filled ? 'border-green/50' : 'border-line'}`}>
+              {filled && <span className="animate-scale-in">{value[i]}</span>}
+            </div>
+          );
+        })}
       </div>
       <input ref={ref} className="absolute inset-0 w-full h-full opacity-0 cursor-text" inputMode="numeric" autoComplete="one-time-code"
         maxLength={CODE_LENGTH} aria-label={label} value={value} disabled={disabled} onChange={e => onChange(e.target.value)} />

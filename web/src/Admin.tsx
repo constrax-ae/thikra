@@ -1,7 +1,9 @@
+import { Icon } from './icons';
 import { useEffect, useState } from 'react';
 import { api, ApiError, type Me } from './api';
 import { useI18n } from './i18n';
 import { Dialog } from './Dialog';
+import { TableSkeleton, Badge } from './States';
 
 interface Stats { users: number; circles: number; activeCircles: number; messages: number; archived: number; byCategory: Array<{ category: string; n: number }> }
 interface Lat { n: number; p50: number | null; p95: number | null }
@@ -26,7 +28,7 @@ function Overview({ role }: { role: Role }) {
     if (role === 'owner') { loadBackups(); const load = () => api<Health>('/admin/metrics').then(setHealth).catch(() => {}); load(); const timer = setInterval(load, 10_000); return () => clearInterval(timer); }
     return undefined;
   }, []);
-  if (!stats) return null;
+  if (!stats) return <TableSkeleton rows={4} cols={3} />;
 
   const tiles: Array<[string, number]> = [
     [t.users, stats.users], [t.circles, stats.circles], [t.activeCircles, stats.activeCircles],
@@ -82,9 +84,9 @@ function Overview({ role }: { role: Role }) {
           <li key={c.id} className="p-3 flex items-center gap-3">
             <b className="flex-1 truncate">{c.name}</b>
             <span className="text-xs text-muted">{c.members} {t.members} · {c.archived} {t.archivedCount}</span>
-            <span className={`text-[11px] px-2 py-0.5 rounded-full ${c.agentActive ? 'bg-gold/20 text-gold-dark' : 'bg-line text-muted'}`}>
+            <Badge tone={c.agentActive ? 'warn' : 'neutral'}>
               {c.agentActive ? t.agentOn : t.agentOff}
-            </span>
+            </Badge>
           </li>
         ))}
       </ul>
@@ -134,7 +136,7 @@ function ReportsTab() {
               </div>
               {r.snapshot && <p className="whitespace-pre-wrap break-words">{r.snapshot}</p>}
               {r.note && <p className="text-sm text-muted">{r.note}</p>}
-              {r.resolution && <p className="text-sm text-muted">✎ {r.resolution}</p>}
+              {r.resolution && <p className="text-sm text-muted flex items-start gap-1.5"><Icon name="pen" className="w-4 h-4 shrink-0 mt-0.5" />{r.resolution}</p>}
               {r.status !== 'resolved' && (open === r.id ? (
                 <div className="space-y-2 pt-1">
                   <select className="field" value={action} onChange={e => setAction(e.target.value)} aria-label={t.admAction}>
@@ -181,7 +183,7 @@ function NotesBox({ type, id, notes, reload }: { type: 'user' | 'circle'; id: nu
 }
 
 function Chips({ value, options, onPick }: { value: string; options: Record<string, string>; onPick: (k: string) => void }) {
-  return <div className="flex gap-1.5 overflow-x-auto pb-1">{Object.entries(options).map(([k, label]) => <button key={k} type="button" aria-pressed={value === k} onClick={() => onPick(k)} className={`px-3 py-1 rounded-full text-xs whitespace-nowrap border ${value === k ? 'bg-green text-white border-green' : 'border-line text-muted'}`}>{label}</button>)}</div>;
+  return <div className="flex gap-1.5 overflow-x-auto pb-1">{Object.entries(options).map(([k, label]) => <button key={k} type="button" aria-pressed={value === k} onClick={() => onPick(k)} className={`px-3 py-1.5 rounded-full text-xs whitespace-nowrap border transition-[background-color,border-color,color] duration-[var(--dur-instant)] ease-[var(--ease-standard)] ${value === k ? 'bg-brand text-white border-brand font-bold' : 'border-line text-muted hover:border-green/50 hover:text-green'}`}>{label}</button>)}</div>;
 }
 
 function UsersTab({ role, onFamily }: { role: Role; onFamily: (id: number) => void }) {
@@ -216,17 +218,17 @@ function UsersTab({ role, onFamily }: { role: Role; onFamily: (id: number) => vo
       <p className="text-xs text-muted">{t.admPeopleNote}</p>
       {sel ? (
         <div className="card p-3 space-y-3">
-          <div className="flex items-center gap-2"><b className="flex-1 truncate">{sel.name}</b>{sel.banned && <span className="text-[11px] px-2 py-0.5 rounded-full bg-danger-soft text-danger">{t.ppBannedTag}</span>}<button className="btn btn-ghost !py-1 text-sm" onClick={() => setSel(null)}>{t.back}</button></div>
+          <div className="flex items-center gap-2"><b className="flex-1 truncate">{sel.name}</b>{sel.banned && <Badge tone="bad">{t.ppBannedTag}</Badge>}<button className="btn btn-ghost !py-1 text-sm" onClick={() => setSel(null)}>{t.back}</button></div>
           <div className="text-sm text-muted space-y-0.5">
             <div dir="ltr">{sel.phoneFull ?? sel.phone}</div>
             <div>{t.admCircles}: {sel.circles} · {t.admMessages}: {sel.messages ?? '—'} · {t.admReportsAgainst}: {sel.reportsAgainst ?? '—'} ({t.ppOpenReports}: {sel.openReportsAgainst ?? 0})</div>
-            <div>{t.admSessions}: {sel.activeSessions ?? '—'} · {t.admPin}: {sel.hasPin ? '✓' : '—'} · {sel.role ? t.admRoles[sel.role] : ''} · {t.ppSupportCases}: {sel.supportCases ?? 0}</div>
+            <div>{t.admSessions}: {sel.activeSessions ?? '—'} · {t.admPin}: {sel.hasPin ? <Icon name="check" className="w-4 h-4 inline text-green" /> : '—'} · {sel.role ? t.admRoles[sel.role] : ''} · {t.ppSupportCases}: {sel.supportCases ?? 0}</div>
             <div>{t.ppLastActive}: {sel.lastActive ?? '—'}</div>
             {sel.suspended && <div className="text-danger">{t.admSuspended}{sel.suspendedUntil ? ` → ${sel.suspendedUntil}` : ''}{sel.suspendedReason ? `: ${sel.suspendedReason}` : ''}</div>}
           </div>
           {(sel.familiesOf?.length ?? 0) > 0 && (
             <div className="space-y-1"><b className="text-sm">{t.ppFamilies}</b>
-              <div className="flex flex-wrap gap-1.5">{sel.familiesOf!.map(f => <button key={f.id} className="btn btn-ghost !py-1 text-xs" onClick={() => onFamily(f.id)}>{f.name}{f.frozen ? ' ❄' : ''}</button>)}</div></div>
+              <div className="flex flex-wrap gap-1.5">{sel.familiesOf!.map(f => <button key={f.id} className="btn btn-ghost !py-1 text-xs" onClick={() => onFamily(f.id)}>{f.name}{f.frozen && <Icon name="snow" className="w-3.5 h-3.5" />}</button>)}</div></div>
           )}
           {role !== 'support' && !sel.phoneFull && <button className="btn btn-ghost !py-1 text-sm" onClick={() => open(sel.id, true)}>{t.admReveal}</button>}
           {canAct && (
@@ -237,8 +239,8 @@ function UsersTab({ role, onFamily }: { role: Role; onFamily: (id: number) => vo
               <button className="btn btn-ghost w-full" onClick={() => act('revoke-sessions')}>{t.admRevoke}</button>
               {sel.banned
                 ? <button className="btn btn-ghost w-full" onClick={() => act('unban')}>{t.ppUnban}</button>
-                : <button className="btn btn-ghost w-full text-danger" onClick={() => arm.tap('ban', () => act('ban', { reason }))}>{arm.armed === 'ban' ? t.ppTapAgain : t.ppBan}</button>}
-              {role === 'owner' && <button className="btn btn-ghost w-full text-danger" onClick={() => arm.tap('del', () => act('delete', { confirm: true, reason }))}>{arm.armed === 'del' ? t.ppTapAgain : t.ppDelete}</button>}
+                : <button className={`btn btn-ghost w-full text-danger ${arm.armed === 'ban' ? 'btn-armed' : ''}`} onClick={() => arm.tap('ban', () => act('ban', { reason }))}>{arm.armed === 'ban' ? t.ppTapAgain : t.ppBan}</button>}
+              {role === 'owner' && <button className={`btn btn-ghost w-full text-danger ${arm.armed === 'del' ? 'btn-armed' : ''}`} onClick={() => arm.tap('del', () => act('delete', { confirm: true, reason }))}>{arm.armed === 'del' ? t.ppTapAgain : t.ppDelete}</button>}
               {role === 'owner' && (
                 <div className="flex items-center gap-2"><span className="text-sm flex-1">{t.admRole}</span>
                   <select className="field !w-auto" value={sel.role ?? ''} onChange={e => act('role', { role: e.target.value || null })}>
@@ -250,14 +252,14 @@ function UsersTab({ role, onFamily }: { role: Role; onFamily: (id: number) => vo
           <NotesBox type="user" id={sel.id} notes={sel.notes ?? []} reload={() => open(sel.id)} />
           {msg && <p role="status" className="text-sm text-muted">{msg}</p>}
         </div>
-      ) : list === null ? null : list.length === 0 ? <p className="text-sm text-muted">{t.admNoPeople}</p> : (
+      ) : list === null ? <TableSkeleton rows={6} cols={3} /> : list.length === 0 ? <p className="text-sm text-muted">{t.admNoPeople}</p> : (
         <>
           <ul className="card divide-y divide-line">
             {list.map(u => (
-              <li key={u.id}><button className="w-full p-3 text-start flex items-center gap-2" onClick={() => { setMsg(''); open(u.id); }}>
+              <li key={u.id}><button className="row-interactive w-full p-3 text-start flex items-center gap-2" onClick={() => { setMsg(''); open(u.id); }}>
                 <span className="flex-1 min-w-0"><b className="block truncate">{u.name}</b><span className="text-xs text-muted" dir="ltr">{u.phone}{u.lastActive ? ` · ${u.lastActive}` : ''}</span></span>
-                {u.role && <span className="text-[11px] px-2 py-0.5 rounded-full bg-gold/20 text-gold-dark">{t.admRoles[u.role]}</span>}
-                {u.suspended && <span className="text-[11px] px-2 py-0.5 rounded-full bg-danger-soft text-danger">{t.admSuspended}</span>}
+                {u.role && <Badge tone="warn">{t.admRoles[u.role]}</Badge>}
+                {u.suspended && <Badge tone="bad">{t.admSuspended}</Badge>}
               </button></li>
             ))}
           </ul>
@@ -304,7 +306,7 @@ function FamiliesTab({ role, focus }: { role: Role; focus: number | null }) {
       <Chips value={filter} options={t.ppFamFilters} onPick={k => { setFilter(k); setSel(null); search(k); }} />
       {sel ? (
         <div className="card p-3 space-y-3">
-          <div className="flex items-center gap-2"><b className="flex-1 truncate">{sel.name}</b>{sel.frozen && <span className="text-[11px] px-2 py-0.5 rounded-full bg-gold/20 text-gold-dark">{t.ppFrozen}</span>}<button className="btn btn-ghost !py-1 text-sm" onClick={() => setSel(null)}>{t.back}</button></div>
+          <div className="flex items-center gap-2"><b className="flex-1 truncate">{sel.name}</b>{sel.frozen && <Badge tone="warn">{t.ppFrozen}</Badge>}<button className="btn btn-ghost !py-1 text-sm" onClick={() => setSel(null)}>{t.back}</button></div>
           <div className="text-sm text-muted space-y-1">
             <div>{sel.members} {t.ppMembers} · {sel.archived} {t.ppArchived} · {t.ppOpenReports}: {sel.openReports} · {t.ppSupportCases}: {sel.supportCases ?? 0}</div>
             <div>{t.ppStorage}: {sel.usedGB} / {sel.quotaGB} GB ({sel.plan}{sel.status === 'readonly' ? ` · ${t.ppReadonly}` : ''})</div>
@@ -348,12 +350,12 @@ function FamiliesTab({ role, focus }: { role: Role; focus: number | null }) {
           {(sel.history?.length ?? 0) > 0 && <div className="space-y-1"><b className="text-sm">{t.ppHistory}</b><ul className="text-xs text-muted space-y-0.5">{sel.history!.map((h, i) => <li key={i}>{h.createdAt} · {h.action} · {h.actor ?? '—'}</li>)}</ul></div>}
           {msg && <p role="status" className="text-sm text-muted">{msg}</p>}
         </div>
-      ) : list === null ? null : list.length === 0 ? <p className="text-sm text-muted">{t.ppNoFamilies}</p> : (
+      ) : list === null ? <TableSkeleton rows={6} cols={3} /> : list.length === 0 ? <p className="text-sm text-muted">{t.ppNoFamilies}</p> : (
         <>
           <ul className="card divide-y divide-line">
             {list.map(f => (
               <li key={f.id}><button className="w-full p-3 text-start space-y-1.5" onClick={() => { setMsg(''); open(f.id); }}>
-                <span className="flex items-center gap-2"><b className="flex-1 truncate">{f.name}</b>{f.frozen && <span className="text-[11px] px-2 py-0.5 rounded-full bg-gold/20 text-gold-dark">{t.ppFrozen}</span>}{f.openReports > 0 && <span className="text-[11px] px-2 py-0.5 rounded-full bg-danger-soft text-danger">{f.openReports}</span>}</span>
+                <span className="flex items-center gap-2"><b className="flex-1 truncate">{f.name}</b>{f.frozen && <Badge tone="warn">{t.ppFrozen}</Badge>}{f.openReports > 0 && <Badge tone="bad">{f.openReports}</Badge>}</span>
                 <span className="block text-xs text-muted">{f.members} {t.ppMembers} · {f.usedGB}/{f.quotaGB} GB · {f.plan}{f.lastActivity ? ` · ${f.lastActivity.slice(0, 10)}` : ''}</span>
                 {bar(f)}
               </button></li>
@@ -398,7 +400,7 @@ function StaffTab() {
     <section className="space-y-2">
       <p className="text-xs text-muted">{t.admStaffNote}</p>
       <ul className="card divide-y divide-line">
-        {list.map(s => <li key={s.id} className="p-3 flex items-center gap-2"><b className="flex-1 truncate">{s.name}</b><span className="text-[11px] px-2 py-0.5 rounded-full bg-gold/20 text-gold-dark">{t.admRoles[s.role]}</span></li>)}
+        {list.map(s => <li key={s.id} className="p-3 flex items-center gap-2"><b className="flex-1 truncate">{s.name}</b><Badge tone="warn">{t.admRoles[s.role]}</Badge></li>)}
       </ul>
     </section>
   );
@@ -469,9 +471,12 @@ function SettingsTab() {
         <div className="space-y-2">
           <h3 className="font-bold text-green">{t.admSms}</h3>
           <p className="text-sm text-muted" dir="ltr">{sms.provider} · {sms.usedToday} / {sms.dailyCap} {t.admToday}{sms.allowedCodes.length ? ` · allowed: ${sms.allowedCodes.join(',')}` : ''}</p>
+          {/* Sticky header and zebra rows: this table is read by scanning down a column,
+              and with many countries the header scrolls away without it. */}
           {sms.countries.length === 0 ? <p className="text-sm text-muted">{t.admNoSms}</p> : (
-            <div className="card overflow-x-auto"><table className="w-full text-sm" dir="ltr"><thead><tr className="text-muted text-xs"><th className="p-2 text-start">+</th><th className="p-2">sent</th><th className="p-2">verified</th><th className="p-2">%</th><th className="p-2">failed</th><th className="p-2">blocked</th></tr></thead>
-              <tbody>{sms.countries.map(c => <tr key={c.code} className="border-t border-line text-center"><td className="p-2 text-start font-bold">{c.code}</td><td>{c.sent}</td><td>{c.verified}</td><td>{c.completion ?? '–'}</td><td>{c.failed}</td><td>{c.blocked}</td></tr>)}</tbody></table></div>
+            <div className="card overflow-x-auto max-h-96 overflow-y-auto"><table className="w-full text-sm" dir="ltr">
+              <thead className="sticky top-0 z-10 bg-card"><tr className="text-muted text-xs"><th className="p-2 text-start">+</th><th className="p-2">sent</th><th className="p-2">verified</th><th className="p-2">%</th><th className="p-2">failed</th><th className="p-2">blocked</th></tr></thead>
+              <tbody>{sms.countries.map(c => <tr key={c.code} className="border-t border-line text-center even:bg-paper/60"><td className="p-2 text-start font-bold">{c.code}</td><td>{c.sent}</td><td>{c.verified}</td><td>{c.completion ?? '–'}</td><td>{c.failed}</td><td>{c.blocked}</td></tr>)}</tbody></table></div>
           )}
           <label className="block text-sm font-medium">{t.admBlockCodes}</label>
           <div className="flex gap-2"><input className="field" dir="ltr" placeholder="e.g. 7, 234" value={blocked} onChange={e => setBlocked(e.target.value)} /><button className="btn shrink-0" onClick={saveBlocked}>{t.save}</button></div>
@@ -644,7 +649,7 @@ function SupportTab() {
       {list.length === 0 ? <p className="text-sm text-muted">{t.admNoSupport}</p> : (
         <ul className="space-y-2">{list.map(k => (
           <li key={k.id}><button className="card p-3 w-full text-start space-y-0.5" onClick={() => show(k.id)}>
-            <div className="flex items-center gap-2"><b className="flex-1 truncate">{k.subject}</b><span className="text-[11px] px-2 py-0.5 rounded-full bg-line text-muted">{t.supportStatus[k.status]}</span></div>
+            <div className="flex items-center gap-2"><b className="flex-1 truncate">{k.subject}</b><Badge>{t.supportStatus[k.status]}</Badge></div>
             <div className="text-xs text-muted">{k.person} · <span dir="ltr">{k.phone}</span> · {k.messages}</div>
           </button></li>
         ))}</ul>
@@ -702,7 +707,7 @@ function AgentTab() {
       <p className="text-xs text-muted">{t.agentHint}</p>
       <div className="card p-3 space-y-2">
         <b className="text-sm">{t.agentToday}</b>
-        {digest === null ? null : digest.items.length === 0 ? <p className="text-sm text-muted">{t.agentQuiet}</p> : (
+        {digest === null ? <TableSkeleton rows={4} cols={2} /> : digest.items.length === 0 ? <p className="text-sm text-muted">{t.agentQuiet}</p> : (
           <ul className="space-y-1.5">{digest.items.map(i => <li key={i.code} className="flex items-start gap-2 text-sm"><span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot[i.sev]}`} /><span>{i[l]}</span></li>)}</ul>
         )}
       </div>
@@ -990,7 +995,7 @@ function SecurityTab({ role, onUnlocked }: { role: Role; onUnlocked?: () => void
         <div className="card p-3 space-y-2">
           <h3 className="font-bold text-green">{t.secSessions}</h3>
           <ul className="space-y-1.5">{sessions.map(s => (
-            <li key={s.id} className="text-sm flex items-center gap-2"><span className="flex-1 min-w-0"><b>{s.name}</b> <span className="text-xs text-muted">· {t.admRoles[s.role as Role] ?? s.role}{s.verified ? ' ✓' : ''}{s.current ? ` · ${t.secCurrent}` : ''}</span><span className="block text-xs text-muted truncate" dir="ltr">{s.createdAt ?? '—'} · {s.agent ?? '—'}</span></span>
+            <li key={s.id} className="text-sm flex items-center gap-2"><span className="flex-1 min-w-0"><b>{s.name}</b> <span className="text-xs text-muted">· {t.admRoles[s.role as Role] ?? s.role}{s.verified && <Icon name="check" className="w-3.5 h-3.5 inline text-green ms-1" />}{s.current ? ` · ${t.secCurrent}` : ''}</span><span className="block text-xs text-muted truncate" dir="ltr">{s.createdAt ?? '—'} · {s.agent ?? '—'}</span></span>
               {!s.current && <button className="btn btn-ghost !py-0.5 text-xs text-danger" onClick={() => run(() => api(`/admin/security/sessions/${s.id}/revoke`, { body: {} }))}>{t.secRevoke}</button>}</li>
           ))}</ul>
         </div>

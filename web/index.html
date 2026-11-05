@@ -11,9 +11,11 @@
     <meta name="apple-mobile-web-app-title" content="ذكرى" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet" />
+    <!-- Tajawal is self-hosted (web/public/fonts, @font-face in styles.css) so we can
+         correct its vertical metrics, which Google's stylesheet would not let us touch.
+         Preloading the two faces the first screen needs avoids a flash of fallback text. -->
+    <link rel="preload" href="/fonts/tajawal-400-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/tajawal-400-arabic.woff2" as="font" type="font/woff2" crossorigin />
     <title>ذكرى · Thekra</title>
   </head>
   <body>

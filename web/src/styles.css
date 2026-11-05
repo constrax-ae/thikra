@@ -1,5 +1,90 @@
 @import "tailwindcss";
 
+/* ---------------------------------------------------------------------------
+   Tajawal, self-hosted.
+   It used to come from Google's stylesheet, which meant we could not touch its
+   @font-face — and the font's shipped vertical metrics are the reason text sat high
+   in every control. Measured in Chrome at 16px: the font box is ascent 10px /
+   descent 6px, while the cap is 10.13px above the baseline, so the visible Latin
+   text ends up 3.06px above the middle of the box the browser centres.
+
+   The overrides below rebalance that box around the cap-to-baseline span. Text then
+   centres by itself — no padding compensation anywhere — and the caret, which Chrome
+   draws to the content area rather than the glyphs, lines up with the letters too.
+     ascent  94% + descent 31% = 1.25em line box
+     ascent - descent = 0.63em = the cap height, which is what centres it.
+
+   Self-hosting also drops a third-party request. 72 KB, Latin and Arabic subsets,
+   same files Google serves (v12), OFL-1.1.
+   --------------------------------------------------------------------------- */
+@font-face {
+  font-family: 'Tajawal';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/tajawal-400-arabic.woff2') format('woff2');
+  ascent-override: 94%;
+  descent-override: 31%;
+  line-gap-override: 0%;
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC, U+102E0-102FB, U+10E60-10E7E, U+10EC2-10EC7, U+10EC9-10EEE, U+10EF0-10EFF, U+1EE00-1EE03, U+1EE05-1EE1F, U+1EE21-1EE22, U+1EE24, U+1EE27, U+1EE29-1EE32, U+1EE34-1EE37, U+1EE39, U+1EE3B, U+1EE42, U+1EE47, U+1EE49, U+1EE4B, U+1EE4D-1EE4F, U+1EE51-1EE52, U+1EE54, U+1EE57, U+1EE59, U+1EE5B, U+1EE5D, U+1EE5F, U+1EE61-1EE62, U+1EE64, U+1EE67-1EE6A, U+1EE6C-1EE72, U+1EE74-1EE77, U+1EE79-1EE7C, U+1EE7E, U+1EE80-1EE89, U+1EE8B-1EE9B, U+1EEA1-1EEA3, U+1EEA5-1EEA9, U+1EEAB-1EEBB, U+1EEF0-1EEF1;
+}
+@font-face {
+  font-family: 'Tajawal';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/tajawal-400-latin.woff2') format('woff2');
+  ascent-override: 94%;
+  descent-override: 31%;
+  line-gap-override: 0%;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Tajawal';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/tajawal-500-arabic.woff2') format('woff2');
+  ascent-override: 94%;
+  descent-override: 31%;
+  line-gap-override: 0%;
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC, U+102E0-102FB, U+10E60-10E7E, U+10EC2-10EC7, U+10EC9-10EEE, U+10EF0-10EFF, U+1EE00-1EE03, U+1EE05-1EE1F, U+1EE21-1EE22, U+1EE24, U+1EE27, U+1EE29-1EE32, U+1EE34-1EE37, U+1EE39, U+1EE3B, U+1EE42, U+1EE47, U+1EE49, U+1EE4B, U+1EE4D-1EE4F, U+1EE51-1EE52, U+1EE54, U+1EE57, U+1EE59, U+1EE5B, U+1EE5D, U+1EE5F, U+1EE61-1EE62, U+1EE64, U+1EE67-1EE6A, U+1EE6C-1EE72, U+1EE74-1EE77, U+1EE79-1EE7C, U+1EE7E, U+1EE80-1EE89, U+1EE8B-1EE9B, U+1EEA1-1EEA3, U+1EEA5-1EEA9, U+1EEAB-1EEBB, U+1EEF0-1EEF1;
+}
+@font-face {
+  font-family: 'Tajawal';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/tajawal-500-latin.woff2') format('woff2');
+  ascent-override: 94%;
+  descent-override: 31%;
+  line-gap-override: 0%;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Tajawal';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/tajawal-700-arabic.woff2') format('woff2');
+  ascent-override: 94%;
+  descent-override: 31%;
+  line-gap-override: 0%;
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC, U+102E0-102FB, U+10E60-10E7E, U+10EC2-10EC7, U+10EC9-10EEE, U+10EF0-10EFF, U+1EE00-1EE03, U+1EE05-1EE1F, U+1EE21-1EE22, U+1EE24, U+1EE27, U+1EE29-1EE32, U+1EE34-1EE37, U+1EE39, U+1EE3B, U+1EE42, U+1EE47, U+1EE49, U+1EE4B, U+1EE4D-1EE4F, U+1EE51-1EE52, U+1EE54, U+1EE57, U+1EE59, U+1EE5B, U+1EE5D, U+1EE5F, U+1EE61-1EE62, U+1EE64, U+1EE67-1EE6A, U+1EE6C-1EE72, U+1EE74-1EE77, U+1EE79-1EE7C, U+1EE7E, U+1EE80-1EE89, U+1EE8B-1EE9B, U+1EEA1-1EEA3, U+1EEA5-1EEA9, U+1EEAB-1EEBB, U+1EEF0-1EEF1;
+}
+@font-face {
+  font-family: 'Tajawal';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/tajawal-700-latin.woff2') format('woff2');
+  ascent-override: 94%;
+  descent-override: 31%;
+  line-gap-override: 0%;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+
 @theme {
   --font-sans: "Tajawal", ui-sans-serif, system-ui, sans-serif;
   --color-ink: #2b3832;
@@ -21,6 +106,54 @@
   --radius-control: 0.75rem;
   --radius-card: 1rem;
   --text-caption: 0.6875rem;
+
+  /* ---------- Motion (THK design foundation) ----------
+     Durations are tiered by distance and purpose, never one value for everything.
+     Exits are shorter than entries: leaving should feel quicker than arriving.
+     Every value below is switched off by html[data-motion="off"] at the end of this file. */
+  --dur-instant: 90ms;    /* colour and opacity only: hover tints, text colour */
+  --dur-fast: 150ms;      /* small local change: press, checkbox, icon swap */
+  --dur-base: 220ms;      /* an element entering or expanding in place */
+  --dur-slow: 340ms;      /* a panel, sheet or route arriving */
+  --dur-exit: 120ms;      /* anything leaving */
+
+  /* Easing. Entry decelerates (arrives and settles), exit accelerates (leaves and is gone),
+     standard is for anything moving between two states, emphasis adds a slight overshoot. */
+  --ease-entrance: cubic-bezier(0.16, 0.84, 0.44, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasis: cubic-bezier(0.34, 1.36, 0.64, 1);
+
+  /* Elevation: three levels, no more. Light mode lifts with a soft green-tinted shadow
+     (never neutral grey, which reads muddy on paper). Dark mode overrides these below,
+     because shadow alone is invisible on a dark surface. */
+  --shadow-e1: 0 1px 2px rgb(31 48 40 / 0.06), 0 1px 3px rgb(31 48 40 / 0.04);
+  --shadow-e2: 0 2px 6px rgb(31 48 40 / 0.07), 0 6px 16px rgb(31 48 40 / 0.06);
+  --shadow-e3: 0 8px 24px rgb(31 48 40 / 0.10), 0 16px 48px rgb(31 48 40 / 0.08);
+
+  /* Focus ring gets its own token so it stays visible on paper, on card and on the brand fill,
+     in both themes. Dark mode swaps it to the gold below. */
+  --color-focus: #1f4d3f;
+
+  /* Danger needs the same split the brand already has: --color-danger is TEXT, and turns
+     light in dark mode, so it cannot also be a fill behind white text. This is the fill. */
+  --color-danger-fill: #b91c1c;
+
+  /* Keyframes live in @theme so Tailwind emits the matching animate-* utilities. */
+  --animate-fade-in: fade-in var(--dur-base) var(--ease-entrance) both;
+  --animate-slide-up: slide-up var(--dur-base) var(--ease-entrance) both;
+  --animate-slide-in: slide-in var(--dur-base) var(--ease-entrance) both;
+  --animate-scale-in: scale-in var(--dur-base) var(--ease-emphasis) both;
+  --animate-shimmer: shimmer 1.4s linear infinite;
+  --animate-pulse-soft: pulse-soft 1.8s var(--ease-standard) infinite;
+
+  @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes slide-up { from { opacity: 0; transform: translateY(0.5rem); } to { opacity: 1; transform: none; } }
+  /* Logical direction: slides from the inline start, so it mirrors correctly in Arabic. */
+  @keyframes slide-in { from { opacity: 0; transform: translateX(calc(var(--slide-from, 0.75rem) * -1)); } to { opacity: 1; transform: none; } }
+  @keyframes scale-in { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: none; } }
+  @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+  @keyframes pulse-soft { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 }
 
 /* Large-text mode (accessibility): everything is rem-based, so scaling the root scales the whole app. */
@@ -61,7 +194,7 @@ html[data-theme="dark"] {
 /* Visual calm (owner's rule): the default light theme is white and soft neutrals with ONE calm green accent. Gold headings and tonal gold buttons belong to the dark theme only. */
 html[data-theme="dark"] h2 { color: var(--color-gold-dark); }
 /* Tonal primary buttons: a soft gold wash with gold-brown text, so gold stays an accent and not a block of colour. */
-html[data-theme="dark"] .btn:not(.btn-ghost):not([class*="bg-red"]) { background: color-mix(in srgb, var(--color-gold) 20%, var(--color-card)); color: var(--color-gold-dark); border: 1px solid color-mix(in srgb, var(--color-gold) 50%, transparent); }
+html[data-theme="dark"] .btn:not(.btn-ghost):not([class*="bg-red"]):not(.btn-danger) { background: color-mix(in srgb, var(--color-gold) 20%, var(--color-card)); color: var(--color-gold-dark); border: 1px solid color-mix(in srgb, var(--color-gold) 50%, transparent); }
 
 /* Design A: the agent's card and glass-like list cards. */
 .agent-card { background: var(--color-card); border: 1px solid var(--color-gold); border-radius: 1rem ; }
@@ -72,7 +205,26 @@ html[data-theme="dark"] .card { background: color-mix(in srgb, var(--color-card)
 /* Chat theme (You > Appearance): wallpaper behind the messages and the colour of my bubbles. */
 .bubble-mine { background: var(--bubble-mine, #d9f2d6); color: var(--bubble-ink, #2b3832); border: 1px solid var(--bubble-edge, #bfe3bb); --bubble-tick: var(--bubble-tick-user, #075985);
   --color-ink: #2b3832; --color-muted: #3f4f47; --color-green: #1f4d3f; --color-green-soft: #c4e6c0; --color-gold-dark: #7a5a13; --color-card: #ffffff; }
-.chat-wall { border-radius: 1rem; padding: 0.5rem; }
+/* The conversation is its own surface, not the same sheet as the page chrome. A quiet
+   recess gives the bubbles something to sit on — the owner's rule is visual calm, so this
+   is a tint and a whisper of pattern, not a wallpaper.
+   The motif is scoped to "no wallpaper chosen" rather than applied then overridden: an
+   override would have needed higher specificity than the six real wallpaper rules below
+   and would have blanked them. */
+.chat-wall {
+  border-radius: 1rem;
+  padding: 0.5rem 0.75rem;
+  background-color: color-mix(in srgb, var(--color-green) 4%, var(--color-paper));
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--color-ink) 5%, transparent);
+}
+html:not([data-wall]) .chat-wall, html[data-wall="none"] .chat-wall {
+  background-image: radial-gradient(color-mix(in srgb, var(--color-green) 11%, transparent) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+html[data-theme="dark"] .chat-wall { background-color: color-mix(in srgb, #000 28%, var(--color-paper)); }
+html[data-theme="dark"][data-wall="none"] .chat-wall {
+  background-image: radial-gradient(color-mix(in srgb, #fff 5%, transparent) 1px, transparent 1px);
+}
 
 /* Memory: a quiet vertical line with a dot per event. Sealed letters: an envelope card with a wax-seal edge. */
 .timeline { border-inline-start: 2px solid color-mix(in srgb, var(--color-gold) 45%, transparent); padding-inline-start: 1rem; margin-inline-start: 0.35rem; }
@@ -92,6 +244,295 @@ html[data-wall="rose"] .chat-wall, .wall-rose { background-image: url("data:imag
 /* Calm type (owner: "black, dark and thick"): Tajawal 700 is heavy, so bold is the medium weight, and body ink is a soft charcoal. */
 b, strong, h1, h2, h3, .font-bold { font-weight: 500; }
 
+/* ---------------------------------------------------------------------------
+   Design foundation: elevation, focus and interaction states.
+   Added by THK web UI 1/8. Colour tokens above are unchanged.
+   --------------------------------------------------------------------------- */
+
+/* Dark mode cannot lift with shadow alone, so elevation there is a deeper shadow plus a
+   lighter top edge. Kept out of the colour block above so the contrast test still parses it. */
+html[data-theme="dark"] {
+  --shadow-e1: 0 1px 2px rgb(0 0 0 / 0.40), inset 0 1px 0 rgb(255 255 255 / 0.03);
+  --shadow-e2: 0 4px 12px rgb(0 0 0 / 0.45), inset 0 1px 0 rgb(255 255 255 / 0.04);
+  --shadow-e3: 0 12px 32px rgb(0 0 0 / 0.55), inset 0 1px 0 rgb(255 255 255 / 0.06);
+  --color-focus: #f0b957;
+  --color-danger-fill: #7f1d1d;
+}
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme="light"]) {
+    --shadow-e1: 0 1px 2px rgb(0 0 0 / 0.40), inset 0 1px 0 rgb(255 255 255 / 0.03);
+    --shadow-e2: 0 4px 12px rgb(0 0 0 / 0.45), inset 0 1px 0 rgb(255 255 255 / 0.04);
+    --shadow-e3: 0 12px 32px rgb(0 0 0 / 0.55), inset 0 1px 0 rgb(255 255 255 / 0.06);
+    --color-focus: #f0b957;
+  --color-danger-fill: #7f1d1d;
+  }
+}
+
+/* Arabic is the primary language: flip the slide-in origin so content still enters
+   from the inline start rather than always from the left. */
+[dir="rtl"] { --slide-from: -0.75rem; }
+
+/* ---------- Focus ----------
+   One visible ring on everything operable. :focus-visible so a mouse press does not
+   draw it, but a keyboard tab always does. The 2px offset keeps the ring on the
+   surrounding surface, so it stays visible even on the dark green brand fill. */
+:where(a, button, [role="button"], [role="tab"], [role="menuitem"], input, textarea, select, summary, [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-control);
+}
+/* Never leave a control with no indicator: this is the replacement, not a removal. */
+:where(button, [role="button"], input, textarea, select):focus { outline-color: var(--color-focus); }
+
+/* ---------- Interactive primitives ----------
+   Every control gets hover, active and disabled feedback. Transitions name their
+   properties: never `all`, which animates layout and causes jank. */
+.btn {
+  min-height: 2.75rem;                    /* 44px: the minimum comfortable touch target */
+  transition:
+    background-color var(--dur-instant) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-standard);
+  box-shadow: var(--shadow-e1);
+}
+.btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-brand) 88%, #000);
+  box-shadow: var(--shadow-e2);
+}
+.btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.99);
+  box-shadow: var(--shadow-e1);
+  transition-duration: var(--dur-instant);
+}
+/* A disabled primary button used to be the brand green at 50% opacity, which reads as a
+   muddy half-colour rather than as "not yet". A flat neutral says it plainly. */
+.btn:disabled { box-shadow: none; opacity: 1; background: color-mix(in srgb, var(--color-line) 50%, var(--color-card)); color: var(--color-muted); }
+.btn-ghost:disabled { background: transparent; color: var(--color-muted); }
+
+/* Destructive actions get one shared look, so "delete for good" never resembles "save".
+   Excluded from the dark tonal gold rule above: red must stay red in both themes. */
+.btn-danger { background: var(--color-danger-fill); color: #fff; }
+.btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--color-danger-fill) 85%, #000); }
+.btn-danger:focus-visible { outline-color: var(--color-danger); }
+
+/* A moderation action that is one tap from happening. The label already changes to
+   "tap again"; this makes the button itself look like it is about to fire. */
+.btn-armed { background: var(--color-danger-fill); color: #fff; border-color: transparent; animation: var(--animate-pulse-soft); }
+
+.btn-ghost { box-shadow: none; }
+.btn-ghost:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-green) 8%, transparent);
+  border-color: color-mix(in srgb, var(--color-green) 45%, var(--color-line));
+  box-shadow: none;
+}
+.btn-ghost:active:not(:disabled) { background: color-mix(in srgb, var(--color-green) 14%, transparent); }
+
+/* In dark mode the primary button is a tonal gold wash, so it darkens the other way. */
+html[data-theme="dark"] .btn:not(.btn-ghost):not([class*="bg-red"]):not(.btn-danger):hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-gold) 30%, var(--color-card));
+}
+/* The dark tonal rule is more specific than .btn:disabled, so a disabled button kept its
+   gold wash and still looked pressable. Restate the disabled look at matching specificity. */
+html[data-theme="dark"] .btn:not(.btn-ghost):not([class*="bg-red"]):not(.btn-danger):disabled {
+  background: color-mix(in srgb, var(--color-line) 50%, var(--color-card)); color: var(--color-muted); border-color: transparent;
+}
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme="light"]) .btn:not(.btn-ghost):not([class*="bg-red"]):not(.btn-danger):disabled {
+    background: color-mix(in srgb, var(--color-line) 50%, var(--color-card)); color: var(--color-muted); border-color: transparent;
+  }
+}
+
+/* ---------- Optical centring of text in controls ----------
+   Tajawal reserves a large descent for Arabic descenders (ج ح ي). The browser centres the
+   font's *box*, not the visible glyphs, so that reserved space hangs below the Latin
+   baseline and every control looks top-heavy: the text sits high with a gap underneath.
+   It shows up in inputs, in flex-centred buttons, in badges — anywhere text is centred.
+
+   Two layers, because one is not enough:
+   1. An explicit tight line-height, so the line box is not inflated by the font's own
+      `normal` leading. Works everywhere.
+   2. text-box trim, which cuts the reserved space down to the cap and baseline edges so
+      the glyphs themselves centre. Chrome 133+; older browsers ignore it and keep (1). */
+input.field, select.field { height: 2.75rem; padding-block: 0; }
+
+/* The font's metrics are corrected at the @font-face above, so controls need no
+   padding compensation: text centres on its own and the caret lines up with it. */
+/* A <button> centres its own content; an <a class="btn"> does not, which is why the
+   Download link's label sat high and left of centre next to a real button. Making every
+   .btn a centring flex box means both render identically. */
+.btn {
+  line-height: 1.25;
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+  text-align: center; text-decoration: none;
+}
+
+/* After jumping to a message from search or the media grid, show which one it was. */
+@keyframes flash-ring {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  20%, 70% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-gold) 65%, transparent); }
+}
+.flash > * { animation: flash-ring 1.5s var(--ease-standard); border-radius: 1rem; }
+
+/* Two controls that are really one field — a country code and the number it belongs to.
+   Separate boxes made the row read as two unrelated inputs and never quite aligned. */
+.field-group {
+  display: flex; align-items: stretch; width: 100%;
+  border: 1px solid var(--color-line); background: var(--color-card);
+  border-radius: var(--radius-control); overflow: hidden;
+  transition: border-color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
+}
+.field-group:hover:not(:focus-within) { border-color: color-mix(in srgb, var(--color-green) 35%, var(--color-line)); }
+.field-group:focus-within { border-color: var(--color-green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-focus) 18%, transparent); }
+.field-group > input {
+  flex: 1; min-width: 0; height: 2.75rem; padding: 0 0.85rem;
+  border: 0; background: transparent; color: var(--color-ink); outline: none;
+}
+/* The ring belongs to the whole group, so the inner control must not draw its own. */
+.field-group > input:focus-visible, .field-group > .field-prefix:focus-visible { outline: none; }
+.field-group > .field-prefix {
+  display: flex; align-items: center; gap: 0.4rem; padding: 0 0.75rem;
+  border-inline-end: 1px solid var(--color-line); cursor: pointer; white-space: nowrap;
+  transition: background-color var(--dur-instant) var(--ease-standard);
+}
+.field-group > .field-prefix:hover { background: color-mix(in srgb, var(--color-green) 7%, transparent); }
+/* Keyboard users still need to see which half has focus. */
+.field-group > .field-prefix:focus-visible { background: color-mix(in srgb, var(--color-green) 12%, transparent); }
+
+.field {
+  min-height: 2.75rem;
+  transition:
+    border-color var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard);
+}
+.field:hover:not(:focus):not(:disabled) { border-color: color-mix(in srgb, var(--color-green) 35%, var(--color-line)); }
+.field:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-focus) 18%, transparent); }
+
+.card { transition: box-shadow var(--dur-base) var(--ease-standard), border-color var(--dur-base) var(--ease-standard); }
+/* Only cards that actually do something on click should lift. A static card that
+   lifts on hover promises an action that is not there. */
+.card-interactive { cursor: pointer; box-shadow: var(--shadow-e1); }
+.card-interactive:hover { box-shadow: var(--shadow-e2); border-color: color-mix(in srgb, var(--color-green) 30%, var(--color-line)); }
+.card-interactive:active { box-shadow: var(--shadow-e1); transform: translateY(1px); }
+
+/* ---------- List rows ----------
+   Chat list, member lists, settings rows and admin tables all share this. */
+.row-interactive {
+  cursor: pointer;
+  transition: background-color var(--dur-instant) var(--ease-standard);
+}
+.row-interactive:hover { background: color-mix(in srgb, var(--color-green) 6%, transparent); }
+.row-interactive:active { background: color-mix(in srgb, var(--color-green) 11%, transparent); }
+.row-interactive[aria-current="true"], .row-interactive[data-selected="true"] { background: var(--color-green-soft); }
+
+/* Elevation helpers for anything that floats above the page. */
+.elevated-1 { box-shadow: var(--shadow-e1); }
+.elevated-2 { box-shadow: var(--shadow-e2); }
+.elevated-3 { box-shadow: var(--shadow-e3); }
+
+/* The surface a skeleton paints on. The Skeleton component itself lands in ticket 2/8. */
+.shimmer {
+  background-image: linear-gradient(90deg,
+    color-mix(in srgb, var(--color-ink) 6%, transparent) 25%,
+    color-mix(in srgb, var(--color-ink) 12%, transparent) 37%,
+    color-mix(in srgb, var(--color-ink) 6%, transparent) 63%);
+  background-size: 200% 100%;
+  animation: var(--animate-shimmer);
+}
+
+/* ---------------------------------------------------------------------------
+   The archive: the Memory timeline and Sealed letters (THK web UI 6/8).
+   This is the part of Thikra that is not a messaging app, so it is the part that
+   should not look like one.
+   --------------------------------------------------------------------------- */
+
+/* ---------- Timeline ----------
+   The rail is a thread through the family's history. The dot is the event on it. */
+.timeline-item::before {
+  box-shadow: 0 0 0 3px var(--color-paper);                 /* the dot sits on the rail, not behind it */
+  transition: transform var(--dur-base) var(--ease-emphasis), background-color var(--dur-base) var(--ease-standard);
+}
+.timeline-item:hover::before { transform: scale(1.35); }
+/* A month heading is a marker on the thread, not a list label. */
+.timeline-month {
+  position: sticky; top: 0; z-index: 1;
+  display: inline-flex; align-items: center; gap: .5rem;
+  padding: .2rem .7rem; border-radius: 9999px;
+  background: color-mix(in srgb, var(--color-gold) 12%, var(--color-card));
+  border: 1px solid color-mix(in srgb, var(--color-gold) 38%, transparent);
+  color: var(--color-gold-dark); font-size: var(--text-caption); font-weight: 500;
+  backdrop-filter: blur(4px);
+}
+
+/* Events reveal as the thread is scrolled. The end state is the normal one, so if
+   the observer never fires (or motion is off) the content is simply there. */
+.reveal { opacity: 0; transform: translateY(0.6rem); }
+.reveal-in { opacity: 1; transform: none; transition: opacity var(--dur-slow) var(--ease-entrance), transform var(--dur-slow) var(--ease-entrance); }
+html[data-motion="off"] .reveal { opacity: 1; transform: none; }
+
+/* ---------- Sealed letters ----------
+   A letter to the family's future should read as a physical object: paper, a flap,
+   and a wax seal that is unbroken until the day it opens. */
+.envelope {
+  position: relative; overflow: hidden;
+  border-inline-start: 4px solid var(--color-gold);
+  background-image: linear-gradient(158deg, color-mix(in srgb, var(--color-gold) 8%, transparent), transparent 45%);
+}
+/* A flap crease was tried here and removed: across a full-width card the angle is so
+   shallow that it reads as a stray diagonal rather than as an envelope. The wax seal,
+   the gold edge and the paper tint carry the idea on their own. */
+
+/* An opened or stopped letter has no gold edge and no paper tint: it is just a page now. */
+.envelope-open { border-inline-start-color: color-mix(in srgb, var(--color-muted) 40%, transparent); background-image: none; }
+
+.wax-seal {
+  width: 2.25rem; height: 2.25rem; border-radius: 9999px;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; flex: none;
+  background: radial-gradient(circle at 32% 28%, color-mix(in srgb, var(--color-gold) 75%, #fff), var(--color-gold) 55%, color-mix(in srgb, var(--color-gold) 70%, #000));
+  box-shadow: var(--shadow-e1), inset 0 -1px 2px rgb(0 0 0 / 0.25);
+}
+/* A letter whose trigger has fired but is still inside the waiting period. */
+.wax-seal-waiting { background: radial-gradient(circle at 32% 28%, #d98f8f, var(--color-danger) 60%, #7a1a1a); }
+/* A seal that has been broken: flat, grey, and clearly spent. */
+.wax-seal-open { background: none; color: var(--color-muted); box-shadow: none; border: 1px dashed var(--color-line); }
+
 /* Reduced animations (You > Notifications / Appearance): no transitions or motion at all. */
 html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="off"] *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 @media (prefers-reduced-motion: reduce) { html[data-motion="on"] * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
+
+/* An input that sits inside a box which already shows focus (the chat search): the box
+   glows, so the input's own ring would draw a second outline inside it. */
+.bare-input, .bare-input:focus, .bare-input:focus-visible { outline: none; border: 0; }
+
+/* The open chat docked in the desktop pane: header, tabs and the message wall run edge to
+   edge like a native messenger; only the composer keeps an inset. Mobile is unchanged. */
+.chat-docked > .chat-head { min-height: 4.5rem; padding-inline: 1.25rem; margin-bottom: 0; }
+.chat-docked > .chat-tabs { padding-inline: 1.25rem; margin-bottom: 0; }
+.chat-docked > :not(.chat-head):not(.chat-tabs):not(.flex-1) { margin: 0.5rem 1.25rem 0; width: auto; }
+.chat-docked .chat-root > :not(.chat-wall) { margin-inline: 1.25rem; width: auto; }   /* width:auto: a w-full child plus side margins would overflow and let the pane scroll sideways */
+.chat-docked .chat-root > :first-child:not(.chat-wall) { margin-top: 0.5rem; }
+.chat-docked .chat-root > form { padding-block: 0.75rem; }
+.chat-docked .chat-wall { border-radius: 0; box-shadow: none; padding-inline: 1.25rem; }
+.chat-docked .tab-scroll { padding: 1rem 1.25rem; }
+.flash-ring { animation: flash-ring 1.5s var(--ease-standard); }
+
+/* Dialogs: a bottom sheet that slides up on phones, the scale-in card from sm up. */
+@keyframes sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+.sheet { animation: sheet-up var(--dur-slow) var(--ease-entrance) both; }
+@media (min-width: 640px) { .sheet { animation: scale-in var(--dur-base) var(--ease-emphasis) both; } }
+html[data-motion="off"] .sheet { animation: none; }
+
+/* Scrollbars. Phones and tablets scroll by touch, so a visible bar is only clutter (and in
+   desktop browsers' phone emulation it shows as a wide grey strip): hidden there, scrolling
+   still works. With a mouse, a slim bar in the theme's line colour instead of the grey default. */
+@media (max-width: 1023px) {
+  * { scrollbar-width: none; }
+  *::-webkit-scrollbar { display: none; width: 0; height: 0; }
+}
+@media (min-width: 1024px) {
+  * { scrollbar-width: thin; scrollbar-color: var(--color-line) transparent; }
+  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb { background: var(--color-line); border-radius: 9999px; border: 2px solid transparent; background-clip: padding-box; }
+  *::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--color-green) 35%, var(--color-line)); background-clip: padding-box; }
+}
