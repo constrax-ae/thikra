@@ -19,7 +19,7 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
   return data as T;
 }
 
-export interface Me { id: number; phone: string; name: string; lang: string; is_admin: number; read_receipts: number; push_preview: number; has_pin?: number; admin_role?: 'owner' | 'moderator' | 'support' | null }
+export interface Me { id: number; phone: string; name: string; lang: string; is_admin: number; read_receipts: number; push_preview: number; /** Optional second way to reach someone; the phone stays the identity. */ email?: string | null; has_pin?: number; admin_role?: 'owner' | 'moderator' | 'support' | null }
 export type Kind = 'circle' | 'group' | 'direct';
 export interface CircleSummary {
   id: number; kind: Kind; name: string; sensitivity: string; agentActive: number; role: string; members: number; unread: number;

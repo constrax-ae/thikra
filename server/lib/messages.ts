@@ -1,4 +1,5 @@
 import { flag } from './ops.ts';
+import { excerpt } from '../../core/excerpt.ts';
 import { assess, normalize, type Sensitivity } from '../../core/agent.ts';
 import { all, one, run } from '../db.ts';
 import { gate } from '../../core/gate.ts';
@@ -33,8 +34,8 @@ export function analyze(circleId: number, messageId: number, text: string, manua
     r.verdict, r.score, r.category, r.reason, messageId);
   const existing = one('SELECT id FROM archive_entries WHERE message_id = ? AND deleted_at IS NULL', messageId);
   if (r.verdict === 'archived' && !existing) {
-    const title = text.replace(/\s+/g, ' ').slice(0, 60);
+    const title = excerpt(text, 60);
     run('INSERT INTO archive_entries (circle_id, message_id, title, summary, category, event_date, source) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      circleId, messageId, title, `${msg.author}: ${text.slice(0, 400)}`, r.category, String(msg.created_at).slice(0, 10) || today(), manual ? 'manual' : 'auto');
+      circleId, messageId, title, `${msg.author}: ${excerpt(text, 400)}`, r.category, String(msg.created_at).slice(0, 10) || today(), manual ? 'manual' : 'auto');
   }
 }

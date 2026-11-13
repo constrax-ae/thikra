@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError, type Me } from './api';
 import { useI18n } from './i18n';
+import { isEmail, normalizeEmail } from '../../core/email.ts';
 import { useTextSize, type TextSize } from './textsize';
 import { useTheme, type Theme } from './theme';
 import { useUploadQuality } from './quality';
@@ -9,7 +10,7 @@ import { useInstall } from './install';
 import { LangPicker, MachineNote } from './LangPicker';
 import { useChatTheme, WALLPAPERS, BUBBLES } from './chattheme';
 import { Icon, type IconName } from './icons';
-import { Toggle } from './States';
+import { Toggle, BusyButton } from './States';
 
 type Row = 'install' | 'starred' | 'account' | 'privacy' | 'chats' | 'appearance' | 'notifications' | 'storage' | 'rights' | 'help' | null;
 
@@ -136,6 +137,56 @@ function TwoStep({ has, onDone }: { has: boolean; onDone: () => void }) {
 
 
 /** Change the number: a code goes to the NEW number; the account, circles and history stay. */
+/** The optional email address.
+ *
+ *  Validated with the same rule the server uses, so the form never accepts something the
+ *  save then refuses. An empty value clears it: someone who no longer wants us holding an
+ *  address should not have to ask for it to go. */
+function EmailField({ me, onDone }: { me: Me; onDone: () => void }) {
+  const { t } = useI18n();
+  const [value, setValue] = useState(me.email ?? '');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [error, setError] = useState('');
+
+  const changed = normalizeEmail(value) !== (me.email ?? '');
+  const bad = !isEmail(value);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setError(''); setMsg('');
+    if (bad) { setError(t.errors.bad_email); return; }
+    setBusy(true);
+    try {
+      const clean = normalizeEmail(value);
+      await api('/me', { method: 'PATCH', body: { email: clean } });
+      // Show what was actually kept. Leaving the typed casing on screen told the person
+      // we hold "Rizwan@Example.COM" when the row says rizwan@example.com.
+      setValue(clean);
+      setMsg(clean ? t.emailSaved : t.emailCleared);
+      onDone();
+    } catch (err) {
+      setError(t.errors[err instanceof ApiError ? err.code : 'generic'] ?? t.errors.generic);
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <form onSubmit={save} className="space-y-2">
+      <label className="block">
+        <span className="block text-sm font-medium mb-1">{t.yourEmail}</span>
+        <input className="field" type="email" dir="ltr" inputMode="email" autoComplete="email" maxLength={254}
+          placeholder="name@example.com" value={value}
+          aria-invalid={value.length > 0 && bad} aria-describedby="email-note"
+          onChange={e => { setValue(e.target.value); setError(''); setMsg(''); }} />
+      </label>
+      <p id="email-note" className="text-muted text-sm">{t.emailNote}</p>
+      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+      {msg && <p role="status" className="text-sm text-green">{msg}</p>}
+      <BusyButton busy={busy} className="btn w-full" disabled={!changed || bad}>{t.emailSave}</BusyButton>
+    </form>
+  );
+}
+
 function ChangeNumber({ onDone }: { onDone: () => void }) {
   const { t, lang } = useI18n();
   const [step, setStep] = useState<'idle' | 'code'>('idle');
@@ -279,6 +330,7 @@ export function You({ me, onLogout, onDeleteAccount, onAdmin, onSealed, onChange
           <>
             <TwoStep has={!!me.has_pin} onDone={onChanged} />
             <ChangeNumber onDone={onChanged} />
+            <EmailField me={me} onDone={onChanged} />
             <a className="btn btn-ghost block text-center" href="/api/me/export" download>{t.exportData}</a>
             <p className="text-muted">{t.exportNote}</p>
             {/* Set apart by a rule: nothing destructive should sit flush against the

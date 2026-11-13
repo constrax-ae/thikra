@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { Picker } from './Picker';
+import { Toggle } from './States';
 import { MachineNote } from './LangPicker';
 import { api, ApiError, toDate, type CircleDetail, type CircleSummary } from './api';
 import { useI18n, intlLocale } from './i18n';
@@ -138,11 +140,10 @@ export function SealedPage({ meId, onBack }: { meId: number; onBack: () => void 
       )}
 
       <form onSubmit={seal} className="card p-4 space-y-3">
-        <label className="block text-sm font-medium">{t.sealedCircle}
-          <select className="field mt-1" value={circle} onChange={e => setCircle(Number(e.target.value))}>
-            {circles.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        </label>
+        <div className="block text-sm font-medium">{t.sealedCircle}
+          <Picker className="mt-1" label={t.sealedCircle} value={circle} onChange={setCircle}
+            options={circles.map(c => ({ value: c.id, label: c.name }))} />
+        </div>
         <div role="group" aria-label={t.sealedTrigger} className="flex flex-wrap gap-2">
           {([['date', t.trigDate], ['event', t.trigEvent], ...(env?.deathEnabled ? [['death', t.trigDeath]] : [])] as Array<[Trigger, string]>).map(([k, label]) => (
             <button key={k} type="button" aria-pressed={trigger === k} onClick={() => setTrigger(k)} className={`btn btn-ghost !py-1 text-sm ${trigger === k ? '!border-green !text-green font-bold' : ''}`}>{label}</button>
@@ -164,13 +165,13 @@ export function SealedPage({ meId, onBack }: { meId: number; onBack: () => void 
               ))}
               {dates.length < 12 && <button type="button" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-sm font-bold text-green hover:bg-green-soft transition-colors duration-[var(--dur-instant)]" onClick={() => setDates(p => [...p, ''])}><Icon name="plus" className="w-4 h-4" />{t.sealedAddDate}</button>}
             </div>
-            {dates.length === 1 && <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={yearly} onChange={e => setYearly(e.target.checked)} />{t.sealedYearly}</label>}
-            <label className="block text-sm font-medium">{t.sealedTo}
-              <select className="field mt-1" value={to} onChange={e => setTo(e.target.value === '' ? '' : Number(e.target.value))}>
-                <option value="">{t.sealedWhole}</option>
-                {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-              </select>
-            </label>
+            {dates.length === 1 && <Toggle checked={yearly} onChange={setYearly} label={t.sealedYearly} />}
+            <div className="block text-sm font-medium">{t.sealedTo}
+              {/* 0 stands for "the whole circle": Picker needs a real value, and the empty
+                  string the native select used is not one. */}
+              <Picker className="mt-1" label={t.sealedTo} value={to === '' ? 0 : to} onChange={v => setTo(v === 0 ? '' : v)}
+                options={[{ value: 0, label: t.sealedWhole }, ...members.map(m => ({ value: m.id, label: m.name }))]} />
+            </div>
           </>
         )}
 

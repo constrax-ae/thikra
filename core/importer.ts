@@ -1,4 +1,5 @@
 // Turns an imported chat history into a DRAFT of archive events. Nothing is saved here: the person
+import { excerpt } from './excerpt.ts';
 // importing reviews the draft and only what they tick goes to the circle.
 //
 // Deliberately left out of an import: conflicts. Old quarrels are not brought back to life.
@@ -51,8 +52,8 @@ export function buildDraft(messages: ImportedMessage[], sensitivity: Sensitivity
     open.delete(key);
     events.push({
       date: g.best.date,
-      title: g.best.text.replace(/\s+/g, ' ').slice(0, 60),
-      summary: `${g.best.sender}: ${g.best.text.slice(0, 400)}`,
+      title: excerpt(g.best.text, 60),
+      summary: `${g.best.sender}: ${excerpt(g.best.text, 400)}`,
       category: g.best.category,
       score: g.best.score,
       reactions: g.n - 1,

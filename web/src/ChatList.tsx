@@ -20,7 +20,7 @@ function listTime(iso: string, lang: string, t: { today: string; yesterday: stri
   return d.toLocaleDateString(loc, { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-export function ChatList({ onOpen, activeId }: { onOpen: (id: number) => void; activeId?: number }) {
+export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) => void; activeId?: number; onCount?: (n: number) => void }) {
   const { t, lang } = useI18n();
   const [list, setList] = useState<CircleSummary[] | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
@@ -36,7 +36,7 @@ export function ChatList({ onOpen, activeId }: { onOpen: (id: number) => void; a
   // The flag is cleared on the next success, so a blip during the 8s refresh never
   // replaces a list that is already on screen.
   const [loadFailed, setLoadFailed] = useState(false);
-  const load = useCallback(() => api<CircleSummary[]>('/circles').then(l => { setList(l); setLoadFailed(false); }).catch(() => setLoadFailed(true)), []);
+  const load = useCallback(() => api<CircleSummary[]>('/circles').then(l => { setList(l); setLoadFailed(false); onCount?.(l.length); }).catch(() => setLoadFailed(true)), [onCount]);
   useEffect(() => {
     load();
     const timer = setInterval(load, 8000); // the badges and previews stay fresh while the list is on screen
@@ -94,7 +94,10 @@ export function ChatList({ onOpen, activeId }: { onOpen: (id: number) => void; a
       if (sheet === 'chat') r = await api('/direct', { body: { phone: field.trim() } });
       else if (sheet === 'join') r = await api('/circles/join', { body: { code: field.trim() } });
       else r = await api('/circles', { body: { name: field, kind: (sheet === 'group' ? 'group' : 'circle') as Kind } });
-      setSheet(null); setField(''); onOpen(r.id);
+      // Reload before navigating: the list drives the sidebar's onboarding card, and
+      // without this the person who just made their first circle is still told to
+      // "start with your family" until the 8s refresh catches up.
+      setSheet(null); setField(''); setError(''); await load(); onOpen(r.id);
     } catch (err) { fail(err); }
   }
 
@@ -325,7 +328,7 @@ export function ChatList({ onOpen, activeId }: { onOpen: (id: number) => void; a
       )}
 
       {sheet && (
-        <Dialog onClose={() => setSheet(null)} label={sheetTitle}>
+        <Dialog onClose={() => { setSheet(null); setError(''); }} label={sheetTitle}>
           <h2 className="text-lg font-bold">{sheetTitle}</h2>
           {sheet === 'new' ? (
             <div className="mt-3 flex flex-col gap-1">
@@ -432,7 +435,10 @@ function Onboarding({ onCreate, onJoin }: { onCreate: () => void; onJoin: () => 
 }
 
 /** The right-hand pane on a wide screen when no chat is open. */
-export function ChatWelcome() {
+/** `empty` is the first-run case: there is nothing to pick yet, so inviting the family
+ *  is the only thing to say. Telling someone to pick a conversation they do not have
+ *  reads as a broken screen. */
+export function ChatWelcome({ empty }: { empty?: boolean } = {}) {
   const { t } = useI18n();
   return (
     <div className="h-full flex flex-col">
@@ -448,8 +454,8 @@ export function ChatWelcome() {
           <HeroArt size="lg" />
           <div className="space-y-3 animate-slide-up">
             <p className="text-caption font-bold uppercase tracking-[0.16em] text-green">{t.hubWelcomeEyebrow}</p>
-            <h2 className="text-4xl font-bold !text-ink tracking-tight">{t.hubWelcomeTitle}</h2>
-            <p className="text-muted text-lg leading-relaxed max-w-lg mx-auto text-balance">{t.hubWelcomeBody}</p>
+            <h2 className="text-4xl font-bold !text-ink tracking-tight">{empty ? t.onbTitle : t.hubWelcomeTitle}</h2>
+            <p className="text-muted text-lg leading-relaxed max-w-lg mx-auto text-balance">{empty ? t.onbText : t.hubWelcomeBody}</p>
           </div>
           <div className="w-full pt-4"><FeatureList layout="row" /></div>
         </div>

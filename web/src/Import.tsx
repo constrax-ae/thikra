@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
+import { Picker } from './Picker';
 import { api, ApiError, type CircleDetail } from './api';
 import { useI18n } from './i18n';
 import { parseWhatsApp, type ParsedChat } from '../../core/whatsapp';
@@ -164,7 +165,7 @@ export function ImportPanel({ circle, onDone }: { circle: CircleDetail; onDone: 
                 {([['image', t.impPhotos], ['voice', t.impVoices], ['video', t.impVideos]] as const).map(([k, label]) => {
                   const total = plan.items.filter(i => years.has(i.year) && i.kind === k).length;
                   if (!plan.items.some(i => i.kind === k)) return null;
-                  return <label key={k} className="flex items-center gap-2"><input type="checkbox" className="w-5 h-5 accent-[#1f4d3f]" checked={kinds[k]} disabled={busy} onChange={() => setKinds(p => ({ ...p, [k]: !p[k] }))} />{label} ({total})</label>;
+                  return <label key={k} className="flex items-center gap-2"><input type="checkbox" className="check" checked={kinds[k]} disabled={busy} onChange={() => setKinds(p => ({ ...p, [k]: !p[k] }))} />{label} ({total})</label>;
                 })}
               </div>
               <p className="text-xs text-muted">{wanted.length} · {t.impSize}: {mb(bytes)}
@@ -181,16 +182,15 @@ export function ImportPanel({ circle, onDone }: { circle: CircleDetail; onDone: 
           <h4 className="font-bold text-green">{t.impEventsHead}</h4>
           <div>
             <label className="block text-sm font-medium mb-1">{t.sensitivity}</label>
-            <select className="field" value={sensitivity} disabled={busy} onChange={e => { setSensitivity(e.target.value as typeof sensitivity); setUnticked(new Set()); }}>
-              {(['strict', 'medium', 'lenient'] as const).map(s => <option key={s} value={s}>{t.sens[s]}</option>)}
-            </select>
+            <Picker label={t.sensitivity} value={sensitivity} onChange={v => { setSensitivity(v); setUnticked(new Set()); }}
+              options={(['strict', 'medium', 'lenient'] as const).map(s => ({ value: s, label: t.sens[s] }))} />
           </div>
           {draft.events.length === 0 ? <p className="text-sm text-muted">{t.importNone}</p> : (
             <ol className="space-y-2 max-h-96 overflow-y-auto">
               {draft.events.map((ev, i) => (
                 <li key={`${ev.date}-${i}`} className="border border-line rounded-xl p-2">
                   <label className="flex items-start gap-3">
-                    <input type="checkbox" className="mt-1 w-5 h-5 accent-[#1f4d3f]" checked={!unticked.has(i)} disabled={busy}
+                    <input type="checkbox" className="check mt-1" checked={!unticked.has(i)} disabled={busy}
                       onChange={() => setUnticked(prev => { const n = new Set(prev); if (n.has(i)) n.delete(i); else n.add(i); return n; })} />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-2 text-xs text-muted">
