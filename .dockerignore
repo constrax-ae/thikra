@@ -1,7 +1,19 @@
-node_modules
+# Anything not needed to BUILD or RUN the server. Patterns without a slash match at the context root only, so nested
+# directories need the ** prefix: a bare `node_modules` let mobile/node_modules through and put 2.1 GB of React Native
+# toolchain inside the server image.
+**/node_modules
 dist
 data
 backups
 .git
+.github
 .env
 *.log
+
+# The mobile app is built and shipped by Expo, never by this image.
+mobile
+
+# Not read at runtime.
+docs
+brand
+bench

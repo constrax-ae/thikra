@@ -1,10 +1,14 @@
-# One server and its data volume. NOT TESTED (no Docker where this was written).
+# One server and its data volume.
 # Put the secrets in a .env file next to this one (never in git): THIKRA_ADMIN_PHONES, THIKRA_SMS_PROVIDER, TWILIO_*, ... (see docs/DEPLOY.md).
 services:
   thikra:
     build: .
     ports: ["8787:8787"]
-    env_file: [.env]
+    env_file:
+      # Optional, so `docker compose up` works for a first look before any secret exists. Without it the app runs in its
+      # development shape: sign-in codes print to the log instead of being sent.
+      - path: .env
+        required: false
     environment:
       NODE_ENV: production
       THIKRA_TRUST_PROXY: "1"   # only when a load balancer / reverse proxy sits in front

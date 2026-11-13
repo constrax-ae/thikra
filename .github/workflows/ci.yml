@@ -32,3 +32,61 @@ jobs:
       - run: pnpm test
       - name: Tests again on the WebAssembly SQLite backend
         run: THIKRA_SQLITE=wasm pnpm test
+
+  # Supply-chain and secret hygiene (LAUNCH-PLAN P0-6). A production dependency with a known HIGH or CRITICAL advisory fails the
+  # build; low and moderate ones are reported by `pnpm audit` but do not block, so the gate stays meaningful. The secret scan reads
+  # the WHOLE history, so a key committed by mistake is caught even after it was deleted in a later commit.
+  security:
+    name: Dependencies and secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # the scan needs the history, not just the tip
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Known vulnerabilities in production dependencies
+        run: pnpm audit --prod --audit-level high
+      # Gitleaks' own Action asks an organisation for a paid licence key; its Docker image does not, and is the same scanner.
+      - name: Secret scan (whole history)
+        run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest detect --source /repo --redact --no-banner
+
+  # The phone app (mobile/, Expo). It imports the shared core/ code, so the root is installed too. The bundle step builds the
+  # iOS JavaScript exactly as a release would, which catches what a type check cannot (an import Metro can't resolve, a syntax
+  # error in a file tsc skips). The audit uses the same bar as the server: HIGH or CRITICAL in what ships fails the build.
+  mobile:
+    name: Phone app
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install the shared root (core/ imports)
+        run: pnpm install --frozen-lockfile
+        working-directory: .
+      - run: npm ci
+      - name: The Xcode 26 compile fix was applied by postinstall
+        run: 'grep -q "UInt(bitPattern: slot)" node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI/Runtime/Values/JavaScriptObject.swift'
+      - run: npm run typecheck
+      - run: npm test
+      - name: Bundle the iOS JavaScript
+        run: npx expo export --platform ios --output-dir /tmp/thekra-ios-bundle
+        env:
+          EXPO_PUBLIC_API_URL: https://ci.invalid
+      - name: Known vulnerabilities in the app's production dependencies
+        run: npm audit --omit=dev --audit-level high
