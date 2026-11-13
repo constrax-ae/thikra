@@ -70,7 +70,7 @@ pnpm tsx scripts/scale-test.ts 100000   # admin screen behaviour with 100k users
 
 Rules the tests enforce (read them before changing things):
 - route list snapshot; every mutating `/api/admin/*` route must write an **audit row** (fixtures in `server/admin.test.ts`, must be self-contained and run alphabetically); every admin list route must have a `LIMIT`; `lib` never imports `routes`; `docs/openapi.json` current; contrast tests for the web colours; language packs valid (see §7).
-- CI: `.github/workflows/ci.yml` runs on Node 20 and 24. Security job (`pnpm audit`, gitleaks) is written in `docs/ci-security-job.yml` but **not enabled** (needs a token with workflow scope).
+- CI: `.github/workflows/ci.yml` runs on Node 20 and 24, plus a `security` job (`pnpm audit --prod --audit-level high` and a gitleaks secret scan over the whole history). The security job is **in the workflow now**; pushing a change to `.github/workflows/` needs a token with the `workflow` scope.
 
 Local dev: with `THIKRA_SMS_PROVIDER=console` (default) the sign-in code is printed in the server log and shown in the UI **outside production only**.
 
