@@ -1,4 +1,4 @@
-import { AUDIO_MIME, MAX_AUDIO, afterMessage, isFile, messagesAfter, messagesChanged, messagesSince, sendText } from '../lib/moments.ts';
+import { AUDIO_ALIAS, AUDIO_MIME, MAX_AUDIO, afterMessage, isFile, messagesAfter, messagesChanged, messagesSince, sendText } from '../lib/moments.ts';
 import { analyze } from '../lib/messages.ts';
 import { announce, circleAccess, insertMessage, isFrozen } from '../lib/helpers.ts';
 import { app } from '../app.ts';
@@ -35,9 +35,13 @@ app.post('/api/circles/:id/voice', async c => {
   if (isFrozen(a.circleId)) return c.json({ error: 'circle_frozen' }, 423);
   const form = await c.req.parseBody().catch(() => null);
   const file = form?.audio;
-  if (!isFile(file) || file.size === 0 || file.size > MAX_AUDIO) return c.json({ error: 'invalid_audio' }, 400);
-  const mime = file.type.split(';')[0].trim().toLowerCase();
-  if (!AUDIO_MIME.has(mime)) return c.json({ error: 'invalid_audio' }, 400);
+  if (!isFile(file) || file.size === 0 || file.size > MAX_AUDIO) {
+    console.warn(`[voice] rejected in circle ${a.circleId}: ${!isFile(file) ? 'no audio file in the form' : file.size === 0 ? 'empty file' : `too large (${file.size} bytes)`}`);
+    return c.json({ error: 'invalid_audio' }, 400);
+  }
+  const raw = file.type.split(';')[0].trim().toLowerCase();
+  const mime = AUDIO_ALIAS[raw] ?? raw;
+  if (!AUDIO_MIME.has(mime)) { console.warn(`[voice] rejected in circle ${a.circleId}: type "${file.type}" is not accepted`); return c.json({ error: 'invalid_audio' }, 400); }
 
   const { hash, size } = await blobs.put(Buffer.from(await file.arrayBuffer()));
   run('INSERT OR IGNORE INTO blobs (hash, size) VALUES (?, ?)', hash, size);

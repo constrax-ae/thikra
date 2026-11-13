@@ -3331,6 +3331,176 @@
     }
    }
   },
+  "/api/circles/{id}/book-link": {
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "POST /api/circles/:id/book-link",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/auth/handoff/{token}": {
+   "get": {
+    "tags": [
+     "auth"
+    ],
+    "summary": "GET /api/auth/handoff/:token",
+    "parameters": [
+     {
+      "name": "token",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/me/avatar": {
+   "post": {
+    "tags": [
+     "me"
+    ],
+    "summary": "POST /api/me/avatar",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "me"
+    ],
+    "summary": "DELETE /api/me/avatar",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/users/{id}/avatar": {
+   "get": {
+    "tags": [
+     "users"
+    ],
+    "summary": "GET /api/users/:id/avatar",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/messages/{mid}/star": {
    "post": {
     "tags": [

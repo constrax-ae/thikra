@@ -16,6 +16,7 @@ export const toMs = (s: string) => Date.parse(`${String(s).replace(' ', 'T')}Z`)
 export async function dropBlobIfUnused(hash: string) {
   if (one('SELECT 1 FROM media WHERE blob_hash = ?', hash)) return;
   if (one("SELECT 1 FROM sealed_messages WHERE blob_hash = ? AND status IN ('sealed','waiting','stopped')", hash)) return; // a letter still waiting to open keeps its file
+  if (one('SELECT 1 FROM users WHERE avatar_hash = ?', hash)) return;   // someone's profile picture (the same photo may also have been sent in a chat)
   run('DELETE FROM blobs WHERE hash = ?', hash);
   await blobs.delete(hash);
 }

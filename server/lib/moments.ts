@@ -139,3 +139,5 @@ export const MAX_AUDIO = 5 * 1024 * 1024;
 export const isFile = (v: unknown): v is File =>
   typeof v === 'object' && v !== null && typeof (v as File).arrayBuffer === 'function' && typeof (v as File).size === 'number';
 export const AUDIO_MIME = new Set(['audio/webm', 'audio/mp4', 'audio/ogg', 'audio/mpeg', 'audio/wav']);
+/** Other names phones give the same formats: iOS labels its .m4a recordings "audio/x-m4a" (AAC in MP4), some Android builds "audio/aac" or "audio/x-wav". They are stored under the accepted name. */
+export const AUDIO_ALIAS: Record<string, string> = { 'audio/x-m4a': 'audio/mp4', 'audio/m4a': 'audio/mp4', 'audio/aac': 'audio/mp4', 'audio/x-wav': 'audio/wav', 'audio/wave': 'audio/wav' };

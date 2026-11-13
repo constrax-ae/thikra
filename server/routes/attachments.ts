@@ -95,12 +95,10 @@ app.get('/api/circles/:id/media', c => {
 });
 app.get('/api/messages/:mid/audio', async c => {
   const m = one(
-    "SELECT m.circle_id, md.blob_hash, md.mime FROM messages m JOIN media md ON md.message_id = m.id WHERE m.id = ? AND md.kind = 'audio'",
+    "SELECT m.circle_id, md.blob_hash, md.mime, md.kind, md.name FROM messages m JOIN media md ON md.message_id = m.id WHERE m.id = ? AND md.kind = 'audio'",
     Number(c.req.param('mid')));
   if (!m || !membership(m.circle_id, c.get('user').id)) return c.json({ error: 'not_found' }, 404);
-  const data = await blobs.get(m.blob_hash);
-  if (!data) return c.json({ error: 'not_found' }, 404);
-  return new Response(new Uint8Array(data), {
-    headers: { 'content-type': m.mime, 'x-content-type-options': 'nosniff', 'cache-control': 'private, max-age=31536000, immutable' },
-  });
+  // Through serveMedia for its byte ranges: the iPhone's player asks for the file in ranges and
+  // will not play a voice note from a server that answers with the whole file only.
+  return serveMedia(c, m);
 });

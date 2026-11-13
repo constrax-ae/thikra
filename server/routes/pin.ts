@@ -1,4 +1,6 @@
+import { dropBlobIfUnused } from '../lib/deletes.ts';
 import { ADMIN_PHONES, app, sha } from '../app.ts';
+import { isEmail, normalizeEmail } from '../../core/email.ts';
 import { PIN_RE, PIN_RESET_MS, hashPin, startSession, dropTicket, ticketUser, tryPin } from '../lib/pin.ts';
 import { checkOtp, issueOtp } from '../lib/auth.ts';
 import { isLang } from '../lib/lang.ts';
@@ -85,16 +87,25 @@ app.patch('/api/me', async c => {
   const lang = isLang(b.lang) ? b.lang : u.lang;
   const receipts = typeof b.read_receipts === 'boolean' ? (b.read_receipts ? 1 : 0) : u.read_receipts;
   const preview = typeof b.push_preview === 'boolean' ? (b.push_preview ? 1 : 0) : u.push_preview;
-  run('UPDATE users SET name = ?, lang = ?, read_receipts = ?, push_preview = ? WHERE id = ?', name, lang, receipts, preview, u.id);
-  return c.json({ ...u, name, lang, read_receipts: receipts, push_preview: preview });
+  // An optional second way to reach someone. Sending an empty string clears it, which is how
+  // a person removes an address they no longer want us to hold.
+  let email = u.email ?? null;
+  if (typeof b.email === 'string') {
+    if (!isEmail(b.email)) return c.json({ error: 'bad_email' }, 400);
+    email = normalizeEmail(b.email) || null;
+  }
+  run('UPDATE users SET name = ?, lang = ?, read_receipts = ?, push_preview = ?, email = ? WHERE id = ?', name, lang, receipts, preview, email, u.id);
+  return c.json({ ...u, name, lang, read_receipts: receipts, push_preview: preview, email });
 });
 // Account deletion wipes the user's data (report §11, "right to be forgotten").
-app.delete('/api/me', c => {
+app.delete('/api/me', async c => {
   const u = c.get('user');
   const owned = one('SELECT COUNT(*) n FROM circles WHERE owner_id = ?', u.id)!.n;
   if (owned > 0) return c.json({ error: 'owns_circles' }, 409);
+  const avatar = one('SELECT avatar_hash FROM users WHERE id = ?', u.id)?.avatar_hash as string | null;
   run('DELETE FROM persons WHERE user_id = ?', u.id);
   run('DELETE FROM users WHERE id = ?', u.id);
+  if (avatar) await dropBlobIfUnused(avatar);   // the profile picture goes with the account
   deleteCookie(c, 'thikra_session', { path: '/' });
   return c.json({ ok: true });
 });

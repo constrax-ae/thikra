@@ -1,4 +1,5 @@
 import { flag } from '../lib/ops.ts';
+import { AUDIO_ALIAS } from '../lib/moments.ts';
 import { DEATH_WAIT_HOURS, MAX_SEALED_MEDIA, SEALED_SELECT, SEAL_AUDIO, SEAL_MAX_MS, SEAL_MIN_MS, evidenceFor, releaseOne, sealedRow, sqlUtc } from '../lib/sealed.ts';
 import { all, one, run } from '../db.ts';
 import { app } from '../app.ts';
@@ -31,7 +32,8 @@ app.post('/api/circles/:id/sealed', async c => {
   if (isFile(file) && file.size > 0) {
     if (file.size > MAX_SEALED_MEDIA) return c.json({ error: 'attachment_too_large' }, 413);
     const buf = Buffer.from(await file.arrayBuffer());
-    const claimed = file.type.split(';')[0].trim().toLowerCase();
+    const typed = file.type.split(';')[0].trim().toLowerCase();
+    const claimed = AUDIO_ALIAS[typed] ?? typed;   // iOS names its .m4a recordings audio/x-m4a
     let mime: string;
     if (SEAL_AUDIO.has(claimed)) { kind = 'voice'; mime = claimed; }
     else {

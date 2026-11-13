@@ -1,3 +1,4 @@
+import { dropBlobIfUnused } from '../lib/deletes.ts';
 import { all, one, run } from '../db.ts';
 import { tx } from '../lib/helpers.ts';
 import { app } from '../app.ts';
@@ -140,7 +141,9 @@ app.post('/api/admin/users/:id/delete', requireAdmin('users.delete'), async c =>
   if (b.confirm !== true) return c.json({ error: 'confirm_required' }, 400);
   if (Number(one('SELECT COUNT(*) n FROM circles WHERE owner_id = ?', t.id)!.n) > 0) return c.json({ error: 'owns_circles' }, 409);
   const families = Number(one('SELECT COUNT(*) n FROM circle_members WHERE user_id = ?', t.id)!.n);
+  const avatar = one('SELECT avatar_hash FROM users WHERE id = ?', t.id)?.avatar_hash as string | null;
   tx(() => { run('DELETE FROM persons WHERE user_id = ?', t.id); run('DELETE FROM users WHERE id = ?', t.id); });
+  if (avatar) await dropBlobIfUnused(avatar);   // the profile picture goes with the account
   audit(c, 'user.delete', { type: 'user', id: t.id! }, { families, reason: text(b.reason, 300) || null });
   return c.json({ ok: true });
 });

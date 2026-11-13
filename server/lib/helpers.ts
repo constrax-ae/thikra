@@ -148,10 +148,18 @@ export function systemMessage(circleId: number, key: SystemNote, args: Record<st
   return id;
 }
 export const requireAuth = async (c: Context<Env>, next: () => Promise<void>) => {
-  const token = getCookie(c, 'thikra_session');
-  const s = token && one('SELECT user_id FROM sessions WHERE token = ? AND expires_at > ?', sha(token), Date.now());
-  const user = s && one('SELECT id, phone, name, lang, is_admin, admin_role, read_receipts, push_preview, (pin_hash IS NOT NULL) AS has_pin FROM users WHERE id = ?', s.user_id);
-  if (!user) return c.json({ error: 'unauthorized' }, 401);
+  // The phone app also sends the session in its own header: iOS's media player and file
+  // downloads replace a hand-set Cookie with the system's cookie store, but leave custom headers alone.
+  // Either may be stale (iOS can swap in an old cookie from its own store), so a valid one of the two wins.
+  const live = (t: string | undefined) => (t ? one('SELECT user_id FROM sessions WHERE token = ? AND expires_at > ?', sha(t), Date.now()) : undefined);
+  const token = getCookie(c, 'thikra_session') || c.req.header('x-thikra-session');
+  const s = live(getCookie(c, 'thikra_session')) ?? live(c.req.header('x-thikra-session'));
+  const user = s && one('SELECT id, phone, name, lang, is_admin, admin_role, read_receipts, push_preview, email, (pin_hash IS NOT NULL) AS has_pin, avatar_at, created_at FROM users WHERE id = ?', s.user_id);
+  if (!user) {
+    // Uploads from the phone app carry the session by hand; say what arrived when they are refused.
+    if (/\/(voice|attachments|sealed|audio|file)$|^\/api\/media\//.test(c.req.path)) console.warn(`[auth] ${c.req.method} ${c.req.path} refused: ${c.req.header('cookie') ? (token ? 'session cookie unknown or expired' : 'a Cookie header without the session') : 'no Cookie header'}`);
+    return c.json({ error: 'unauthorized' }, 401);
+  }
   const suspended = suspension(user.id);   // a suspended person's session stops working at once
   if (suspended) return c.json({ error: 'suspended', until: suspended.until }, 403);
   // Maintenance: the app is read-only (reading, support and dismissing a notice still work; admin works so staff can switch it off).

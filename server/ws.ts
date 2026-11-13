@@ -44,8 +44,11 @@ export function attachGateway(server: Server, deps: GatewayDeps) {
 
   server.on('upgrade', (req, socket, head) => {
     if (new URL(req.url ?? '/', 'http://x').pathname !== '/ws') return; // not ours
-    const token = cookieValue(req.headers.cookie, 'thikra_session');
-    const s = token && one('SELECT user_id FROM sessions WHERE token = ? AND expires_at > ?', sha(token), Date.now());
+    // The phone app also sends the session in its own header (as on every request, see requireAuth): iOS may swap a hand-set
+    // Cookie for an old one from its own store, so a valid one of the two is enough.
+    const live = (t: string | undefined) => (t ? one('SELECT user_id FROM sessions WHERE token = ? AND expires_at > ?', sha(t), Date.now()) : undefined);
+    const header = req.headers['x-thikra-session'];
+    const s = live(cookieValue(req.headers.cookie, 'thikra_session')) ?? live(Array.isArray(header) ? header[0] : header);
     if (!s) { socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); socket.destroy(); return; }
     if (suspension(s.user_id)) { socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); socket.destroy(); return; }   // suspended people get no live connection
     wss.handleUpgrade(req, socket, head, ws => connection(ws, s.user_id));

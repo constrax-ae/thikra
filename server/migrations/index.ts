@@ -18,6 +18,8 @@ import { security } from './0016_security.ts';
 import { scale } from './0017_scale.ts';
 import { broadcastCursor } from './0018_broadcast_cursor.ts';
 import { payments } from './0019_payments.ts';
+import { addUserEmail } from './0020_user_email.ts';
+import { addUserAvatar } from './0021_user_avatar.ts';
 
 /**
  * Numbered, ordered, applied once. Every schema change is a new entry here (a new file, a new number); an applied one is never edited.
@@ -45,6 +47,8 @@ export const MIGRATIONS: Migration[] = [
   { version: 17, name: 'scale', up: scale },
   { version: 18, name: 'broadcast_cursor', up: broadcastCursor },
   { version: 19, name: 'payments', up: payments },
+  { version: 20, name: 'user_email', up: addUserEmail },
+  { version: 21, name: 'user_avatar', up: addUserAvatar },
 ];
 
 /** Bring a database to the latest version. Safe on a fresh file, on a database from before versioning (the baseline is idempotent), and when already current. Returns the versions applied now. */

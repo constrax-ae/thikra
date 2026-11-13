@@ -139,7 +139,7 @@ app.get('/api/circles/:id', c => {
   // reciprocal: you see another member's only if both of you have read receipts on (your own are always yours).
   const mine = a.user.read_receipts === 1;
   const members = all(
-    `SELECT u.id, u.name, cm.role, cm.delivered_seq AS deliveredSeq, cm.read_seq AS readSeq, u.read_receipts AS shares
+    `SELECT u.id, u.name, cm.role, cm.delivered_seq AS deliveredSeq, cm.read_seq AS readSeq, u.read_receipts AS shares, u.avatar_at AS avatarAt
        FROM circle_members cm JOIN users u ON u.id = cm.user_id WHERE cm.circle_id = ? ORDER BY cm.joined_at`, a.circleId)
     .map(({ shares, ...m }) => ({ ...m, readSeq: m.id === a.user.id || (mine && shares === 1) ? m.readSeq : null }));
   // The invite code is shown to managers, or to every member if the circle lets anyone invite. Never when invites are off.
