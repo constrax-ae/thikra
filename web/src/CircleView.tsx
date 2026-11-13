@@ -2,15 +2,18 @@ import { prepare } from './media';
 import { AlbumsSection } from './Album';
 import { Picker } from './Picker';
 import { chime, prefOn } from './prefs';
-import { Fragment, useMemo, useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useMemo, useCallback, useEffect, useRef, useState, Suspense, lazy } from 'react';
 import { api, ApiError, toDate, type Attachment, type GalleryItem, type ArchiveEntry, type Billing, type CircleDetail, type Me, type Message } from './api';
 import { useI18n, intlLocale, speechLocale, systemText } from './i18n';
 import { Dialog } from './Dialog';
 import { live } from './live';
-import { ImportPanel } from './Import';
 import { Icon } from './icons';
 import { QUICK_REACTIONS, ALL_REACTIONS } from '../../core/reactions';
 import { Spinner, GridSkeleton, Skeleton, Toggle } from './States';
+
+// The WhatsApp importer carries a chat parser and a draft builder that most families will never open, so it arrives
+// only when someone actually taps Import.
+const ImportPanel = lazy(() => import('./Import').then(m => ({ default: m.ImportPanel })));
 
 type Tab = 'chat' | 'archive' | 'settings';
 export type Panel = null | 'search' | 'starred' | 'media';
@@ -93,15 +96,33 @@ function prefetchMessages(id: number) {
   return firstPage.get(id)!.page;
 }
 
-export function CircleView({ id, me, initialTab, onBack, onLeft, docked }: { id: number; me: Me; initialTab?: Tab; onBack: () => void; onLeft: () => void; /** Desktop right-hand pane: edge to edge, no page padding. */ docked?: boolean }) {
+/** The agent stores its verdict as `agent:<code>:<score>:<threshold>` so each reader sees it
+ *  in their own language. Anything else is older Arabic prose, shown unchanged. */
+function useAgentReason() {
+  const { t } = useI18n();
+  return (reason: string | null | undefined) => {
+    if (!reason) return '';
+    const m = /^agent:([a-zA-Z]+):(\d+):(\d+)$/.exec(reason);
+    if (!m) return reason;
+    const line = (t.agentReason as Record<string, string>)[m[1]];
+    return line ? line.replace('{score}', m[2]).replace('{threshold}', m[3]) : reason;
+  };
+}
+
+export function CircleView({ id, me, initialTab, onBack, onLeft, onTab, docked }: { id: number; me: Me; initialTab?: Tab; onBack: () => void; onLeft: () => void; /** Put the open tab in the URL, so it can be linked, reloaded and stepped back through. */ onTab?: (t: Tab) => void; docked?: boolean }) {
   const { t } = useI18n();
   const [circle, setCircle] = useState<CircleDetail | null>(() => circleCache.get(id) ?? null);
   const [tab, setTab] = useState<Tab>(initialTab ?? 'chat');
-  // The same chat can be re-targeted while open: by a hash change (initialTab) or by the
-  // chat list's "Bring everyone closer" card, which asks for the invite.
-  useEffect(() => { if (initialTab) setTab(initialTab); }, [initialTab]);
+  // The URL owns which tab is open. This used to ignore an absent initialTab, so stepping
+  // back from .../settings to the bare circle left Settings on screen while the address bar
+  // said otherwise.
+  useEffect(() => { setTab(initialTab ?? 'chat'); }, [initialTab, id]);
+
+  /** Change tab through the router when it is wired, so the address bar keeps up. */
+  const goTab = useCallback((t: Tab) => { if (onTab) onTab(t); else setTab(t); }, [onTab]);
+
   useEffect(() => {
-    const on = (e: Event) => { if ((e as CustomEvent<number>).detail === id) setTab('settings'); };
+    const on = (e: Event) => { if ((e as CustomEvent<number>).detail === id) goTab('settings'); };
     window.addEventListener('thikra:invite', on);
     return () => window.removeEventListener('thikra:invite', on);
   }, [id]);
@@ -110,6 +131,14 @@ export function CircleView({ id, me, initialTab, onBack, onLeft, docked }: { id:
   // header can drive the panel that Chat renders.
   const [panel, setPanel] = useState<Panel>(null);
   useEffect(() => { setPanel(null); }, [tab, id]);
+  // Escape closes the side panel, the way it closes a dialog. Without this the media
+  // panel could only be dismissed by finding its toggle again.
+  useEffect(() => {
+    if (!panel) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPanel(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [panel]);
   const [blocked, setBlocked] = useState(false);
   const [sealedTotal, setSealedTotal] = useState(0);
 
@@ -165,17 +194,17 @@ export function CircleView({ id, me, initialTab, onBack, onLeft, docked }: { id:
       {blocked && <p role="status" className="text-xs text-gold-dark bg-gold/15 rounded-lg p-2 mb-2">{t.blockedNote}</p>}
       {tabs.length > 1 && <div className="chat-tabs flex gap-1 mb-3 border-b border-line">
         {tabs.map(k => (
-          <button key={k} onClick={() => setTab(k)}
+          <button key={k} onClick={() => goTab(k)}
             className={`px-4 py-2.5 -mb-px border-b-2 transition-colors duration-[var(--dur-instant)] ${tab === k ? 'border-green text-green font-bold' : 'border-transparent text-muted hover:text-ink'}`}>
             {t[k]}
           </button>
         ))}
       </div>}
-      {tab === 'chat' && circle.kind === 'circle' && <TodayBanner circleId={circle.id} onOpen={() => setTab('archive')} />}
+      {tab === 'chat' && circle.kind === 'circle' && <TodayBanner circleId={circle.id} onOpen={() => goTab('archive')} />}
       <div className="flex-1 min-h-0">
-        {tab === 'chat' && <Chat circle={circle} me={me} panel={panel} setPanel={setPanel} onOpenArchive={() => setTab('archive')} />}
+        {tab === 'chat' && <Chat circle={circle} me={me} panel={panel} setPanel={setPanel} onOpenArchive={() => goTab('archive')} />}
         {tab === 'archive' && <Archive circle={circle} />}
-        {tab === 'settings' && <Settings circle={circle} me={me} reload={loadCircle} onLeft={onLeft} openArchive={() => setTab('archive')} />}
+        {tab === 'settings' && <Settings circle={circle} me={me} reload={loadCircle} onLeft={onLeft} openArchive={() => goTab('archive')} />}
       </div>
     </div>
   );
@@ -364,6 +393,7 @@ function PeoplePanel({ circle, manager }: { circle: CircleDetail; manager: boole
 
 function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDetail; me: Me; panel: Panel; setPanel: React.Dispatch<React.SetStateAction<Panel>>; onOpenArchive: () => void }) {
   const { t, lang } = useI18n();
+  const agentReason = useAgentReason();
   const [msgs, setMsgs] = useState<Message[]>(() => pageCache.get(circle.id) ?? []);
   // False until the first page has arrived: an empty list before that means "loading",
   // not "this chat has no messages", and must not say so.
@@ -890,7 +920,9 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
           return withDay(
             <div key={m.id} id={`m${m.id}`} className={`group/row flex ${gap} animate-slide-up ${mine ? 'justify-end' : 'justify-start'}`}>
               {mine && actions}
-              <div className={`group/msg relative max-w-[85%] rounded-2xl ${tail} px-3 py-2 ${mine ? 'bubble-mine' : 'bubble-other'} ${m.pending ? 'opacity-60' : ''}
+              {/* A photo or video message has a fixed width, as in WhatsApp Web: across a wide desktop pane, 85% made a
+                  single photo the size of the screen. Text keeps the flexible 85%. */}
+              <div className={`group/msg relative ${m.attachments?.some(x => x.kind === 'image' || x.kind === 'video') ? 'w-[min(85%,22rem)]' : 'max-w-[85%]'} rounded-2xl ${tail} px-3 py-2 ${mine ? 'bubble-mine' : 'bubble-other'} ${m.pending ? 'opacity-60' : ''}
                 transition-opacity duration-[var(--dur-base)] ease-[var(--ease-standard)]`}>
                 {!mine && !grouped && <div className="text-xs font-bold mb-0.5" style={{ color: nameColour(m.userId ?? 0) }}>{m.author}</div>}
                 {m.sealedOn && <div className={`text-[11px] mb-0.5 flex items-center gap-1 ${mine ? 'opacity-80' : 'text-gold-dark'}`}><Icon name="lock" className="w-3 h-3" />{t.sealedOnLabel} {m.sealedOn}</div>}
@@ -913,7 +945,7 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
                     {m.attachments.map(x => x.kind === 'image' ? (
                       <button key={x.id} type="button" onClick={() => setLight(x)} className="block overflow-hidden rounded-lg bg-black/10"
                         style={x.w && x.h ? { aspectRatio: `${x.w} / ${x.h}`, maxHeight: '22rem' } : undefined}>
-                        <img alt={x.name ?? ''} loading="lazy" decoding="async" className="w-full h-full object-cover" {...sharpSrc(x, '(min-width: 1024px) 28rem, 80vw')} />
+                        <img alt={x.name ?? ''} loading="lazy" decoding="async" className="w-full h-full object-cover" {...sharpSrc(x, '(min-width: 1024px) 22rem, 80vw')} />
                       </button>
                     ) : x.kind === 'video' ? (
                       <video key={x.id} controls preload={prefOn('saver') ? 'none' : 'metadata'} playsInline className="w-full rounded-lg max-h-96 bg-black" poster={x.thumb ? `/api/media/${x.thumb}` : undefined} src={`/api/media/${x.id}`} />
@@ -996,7 +1028,7 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
                 )}
                 {open === m.id && m.reason && (
                   <p className="mt-1 text-xs rounded-lg bg-black/5 text-ink p-2">
-                    {t.score}: {m.score} · {m.category ? t.cat[m.category] : '—'}<br />{m.reason}
+                    {t.score}: {m.score} · {m.category ? t.cat[m.category] : '—'}<br />{agentReason(m.reason)}
                   </p>
                 )}
               </div>
@@ -1064,7 +1096,7 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
             {fwdTargets.map(c => (
               <li key={c.id}>
                 <label className="flex items-center gap-2 p-2 rounded-lg hover:bg-green-soft">
-                  <input type="checkbox" checked={fwdPick.includes(c.id)} disabled={!fwdPick.includes(c.id) && fwdPick.length >= 5}
+                  <input type="checkbox" className="check" checked={fwdPick.includes(c.id)} disabled={!fwdPick.includes(c.id) && fwdPick.length >= 5}
                     onChange={e => setFwdPick(p => e.target.checked ? [...p, c.id] : p.filter(x => x !== c.id))} />
                   {c.name}
                 </label>
@@ -1166,7 +1198,7 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
               <button className="btn btn-ghost" onClick={() => { const m = del; setDel(null); archiveManually(m); }}>{t.archiveThis}</button>
             )}
             {!del.deleted && del.reason && (del.archiveStatus === 'skipped' || del.archiveStatus === 'rejected') && (
-              <p className="text-xs rounded-lg bg-black/5 text-ink p-2">{del.archiveStatus === 'rejected' ? t.rejectedBadge : t.skippedBadge} · {t.score}: {del.score}{del.category ? ` · ${t.cat[del.category]}` : ''}<br />{del.reason}</p>
+              <p className="text-xs rounded-lg bg-black/5 text-ink p-2">{del.archiveStatus === 'rejected' ? t.rejectedBadge : t.skippedBadge} · {t.score}: {del.score}{del.category ? ` · ${t.cat[del.category]}` : ''}<br />{agentReason(del.reason)}</p>
             )}
             {!del.deleted && <button className="btn btn-ghost" onClick={() => toggleStar(del)}>{starredIds.has(del.id) ? t.unstar : t.star}</button>}
             {canEdit(del) && !del.sealedOn && <button className="btn btn-ghost" onClick={() => { setEditing(del); setReplyTo(null); setText(del.body); setDel(null); }}>{t.edit}</button>}
@@ -1230,7 +1262,7 @@ function Archive({ circle }: { circle: CircleDetail }) {
         )}
       </div>
 
-      {importing && <div className="animate-slide-up"><ImportPanel circle={circle} onDone={load} /></div>}
+      {importing && <div className="animate-slide-up"><Suspense fallback={null}><ImportPanel circle={circle} onDone={load} /></Suspense></div>}
 
       {/* The family story: the year picker and the reader belong together, so they share a card. */}
       <section className="rounded-2xl bg-card border border-line elevated-1 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center gap-4">
@@ -1355,8 +1387,22 @@ function ChatSkeleton({ docked }: { docked?: boolean }) {
 
 // ---- settings ---------------------------------------------------------------
 
-const fmtBytes = (n: number) =>
-  n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : n >= 1024 ** 2 ? `${(n / 1024 ** 2).toFixed(1)} MB` : `${Math.ceil(n / 1024)} KB`;
+// Sizes a person reads, not a machine's. A plan of 2048 GB is two terabytes, and "5.0 GB" of free space reads like a
+// measurement when it should read like an offer: whole numbers lose the pointless ".0".
+const fmtBytes = (n: number) => {
+  const unit = (v: number, u: string) => `${v % 1 === 0 ? v : v.toFixed(1)} ${u}`;
+  if (n >= 1024 ** 4) return unit(n / 1024 ** 4, 'TB');
+  if (n >= 1024 ** 3) { const gb = n / 1024 ** 3; return gb >= 1024 ? unit(gb / 1024, 'TB') : unit(gb, 'GB'); }
+  if (n >= 1024 ** 2) return unit(n / 1024 ** 2, 'MB');
+  return `${Math.ceil(n / 1024)} KB`;
+};
+/** Storage only means something once it is a number of photos. About 4 MB each, the size a modern phone makes. */
+const roughPhotos = (bytes: number) => {
+  const n = Math.round(bytes / (4 * 1024 ** 2));
+  if (n >= 1_000_000) return `${Math.round(n / 100_000) / 10}M`;
+  if (n >= 1000) return `${Math.round(n / 1000)},000`;
+  return String(n);
+};
 
 type PickedContact = { name: string; tel: string };
 /** Invite people from the phone's contacts (where the browser has the Contact Picker: Chrome on Android) or by sharing the invite link. The contacts stay on the phone: nothing is uploaded, the chosen ones only open a message with the link. */
@@ -1480,14 +1526,11 @@ function StoryCard({ circle, reload }: { circle: CircleDetail; reload: () => voi
 }
 
 function StorageCard({ circle, bill, manager, onChanged }: { circle: CircleDetail; bill: Billing; manager: boolean; onChanged: () => void }) {
+  // Choosing a plan is a page of its own now (web/src/Plans.tsx); this card reports the family's space and
+  // links to it. What is left here is the usage picture and managing an existing subscription.
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
-  const [plans, setPlans] = useState<Array<{ id: string; quotaBytes: number; priceMonthly: number; priceYearly: number; currency: string }>>([]);
-  const [live, setLive] = useState<'test' | 'live' | null>(null);
-  const [interval, setIntervalKind] = useState<'month' | 'year'>('month');
   const [paidMsg, setPaidMsg] = useState(false);
   const [err, setErr] = useState('');
-  useEffect(() => { if (open) api<{ plans: typeof plans; paymentsLive: boolean; paymentsMode: 'test' | 'live' | null }>('/plans').then(r => { setPlans(r.plans); setLive(r.paymentsLive ? r.paymentsMode : null); }).catch(() => {}); }, [open]);
   // back from Stripe's page: the plan is switched on by Stripe's message to the server a moment later, so look again shortly
   useEffect(() => {
     if (!new URLSearchParams(location.search).get('paid')) return;
@@ -1495,11 +1538,6 @@ function StorageCard({ circle, bill, manager, onChanged }: { circle: CircleDetai
     const timers = [2500, 6000, 12000].map(ms => setTimeout(onChanged, ms));
     return () => timers.forEach(clearTimeout);
   }, []);
-  async function pay(plan: string) {
-    setErr('');
-    try { const r = await api<{ url: string }>(`/circles/${circle.id}/checkout`, { body: { plan, interval } }); window.location.href = r.url; }
-    catch (e) { setErr(t.errors[e instanceof ApiError ? e.code : 'generic'] ?? t.errors.generic); }
-  }
   async function manage() {
     setErr('');
     try { const r = await api<{ url: string }>(`/circles/${circle.id}/billing-portal`, { body: {} }); window.location.href = r.url; }
@@ -1507,12 +1545,6 @@ function StorageCard({ circle, bill, manager, onChanged }: { circle: CircleDetai
   }
   const pct = Math.min(100, (bill.archivedBytes / bill.quotaBytes) * 100);
   const full = bill.archivedBytes >= bill.quotaBytes, almost = !full && pct >= 80;
-  async function ask(plan: string) {
-    setErr('');
-    try { await api(`/circles/${circle.id}/storage-request`, { body: { plan } }); onChanged(); setOpen(false); }
-    catch (e) { setErr(t.errors[e instanceof ApiError ? e.code : 'generic'] ?? t.errors.generic); }
-  }
-  const price = (p: { priceMonthly: number; priceYearly: number; currency: string }) => p.priceMonthly === 0 ? t.storFreeLine : `${p.priceMonthly} ${p.currency} ${t.storPerMonth} · ${p.priceYearly} ${p.currency} ${t.storPerYear}`;
   return (
     <section className="rounded-2xl bg-card border border-line elevated-1 p-4 sm:p-5 space-y-2">
       <div className="flex items-center gap-3">
@@ -1534,28 +1566,11 @@ function StorageCard({ circle, bill, manager, onChanged }: { circle: CircleDetai
       {paidMsg && <p role="status" className="text-sm text-green bg-green-soft rounded-lg p-2">{t.payPaidThanks}</p>}
       {bill.periodEnd && bill.plan !== 'free' && <p className="text-xs text-muted">{t.payRenews}: <bdi dir="ltr">{bill.periodEnd.slice(0, 10)}</bdi></p>}
       {manager && bill.stripe && <button className="btn btn-ghost w-full" onClick={manage}>{t.payManage}</button>}
-      {err && !open && <p role="alert" className="text-sm text-danger">{err}</p>}
-      {manager ? <button className="btn w-full" onClick={() => setOpen(true)}>{t.storGetMore}</button> : <p className="text-xs text-muted">{t.storManagersOnly}</p>}
-      {open && (
-        <Dialog onClose={() => setOpen(false)} label={t.storGetMore}>
-          <h2 className="text-lg font-bold">{t.storPlansTitle}</h2>
-          <ul className="mt-3 space-y-2">
-            {plans.map(p => (
-              <li key={p.id} className={`border rounded-xl p-3 ${p.id === bill.plan ? 'border-green bg-green-soft' : 'border-line'}`}>
-                <div className="flex items-center gap-2"><b className="flex-1">{t.plans[p.id]} · <bdi dir="ltr">{fmtBytes(p.quotaBytes)}</bdi></b>{p.id === bill.plan && <span className="text-xs text-green">{t.storCurrent}</span>}</div>
-                <p className="text-sm text-muted">{price(p)}</p>
-                {live && p.id !== 'free' && p.id !== bill.plan && p.quotaBytes > bill.quotaBytes && <button className="btn w-full mt-2" onClick={() => pay(p.id)}>{t.payPay} · {interval === 'year' ? `${p.priceYearly} ${p.currency}` : `${p.priceMonthly} ${p.currency}`}</button>}
-                {!live && p.id !== 'free' && p.id !== bill.plan && p.quotaBytes > bill.quotaBytes && bill.request?.status !== 'open' && <button className="btn btn-ghost w-full mt-2" onClick={() => ask(p.id)}>{t.storRequest}</button>}
-              </li>
-            ))}
-          </ul>
-          {live && <div className="flex gap-2 mt-3" role="group">{(['month', 'year'] as const).map(k => <button key={k} aria-pressed={interval === k} onClick={() => setIntervalKind(k)} className={`flex-1 rounded-full border px-3 py-1 text-sm ${interval === k ? 'bg-green text-white border-green' : 'border-line text-muted'}`}>{k === 'month' ? t.payMonthly : t.payYearly}</button>)}</div>}
-          {live === 'test' && <p className="text-xs text-gold-dark bg-gold/15 rounded-lg p-2 mt-2">{t.payTest}</p>}
-          {!live && <p className="text-xs text-muted mt-3">{t.storNoPayments}</p>}
-          {err && <p role="alert" className="text-sm text-danger mt-2">{err}</p>}
-          <button className="btn btn-ghost w-full mt-3" onClick={() => setOpen(false)}>{t.cancel}</button>
-        </Dialog>
-      )}
+      {err && <p role="alert" className="text-sm text-danger">{err}</p>}
+      {manager
+        ? <a className="btn w-full" href={`#/plans/${circle.id}`}>{t.storGetMore}</a>
+        : <p className="text-xs text-muted">{t.storManagersOnly}</p>}
+
     </section>
   );
 }

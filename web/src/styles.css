@@ -167,6 +167,30 @@ button, input, textarea, select { font: inherit; }
 .btn:disabled { opacity: .5; cursor: default; }
 .btn-ghost { background: transparent; color: var(--color-green); border: 1px solid var(--color-line); }
 .field { width: 100%; border: 1px solid var(--color-line); background: var(--color-card); color: var(--color-ink); border-radius: 0.75rem; padding: 0.65rem 0.85rem; outline: none; }
+
+/* A field the person has typed something wrong into. Marking it only with aria-invalid
+   tells a screen reader and nobody else: on screen the box looked untouched while the
+   save button sat disabled with no stated reason. */
+.field[aria-invalid='true'] {
+  border-color: var(--color-danger);
+  background-image: none;
+}
+.field[aria-invalid='true']:focus-visible {
+  outline-color: var(--color-danger);
+}
+
+/* A checkbox in a list of things to pick. A toggle would be wrong here — these are a
+   selection, not a setting — so the native control stays, semantics and keyboard and all,
+   and only takes the brand colour. accent-color was being written as a hard-coded hex in
+   two files, which would not have followed a theme change. */
+.check {
+  width: 1.15rem;
+  height: 1.15rem;
+  accent-color: var(--color-brand);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.check:disabled { cursor: not-allowed; opacity: 0.5; }
 .field:focus { border-color: var(--color-green); }
 .card { background: var(--color-card); border: 1px solid var(--color-line); border-radius: 1rem; }
 
@@ -498,7 +522,9 @@ html[data-motion="off"] .reveal { opacity: 1; transform: none; }
 
 /* Reduced animations (You > Notifications / Appearance): no transitions or motion at all. */
 html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="off"] *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
-@media (prefers-reduced-motion: reduce) { html[data-motion="on"] * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
+/* Reduced motion must also drop the DELAY, not only the duration: a staggered list keeps its entrance delays
+   otherwise, and with fill-mode `both` that leaves the later items invisible for as long as the stagger lasts. */
+@media (prefers-reduced-motion: reduce) { html[data-motion="on"] * { animation-duration: 0.01ms !important; animation-delay: 0ms !important; transition-duration: 0.01ms !important; transition-delay: 0ms !important; } }
 
 /* An input that sits inside a box which already shows focus (the chat search): the box
    glows, so the input's own ring would draw a second outline inside it. */
