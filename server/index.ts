@@ -1,3 +1,4 @@
+import './env.ts';   // FIRST: turns blank settings into absent ones before anything reads them (see the file)
 import { type Context } from 'hono';
 import { SYNC_PAGE, messagesChanged, messagesSince, sendText } from './lib/moments.ts';
 import { app } from './app.ts';
@@ -51,6 +52,8 @@ import './routes/safety.ts';
 import './routes/pins.ts';
 import './routes/export.ts';
 import './routes/book.ts';
+import './routes/handoff.ts';
+import './routes/avatar.ts';
 import './routes/stars.ts';
 import './routes/receipts.ts';
 import './routes/deletes.ts';
