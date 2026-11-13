@@ -29,11 +29,14 @@ app.use('*', async (c, next) => {
   if (c.req.path.startsWith('/api/')) { observe('http_ms', ms); count(`http_${Math.floor(c.res.status / 100)}xx`); }
   log('http', { id, method: c.req.method, route: c.req.routePath, status: c.res.status, ms: Math.round(ms * 10) / 10 });
 });
-// Security headers on every response (THREAT-MODEL: "رؤوس الأمان"). The CSP allows only this site's own scripts and the Google
-// font host, so an injected script cannot run or phone home. Attachment responses set their own stricter CSP and keep it.
+// Security headers on every response (THREAT-MODEL: "رؤوس الأمان"). The CSP allows only this site's own files, so an injected
+// script cannot run or phone home. Attachment responses set their own stricter CSP and keep it.
+// Tajawal is self-hosted (web/public/fonts), so NOTHING is fetched from Google any more: the policy names no outside host at all.
+// It used to allow only fonts.gstatic.com for font-src, which silently blocked every one of the app's own font files and left
+// this Arabic-first app rendering in whatever the device happened to have.
 const FRAME_ANCESTORS = process.env.THIKRA_FRAME_ANCESTORS?.trim() || "'none'";
 const CSP = [
-  "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com", "font-src https://fonts.gstatic.com",
+  "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "font-src 'self'",
   "img-src 'self' data: blob:", "media-src 'self' blob:", "connect-src 'self' ws: wss:", "object-src 'none'", "base-uri 'self'", "form-action 'self'",
   `frame-ancestors ${FRAME_ANCESTORS}`,
 ].join('; ');

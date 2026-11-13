@@ -36,6 +36,10 @@ test('every response carries the security headers; attachments keep their own st
   assert.match(csp, /script-src 'self'/, 'no inline or third-party scripts');
   assert.doesNotMatch(csp, /script-src[^;]*unsafe/, 'scripts may not be unsafe-inline/eval');
   assert.match(csp, /object-src 'none'/);
+  // The app's own fonts must be allowed. The policy once named only Google's font host while the fonts were served from
+  // /fonts here, so every one of them was blocked and the Arabic typeface never loaded in production.
+  assert.match(csp, /font-src 'self'/, "the app's self-hosted fonts must be allowed to load");
+  assert.doesNotMatch(csp, /gstatic|googleapis/, 'nothing is fetched from Google any more: no outside host belongs in the policy');
   assert.match(csp, /frame-ancestors 'none'/);
   assert.equal(res.headers.get('x-frame-options'), 'DENY');
   assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
