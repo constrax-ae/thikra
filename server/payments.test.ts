@@ -13,7 +13,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 const { app } = await import('./index.ts');
 const { one, run } = await import('./db.ts');
-const { setStripeFetch, signForTest, formEncode } = await import('./lib/stripe.ts');
+const { setStripeFetch, signForTest, formEncode, priceId } = await import('./lib/stripe.ts');
 const { subscription } = await import('./billing.ts');
 
 const call = async (cookie: string | undefined, path: string, body?: unknown, method?: string) => {
@@ -160,4 +160,83 @@ test('the owner sees the ledger and can refund (ending the plan now) or stop ren
   assert.equal((await call(alice.cookie, `/api/circles/${fam}/billing-portal`, {})).status, 200, 'a family that paid has a customer');
   run('UPDATE subscriptions SET stripe_customer = NULL WHERE circle_id = ?', fam);
   assert.equal((await call(alice.cookie, `/api/circles/${fam}/billing-portal`, {})).status, 404, 'no customer, no portal');
+});
+
+test('a Stripe Price the owner created is used instead of an inline amount, and only when it looks like one', async () => {
+  // Inline prices cannot be reused, edited, reported on per plan, or carry tax and coupon behaviour. A real setup has a
+  // Product per plan and a Price per interval. Until all four exist the inline path must keep working, plan by plan.
+  const url = (plan: string, interval: string) => `/api/circles/${fam}/checkout`;
+  const body = (plan: string, interval: string) => ({ plan, interval });
+
+  process.env.STRIPE_PRICE_FAMILY_MONTH = 'price_1FamilyMonth';
+  seen.length = 0;
+  assert.equal((await call(alice.cookie, url('family', 'month'), body('family', 'month'))).status, 200);
+  const q = new URLSearchParams(seen[0].body);
+  assert.equal(q.get('line_items[0][price]'), 'price_1FamilyMonth');
+  assert.equal(q.get('line_items[0][price_data][unit_amount]'), null, 'the Price replaces the inline amount entirely');
+  assert.equal(q.get('metadata[plan]'), 'family', 'the webhook still learns the plan from metadata, not from the Price');
+  assert.equal(q.get('subscription_data[metadata][interval]'), 'month');
+
+  // the interval that has no Price yet still falls back, so one configured plan does not break the others
+  seen.length = 0;
+  assert.equal((await call(alice.cookie, url('family', 'year'), body('family', 'year'))).status, 200);
+  assert.equal(new URLSearchParams(seen[0].body).get('line_items[0][price_data][unit_amount]'), '1999');
+  seen.length = 0;
+  assert.equal((await call(alice.cookie, url('heritage', 'month'), body('heritage', 'month'))).status, 200);
+  assert.equal(new URLSearchParams(seen[0].body).get('line_items[0][price_data][unit_amount]'), '999');
+
+  // something that is not a Price id must not be sent to Stripe as one: it falls back like an unset one
+  process.env.STRIPE_PRICE_FAMILY_MONTH = 'prod_1Family';   // the Product's id instead of the Price's: the classic mix-up
+  seen.length = 0;
+  assert.equal((await call(alice.cookie, url('family', 'month'), body('family', 'month'))).status, 200);
+  const bad = new URLSearchParams(seen[0].body);
+  assert.equal(bad.get('line_items[0][price]'), null, 'a Product id is not a Price id');
+  assert.equal(bad.get('line_items[0][price_data][unit_amount]'), '199');
+  delete process.env.STRIPE_PRICE_FAMILY_MONTH;
+});
+
+test('only a real Price id counts as one', () => {
+  // Checked here rather than over the network: the checkout route is rate-limited to ten tries an hour, and this is where the rule lives.
+  process.env.STRIPE_PRICE_FAMILY_MONTH = 'price_1QabcDEF2ghiJKL';
+  assert.equal(priceId('family', 'month'), 'price_1QabcDEF2ghiJKL');
+  assert.equal(priceId('FAMILY', 'month'), 'price_1QabcDEF2ghiJKL', 'the plan name is matched however it is cased');
+  assert.equal(priceId('family', 'year'), null, 'a different interval is a different Price');
+  assert.equal(priceId('heritage', 'month'), null, 'a different plan is a different Price');
+  process.env.STRIPE_PRICE_FAMILY_MONTH = '  price_1Spaced  ';
+  assert.equal(priceId('family', 'month'), 'price_1Spaced', 'spaces around a pasted id are forgiven');
+  for (const bad of ['', '   ', 'prod_1Family', 'sk_live_oops', 'price_1Family Month', 'Family', 'price_', 'PRICE_1Abc']) {
+    process.env.STRIPE_PRICE_FAMILY_MONTH = bad;
+    assert.equal(priceId('family', 'month'), null, `"${bad}" must never be sent to Stripe as a Price`);
+  }
+  delete process.env.STRIPE_PRICE_FAMILY_MONTH;
+});
+
+test('the owner\'s screen shows every plan\'s Price and whether Stripe agrees with our own table', async () => {
+  // A Price that charges a different amount from the one the app displays would be found on a card statement, not in the app.
+  process.env.STRIPE_PRICE_FAMILY_MONTH = 'price_ok';
+  process.env.STRIPE_PRICE_FAMILY_YEAR = 'price_wrong';
+  process.env.STRIPE_PRICE_HERITAGE_MONTH = 'price_gone';
+  delete process.env.STRIPE_PRICE_HERITAGE_YEAR;
+  setStripeFetch((async (u: any) => {
+    const id = String(u).split('/prices/')[1];
+    if (id === 'price_ok') return new Response(JSON.stringify({ unit_amount: 199, currency: 'usd', recurring: { interval: 'month' }, active: true }), { status: 200 });
+    if (id === 'price_wrong') return new Response(JSON.stringify({ unit_amount: 2999, currency: 'usd', recurring: { interval: 'year' }, active: true }), { status: 200 });
+    return new Response(JSON.stringify({ error: { code: 'resource_missing' } }), { status: 404 });
+  }) as typeof fetch);
+
+  const r = (await call(owner.cookie, '/api/admin/payments')).json;
+  const byKey = Object.fromEntries(r.prices.map((p: any) => [`${p.plan}_${p.interval}`, p]));
+  assert.equal(r.prices.length, 4, 'two paid plans, two intervals: the free plan is never charged for');
+  assert.equal(byKey.family_month.agrees, true);
+  assert.equal(byKey.family_month.stripe.cents, 199);
+  assert.equal(byKey.family_year.agrees, false, '29.99 in Stripe against 19.99 in our table is a mismatch, and it is shown');
+  assert.equal(byKey.family_year.stripe.cents, 2999);
+  assert.equal(byKey.family_year.ourCents, 1999);
+  assert.equal(byKey.heritage_month.stripe, null, 'a Price Stripe does not have reads as unknown, it does not break the screen');
+  assert.equal(byKey.heritage_month.agrees, null);
+  assert.equal(byKey.heritage_year.priceId, null, 'not configured yet: no claim either way');
+  assert.equal(byKey.heritage_year.agrees, undefined);
+
+  for (const k of ['STRIPE_PRICE_FAMILY_MONTH', 'STRIPE_PRICE_FAMILY_YEAR', 'STRIPE_PRICE_HERITAGE_MONTH']) delete process.env[k];
+  setStripeFetch((async (url: any, init: any) => { seen.push({ url: String(url), method: init?.method, auth: init?.headers?.authorization ?? null, body: String(init?.body ?? ''), idem: init?.headers?.['idempotency-key'] ?? null }); return new Response(JSON.stringify(reply.body), { status: reply.status }); }) as typeof fetch);
 });

@@ -3,7 +3,7 @@ import { app } from '../app.ts';
 import { audit, requireAdmin } from '../lib/admin.ts';
 import { circleAccess, isManager, limited } from '../lib/helpers.ts';
 import { PLAN_IDS, plans, setSubscription, subscription, type PlanId } from '../billing.ts';
-import { StripeError, cancelAtPeriodEnd, cancelNow, createCheckout, createPortal, paymentsOn, refundPayment, stripeMode, verifyWebhook, webhookSecret } from '../lib/stripe.ts';
+import { StripeError, cancelAtPeriodEnd, cancelNow, createCheckout, createPortal, paymentsOn, priceId, refundPayment, retrievePrice, stripeMode, verifyWebhook, webhookSecret } from '../lib/stripe.ts';
 
 // Payments through Stripe (see docs/PAYMENTS.md). The browser never sends an amount: the plan and interval come in, the price comes from OUR plan table.
 // The webhook is the only thing that changes a family's plan after a payment, and it only believes a request signed with the endpoint secret.
@@ -31,7 +31,8 @@ app.post('/api/circles/:id/checkout', async c => {
   const name = one('SELECT name FROM circles WHERE id = ?', a.circleId)?.name ?? 'Thekra';
   const base = baseUrl(c);
   try {
-    const s = await createCheckout({ circleId: a.circleId, plan: b.plan, interval, amountCents, currency: def.currency, productName: `Thekra ${b.plan}: ${String(name).slice(0, 60)}`, successUrl: `${base}/?paid=1#/circle/${a.circleId}/settings`, cancelUrl: `${base}/#/circle/${a.circleId}/settings` });
+    // The Price the owner created in Stripe for this plan and interval, when there is one; otherwise an inline price from our own table.
+    const s = await createCheckout({ circleId: a.circleId, plan: b.plan, interval, amountCents, currency: def.currency, productName: `Thekra ${b.plan}: ${String(name).slice(0, 60)}`, priceId: priceId(b.plan, interval), successUrl: `${base}/?paid=1#/circle/${a.circleId}/settings`, cancelUrl: `${base}/#/circle/${a.circleId}/settings` });
     return c.json({ url: s.url });
   } catch (e) { return stripeFail(c, e); }
 });
@@ -104,8 +105,37 @@ app.post('/api/stripe/webhook', async c => {
 });
 
 // ---- the owner's side -------------------------------------------------------------------------------------------------------------------
-app.get('/api/admin/payments', requireAdmin('plans'), c => c.json({
+/**
+ * Each plan and interval: the Price configured for it, and what Stripe itself says that Price costs. A Price that disagrees
+ * with our plan table would charge one amount while the app displays another, so it is shown rather than left to be discovered
+ * on someone's card statement. Stripe is asked only when a key and a Price exist, and a failure degrades to "unknown".
+ */
+async function priceReport() {
+  const defs = plans();
+  const out: Array<Record<string, unknown>> = [];
+  for (const plan of PLAN_IDS) {
+    if (plan === 'free') continue;
+    for (const interval of ['month', 'year'] as const) {
+      const id = priceId(plan, interval);
+      const ours = Math.round((interval === 'year' ? defs[plan].priceYearly : defs[plan].priceMonthly) * 100);
+      const row: Record<string, unknown> = { plan, interval, priceId: id, ourCents: ours, currency: defs[plan].currency };
+      if (id && paymentsOn()) {
+        try {
+          const p: any = await retrievePrice(id);
+          const cents = Number(p?.unit_amount);
+          row.stripe = { cents, currency: String(p?.currency ?? '').toUpperCase(), interval: p?.recurring?.interval ?? null, active: p?.active !== false };
+          row.agrees = cents === ours && String(p?.currency ?? '').toUpperCase() === defs[plan].currency.toUpperCase() && p?.recurring?.interval === interval && p?.active !== false;
+        } catch { row.stripe = null; row.agrees = null; }
+      }
+      out.push(row);
+    }
+  }
+  return out;
+}
+
+app.get('/api/admin/payments', requireAdmin('plans'), async c => c.json({
   mode: stripeMode(), keyConfigured: paymentsOn(), webhookConfigured: !!webhookSecret(),
+  prices: await priceReport(),
   paid30: all("SELECT currency, SUM(amount_cents) cents, COUNT(*) n FROM payments WHERE status = 'paid' AND created_at >= datetime('now', '-30 days') GROUP BY currency").map(r => ({ currency: r.currency, amount: Number(r.cents) / 100, count: Number(r.n) })),
   failed7: Number(one("SELECT COUNT(*) n FROM payments WHERE status = 'failed' AND created_at >= datetime('now', '-7 days')")!.n),
   payments: all(`SELECT p.id, p.status, p.amount_cents AS cents, p.currency, p.plan, p.period_end AS periodEnd, p.created_at AS createdAt, p.circle_id AS circleId, c.name AS family, p.stripe_payment_intent IS NOT NULL AS refundable

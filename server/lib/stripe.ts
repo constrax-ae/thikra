@@ -33,11 +33,33 @@ async function call(method: 'POST' | 'GET' | 'DELETE', path: string, params: Rec
   return body;
 }
 
-/** A subscription checkout: Stripe's page, the amount from OUR plan table (never from the browser), the family and plan in metadata so the webhook knows whom it is for. */
-export const createCheckout = (p: { circleId: number; plan: string; interval: 'month' | 'year'; amountCents: number; currency: string; productName: string; successUrl: string; cancelUrl: string }) =>
+// ---- the Prices the owner created in Stripe ------------------------------------------------------------------------------
+// A real Stripe setup has a Product per plan and a Price per interval, created once in the dashboard and named here:
+//
+//   STRIPE_PRICE_FAMILY_MONTH=price_…    STRIPE_PRICE_FAMILY_YEAR=price_…
+//   STRIPE_PRICE_HERITAGE_MONTH=price_…  STRIPE_PRICE_HERITAGE_YEAR=price_…
+//
+// Why it matters: a Price is a lasting object, so Stripe's own dashboard reports revenue per plan, coupons and tax behaviour
+// attach to it, and a customer's invoice names the plan instead of a bare amount. An inline price (price_data) can do none of
+// that and cannot be reused or edited afterwards. Any plan without a Price configured still falls back to an inline one, so
+// the app keeps working while the four Prices are being created.
+export function priceId(plan: string, interval: 'month' | 'year'): string | null {
+  const v = (process.env[`STRIPE_PRICE_${plan.toUpperCase()}_${interval.toUpperCase()}`] ?? '').trim();
+  return /^price_[A-Za-z0-9_]+$/.test(v) ? v : null;
+}
+/** What Stripe itself says a Price is, so a mismatch with our own plan table can be SEEN instead of charged silently. */
+export const retrievePrice = (id: string) => call('GET', `/prices/${encodeURIComponent(id)}`);
+
+/**
+ * A subscription checkout. The amount NEVER comes from the browser: either Stripe's own Price (when the owner created one) or
+ * our plan table. The family and plan ride in metadata, so the webhook knows whom a payment belongs to either way.
+ */
+export const createCheckout = (p: { circleId: number; plan: string; interval: 'month' | 'year'; amountCents: number; currency: string; productName: string; successUrl: string; cancelUrl: string; priceId?: string | null }) =>
   call('POST', '/checkout/sessions', {
     mode: 'subscription', success_url: p.successUrl, cancel_url: p.cancelUrl, client_reference_id: String(p.circleId),
-    line_items: { 0: { quantity: 1, price_data: { currency: p.currency.toLowerCase(), unit_amount: p.amountCents, recurring: { interval: p.interval }, product_data: { name: p.productName } } } },
+    line_items: { 0: p.priceId
+      ? { quantity: 1, price: p.priceId }
+      : { quantity: 1, price_data: { currency: p.currency.toLowerCase(), unit_amount: p.amountCents, recurring: { interval: p.interval }, product_data: { name: p.productName } } } },
     metadata: { circle_id: p.circleId, plan: p.plan, interval: p.interval },
     subscription_data: { metadata: { circle_id: p.circleId, plan: p.plan, interval: p.interval } },
   }, `checkout-${p.circleId}-${p.plan}-${p.interval}-${Math.floor(Date.now() / 60_000)}`);
