@@ -5,11 +5,12 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "app.thekra.family",
-      "buildNumber": "1"
+      "buildNumber": "1",
+      "userInterfaceStyle": "automatic"
     },
     "android": {
       "adaptiveIcon": {
@@ -20,7 +21,8 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "app.thekra.family",
-      "versionCode": 1
+      "versionCode": 1,
+      "userInterfaceStyle": "automatic"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -33,14 +35,30 @@
           "contactsPermission": "Thekra opens your contact picker only to send an invite link. Your contacts are never uploaded."
         }
       ],
-      "expo-audio"
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Thekra uses the microphone only to record a voice message you choose to send to your family."
+        }
+      ],
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-light.png",
+          "imageWidth": 300,
+          "resizeMode": "contain",
+          "backgroundColor": "#f5f1e8",
+          "dark": {
+            "image": "./assets/splash-dark.png",
+            "backgroundColor": "#0d1411"
+          }
+        }
+      ],
+      "expo-status-bar",
+      "expo-sharing"
     ],
     "scheme": "thekra",
-    "backgroundColor": "#f4f1e8",
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#f4f1e8"
-    }
+    "backgroundColor": "#f5f1e8"
   }
 }

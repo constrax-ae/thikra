@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 import { API_URL } from './config';
-import { sessionCookie } from './api';
+import { sessionHeaders } from './api';
 
 // The live gateway (server/ws.ts), the same one the web app uses. It only makes things FASTER: every screen still works over plain HTTP,
 // so while the socket is down (no signal, server asleep) the app keeps polling, and when it is back screens catch up. Nothing depends on it.
@@ -21,9 +21,10 @@ function connect() {
   if (!wanted || ws) return;
   let sock: WebSocket;
   try {
-    // A phone's WebSocket may carry headers: the session cookie authenticates it like any request. A browser sends its own cookies.
-    const cookie = sessionCookie();
-    sock = Platform.OS !== 'web' && cookie ? new (WebSocket as any)(url(), undefined, { headers: { cookie } }) : new WebSocket(url());
+    // A phone's WebSocket may carry headers: the session authenticates it like any request, as the cookie and in x-thikra-session
+    // (iOS may replace a hand-set cookie; the server takes whichever is valid). A browser sends its own cookies.
+    const headers = sessionHeaders();
+    sock = Platform.OS !== 'web' && headers ? new (WebSocket as any)(url(), undefined, { headers }) : new WebSocket(url());
   } catch { return schedule(); }
   ws = sock;
   sock.onopen = () => { retry = 0; emit({ t: 'open' }); };

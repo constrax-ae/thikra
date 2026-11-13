@@ -4,6 +4,16 @@
     "appVersionSource": "remote"
   },
   "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "simulator": true
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "http://localhost:8787"
+      }
+    },
     "preview": {
       "distribution": "internal",
       "android": {

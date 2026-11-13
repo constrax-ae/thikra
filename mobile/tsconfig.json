@@ -1,6 +1,13 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true
-  }
+    "strict": true,
+    // core/ is the code the web and the phone share — the archive agent, the reaction list,
+    // the excerpt and email helpers. It is authored as .ts and imported with the extension,
+    // the way the server does, so there is one copy of these rules and not two.
+    "allowImportingTsExtensions": true,
+    "noEmit": true
+  },
+  // Node tests of phone code (run with node --test) are not part of the app.
+  "exclude": ["node_modules", "src/**/*.test.ts"]
 }
