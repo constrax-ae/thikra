@@ -1,9 +1,11 @@
-import { Icon } from './icons';
+import { Icon, type IconName } from './icons';
 import { useEffect, useState } from 'react';
 import { api, ApiError, type Me } from './api';
 import { useI18n } from './i18n';
 import { Dialog } from './Dialog';
-import { TableSkeleton, Badge } from './States';
+import { TableSkeleton, Badge, Toggle } from './States';
+import { Picker } from './Picker';
+import { excerpt } from '../../core/excerpt.ts';
 
 interface Stats { users: number; circles: number; activeCircles: number; messages: number; archived: number; byCategory: Array<{ category: string; n: number }> }
 interface Lat { n: number; p50: number | null; p95: number | null }
@@ -97,6 +99,15 @@ function Overview({ role }: { role: Role }) {
 type Role = 'owner' | 'moderator' | 'support';
 type Tab = 'security' | 'ops' | 'announce' | 'families' | 'agent' | 'support' | 'storage' | 'overview' | 'analytics' | 'reports' | 'users' | 'audit' | 'staff' | 'settings';
 /** What each role sees (the server enforces it; this only hides what would be refused). */
+/** One icon per section. The menu was plain text while every other list in the app is
+ *  icon-led, which made the admin area look like a different product. */
+const TAB_ICON: Record<Tab, IconName> = {
+  agent: 'sparkle', overview: 'memory', support: 'envelope', storage: 'storage',
+  analytics: 'star', reports: 'alert', users: 'you', families: 'group',
+  announce: 'bell', ops: 'tools', security: 'shield', audit: 'book',
+  staff: 'key', settings: 'palette',
+};
+
 const TABS: Record<Role, Tab[]> = { owner: ['agent', 'overview', 'support', 'storage', 'analytics', 'reports', 'users', 'families', 'announce', 'ops', 'security', 'audit', 'staff', 'settings'], moderator: ['agent', 'overview', 'support', 'analytics', 'reports', 'users', 'families', 'security', 'audit', 'staff'], support: ['overview', 'support', 'users', 'security', 'staff'] };
 
 interface Report { id: number; reason: string; note: string | null; snapshot: string | null; status: 'open' | 'escalated' | 'resolved'; action: string | null; resolution: string | null; createdAt: string; reporter: string | null; reported: string | null; resolvedBy: string | null; messageId: number | null; reportedUserId: number | null }
@@ -139,9 +150,8 @@ function ReportsTab() {
               {r.resolution && <p className="text-sm text-muted flex items-start gap-1.5"><Icon name="pen" className="w-4 h-4 shrink-0 mt-0.5" />{r.resolution}</p>}
               {r.status !== 'resolved' && (open === r.id ? (
                 <div className="space-y-2 pt-1">
-                  <select className="field" value={action} onChange={e => setAction(e.target.value)} aria-label={t.admAction}>
-                    {['dismiss', 'warn', 'remove_message', 'suspend_user', 'ban', 'escalate'].map(a => <option key={a} value={a}>{t.admActions[a]}</option>)}
-                  </select>
+                  <Picker label={t.admAction} value={action} onChange={setAction}
+                    options={['dismiss', 'warn', 'remove_message', 'suspend_user', 'ban', 'escalate'].map(a => ({ value: a, label: t.admActions[a] }))} />
                   {action === 'suspend_user' && <input className="field" inputMode="numeric" placeholder={t.admDays} value={days} onChange={e => setDays(e.target.value.replace(/\D/g, ''))} />}
                   <input className="field" placeholder={t.admNote} maxLength={500} value={note} onChange={e => setNote(e.target.value)} />
                   {action === 'ban' && <p className="text-xs text-danger">{t.admBanWarn}</p>}
@@ -243,9 +253,8 @@ function UsersTab({ role, onFamily }: { role: Role; onFamily: (id: number) => vo
               {role === 'owner' && <button className={`btn btn-ghost w-full text-danger ${arm.armed === 'del' ? 'btn-armed' : ''}`} onClick={() => arm.tap('del', () => act('delete', { confirm: true, reason }))}>{arm.armed === 'del' ? t.ppTapAgain : t.ppDelete}</button>}
               {role === 'owner' && (
                 <div className="flex items-center gap-2"><span className="text-sm flex-1">{t.admRole}</span>
-                  <select className="field !w-auto" value={sel.role ?? ''} onChange={e => act('role', { role: e.target.value || null })}>
-                    <option value="">{t.admNoRole}</option>{(['owner', 'moderator', 'support'] as Role[]).map(r => <option key={r} value={r}>{t.admRoles[r]}</option>)}
-                  </select></div>
+                  <Picker className="!w-auto" align="end" label={t.admRole} value={sel.role ?? ''} onChange={v => act('role', { role: v || null })}
+                    options={[{ value: '', label: t.admNoRole }, ...(['owner', 'moderator', 'support'] as Role[]).map(r => ({ value: r, label: t.admRoles[r] }))]} /></div>
               )}
             </div>
           )}
@@ -296,7 +305,7 @@ function FamiliesTab({ role, focus }: { role: Role; focus: number | null }) {
     try { await api(`/admin/families/${sel.id}/${path}`, { body }); await open(sel.id); search(); setMsg(t.admDone); } catch (e) { setMsg(fail(e)); }
   }
   async function saveBonus() { if (!sel) return; setMsg(''); try { await api(`/admin/circles/${sel.id}/plan`, { body: { plan: planSel, until: planSel === 'free' ? null : until || null, bonusGB: Number(bonus) || 0, reason: planReason } }); await open(sel.id); setMsg(t.admDone); } catch (e) { setMsg(fail(e)); } }
-  const bar = (f: Family) => <div className="h-1.5 rounded-full bg-line overflow-hidden"><div className={`h-full ${f.percent >= 95 ? 'bg-danger' : f.percent >= 80 ? 'bg-gold' : 'bg-green'}`} style={{ width: `${Math.min(100, f.percent)}%` }} /></div>;
+  const bar = (f: Family) => <div className="h-2 rounded-full bg-paper border border-line overflow-hidden"><div className={`h-full rounded-full transition-[width] duration-[var(--dur-slow)] ${f.percent >= 95 ? 'bg-danger' : f.percent >= 80 ? 'bg-gold' : 'bg-green'}`} style={{ width: `${Math.max(2, Math.min(100, f.percent))}%` }} /></div>;
   return (
     <section className="space-y-3">
       <form className="flex gap-2" onSubmit={e => { e.preventDefault(); setSel(null); search(); }}>
@@ -321,7 +330,7 @@ function FamiliesTab({ role, focus }: { role: Role; focus: number | null }) {
               {role === 'owner' && (
                 <div className="card p-2 space-y-2">
                   <div className="text-xs text-muted">{t.capStatus[sel.status] ?? sel.status}{sel.periodEnd ? ` · ${sel.periodEnd}` : ''}</div>
-                  <div className="flex gap-2 items-center"><span className="text-sm w-20">{t.capPlan}</span><select className="field !py-1" value={planSel} onChange={e => setPlanSel(e.target.value)}>{['free', 'family', 'heritage'].map(p => <option key={p} value={p}>{t.plans[p]}</option>)}</select></div>
+                  <div className="flex gap-2 items-center"><span className="text-sm w-20">{t.capPlan}</span><Picker className="flex-1" label={t.capPlan} value={planSel} onChange={setPlanSel} options={['free', 'family', 'heritage'].map(p => ({ value: p, label: t.plans[p] }))} /></div>
                   {planSel !== 'free' && <div className="flex gap-2 items-center"><span className="text-sm w-20">{t.capUntil}</span><input className="field !py-1" type="date" dir="ltr" value={until} onChange={e => setUntil(e.target.value)} /></div>}
                   <div className="flex gap-2 items-center"><span className="text-sm flex-1">{t.ppBonus}</span><input className="field !w-24 !py-1" inputMode="decimal" value={bonus} onChange={e => setBonus(e.target.value.replace(/[^\d.]/g, ''))} /></div>
                   <input className="field !py-1" placeholder={t.capReasonPh} value={planReason} onChange={e => setPlanReason(e.target.value)} />
@@ -352,11 +361,21 @@ function FamiliesTab({ role, focus }: { role: Role; focus: number | null }) {
         </div>
       ) : list === null ? <TableSkeleton rows={6} cols={3} /> : list.length === 0 ? <p className="text-sm text-muted">{t.ppNoFamilies}</p> : (
         <>
-          <ul className="card divide-y divide-line">
+          <ul className="card p-1.5 space-y-0.5">
             {list.map(f => (
-              <li key={f.id}><button className="w-full p-3 text-start space-y-1.5" onClick={() => { setMsg(''); open(f.id); }}>
-                <span className="flex items-center gap-2"><b className="flex-1 truncate">{f.name}</b>{f.frozen && <Badge tone="warn">{t.ppFrozen}</Badge>}{f.openReports > 0 && <Badge tone="bad">{f.openReports}</Badge>}</span>
-                <span className="block text-xs text-muted">{f.members} {t.ppMembers} · {f.usedGB}/{f.quotaGB} GB · {f.plan}{f.lastActivity ? ` · ${f.lastActivity.slice(0, 10)}` : ''}</span>
+              <li key={f.id}><button className="row-interactive w-full p-3.5 text-start space-y-2 rounded-xl" onClick={() => { setMsg(''); open(f.id); }}>
+                <span className="flex items-center gap-2">
+                  <b className="flex-1 truncate text-ink">{f.name}</b>
+                  {/* The plan was buried in the grey meta line, which is the one thing this
+                      list is scanned for. */}
+                  <Badge tone={f.plan === 'free' ? 'neutral' : 'good'}>{t.plans[f.plan] ?? f.plan}</Badge>
+                  {f.frozen && <Badge tone="warn">{t.ppFrozen}</Badge>}
+                  {f.openReports > 0 && <Badge tone="bad">{f.openReports}</Badge>}
+                </span>
+                <span className="flex items-center justify-between gap-3 text-xs text-muted">
+                  <span className="truncate">{f.members} {t.ppMembers}{f.lastActivity ? ` · ${f.lastActivity.slice(0, 10)}` : ''}</span>
+                  <span className="shrink-0 tabular-nums" dir="ltr">{f.usedGB}/{f.quotaGB} GB</span>
+                </span>
                 {bar(f)}
               </button></li>
             ))}
@@ -523,7 +542,8 @@ function CapacityCard({ onFamily }: { onFamily: (id: number) => void }) {
 }
 
 interface PayRow { id: number; status: string; cents: number; currency: string; plan: string | null; periodEnd: string | null; createdAt: string; family: string | null; refundable: boolean }
-interface PayInfo { mode: 'test' | 'live'; keyConfigured: boolean; webhookConfigured: boolean; paid30: Array<{ currency: string; amount: number; count: number }>; failed7: number; payments: PayRow[] }
+interface PriceRow { plan: string; interval: 'month' | 'year'; priceId: string | null; ourCents: number; currency: string; stripe?: { cents: number; currency: string; interval: string | null; active: boolean } | null; agrees?: boolean | null }
+interface PayInfo { mode: 'test' | 'live'; keyConfigured: boolean; webhookConfigured: boolean; prices: PriceRow[]; paid30: Array<{ currency: string; amount: number; count: number }>; failed7: number; payments: PayRow[] }
 function PaymentsCard() {
   const { t } = useI18n();
   const fail = useFail();
@@ -539,6 +559,20 @@ function PaymentsCard() {
       <h3 className="font-bold text-green">{t.pmTitle}</h3>
       <p className="text-sm">{t.pmMode}: <b>{p.mode === 'test' ? t.pmTest : t.pmLive}</b> · {t.pmKey}: {ok(p.keyConfigured)} · {t.pmWebhook}: {ok(p.webhookConfigured)}</p>
       <p className="text-sm">{t.pmPaid30}: <b dir="ltr">{p.paid30.length ? p.paid30.map(x => `${x.amount} ${x.currency.toUpperCase()} (${x.count})`).join(' · ') : '0'}</b> · {t.pmFailed7}: <b>{p.failed7}</b></p>
+      {/* The four Prices. A Price whose amount differs from our own plan table would charge one number while the app shows
+          another, so a mismatch is named here rather than discovered on someone's card statement. */}
+      <ul className="space-y-1">{p.prices.map(r => {
+        const label = `${r.plan} · ${r.interval === 'year' ? t.pmYearly : t.pmMonthly}`;
+        const state = !r.priceId ? { text: t.pmInline, cls: 'text-muted' }
+          : r.agrees === true ? { text: t.pmPriceOk, cls: 'text-green' }
+          : r.agrees === false ? { text: `${t.pmPriceDiffers}: ${(r.stripe!.cents / 100).toFixed(2)} ${r.stripe!.currency} ≠ ${(r.ourCents / 100).toFixed(2)} ${r.currency}`, cls: 'text-danger' }
+          : { text: t.pmPriceUnknown, cls: 'text-danger' };
+        return <li key={`${r.plan}${r.interval}`} className="text-sm flex items-center gap-2">
+          <span className="flex-1 min-w-0 truncate" dir="ltr">{label}</span>
+          <span className={`text-xs ${state.cls}`}>{state.text}</span>
+          {r.priceId && <code className="text-[10px] text-muted" dir="ltr">{r.priceId}</code>}
+        </li>;
+      })}</ul>
       {p.payments.length === 0 ? <p className="text-sm text-muted">{t.pmNone}</p> : (
         <ul className="space-y-1.5">{p.payments.slice(0, 10).map(r => (
           <li key={r.id} className="text-sm flex items-center gap-2"><span className="flex-1 min-w-0 truncate"><b>{r.family ?? '—'}</b> <span className="text-xs text-muted" dir="ltr">· {(r.cents / 100).toFixed(2)} {r.currency.toUpperCase()} · {t.pmStatus[r.status] ?? r.status} · {r.createdAt.slice(0, 10)}</span></span>
@@ -609,7 +643,7 @@ function StorageTab({ onFamily }: { onFamily: (id: number) => void }) {
                 <div className="h-2 rounded-full bg-line overflow-hidden"><div className={`h-full ${pct >= 100 ? 'bg-danger' : pct >= 80 ? 'bg-gold' : 'bg-brand'}`} style={{ width: `${pct}%` }} /></div>
                 <div className="text-xs text-muted" dir="ltr">{gb(c.usedBytes)} / {gb(c.quotaBytes)} ({pct}%){c.bonusBytes ? ` · +${gb(c.bonusBytes)}` : ''}</div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <select className="field !w-auto !py-1" value={c.plan} onChange={e => run(() => api(`/admin/circles/${c.id}/plan`, { body: { plan: e.target.value } }))}>{['free', 'family', 'heritage'].map(p => <option key={p} value={p}>{t.plans[p]}</option>)}</select>
+                  <Picker className="!w-auto" align="end" label={t.capPlan} value={c.plan} onChange={v => run(() => api(`/admin/circles/${c.id}/plan`, { body: { plan: v } }))} options={['free', 'family', 'heritage'].map(p => ({ value: p, label: t.plans[p] }))} />
                   <input className="field !w-24 !py-1" dir="ltr" inputMode="decimal" placeholder={t.admBonusGb} value={bonus[c.id] ?? ''} onChange={e => setBonus(p => ({ ...p, [c.id]: e.target.value }))} />
                   <button className="btn btn-ghost !py-1" disabled={bonus[c.id] === undefined || bonus[c.id] === ''} onClick={() => run(() => api(`/admin/circles/${c.id}/plan`, { body: { bonusGB: Number(bonus[c.id]) } }))}>{t.admSet}</button>
                 </div>
@@ -661,9 +695,10 @@ function SupportTab() {
           <ul className="mt-2 space-y-1 max-h-60 overflow-y-auto">{open.messages.map((m, i) => <li key={i} className={`text-sm rounded-lg p-2 ${m.fromStaff ? 'bg-green-soft' : 'bg-card border border-line'}`}><span className="text-xs text-muted block">{m.fromStaff ? t.supportTeam : open.person}</span><span className="whitespace-pre-wrap break-words">{m.body}</span></li>)}</ul>
           {open.status !== 'closed' && (
             <div className="mt-3 space-y-2">
-              <select className="field" value="" onChange={e => { const tp = templates.find(x => x.id === e.target.value); if (tp) setText(open.lang === 'en' ? tp.en : tp.ar); }}>
-                <option value="">{t.admTemplate}</option>{templates.map(x => <option key={x.id} value={x.id}>{(lang !== 'ar' ? x.en : x.ar).slice(0, 60)}…</option>)}
-              </select>
+              {/* Picking a template fills the box; the control itself holds no value, so it
+                  stays on its placeholder. The preview is cut on a word, not at character 60. */}
+              <Picker label={t.admTemplate} value="" onChange={id => { const tp = templates.find(x => x.id === id); if (tp) setText(open.lang === 'en' ? tp.en : tp.ar); }}
+                options={[{ value: '', label: t.admTemplate }, ...templates.map(x => ({ value: x.id, label: excerpt(lang !== 'ar' ? x.en : x.ar, 60) }))]} />
               <textarea className="field min-h-24" value={text} onChange={e => setText(e.target.value)} placeholder={t.supportReply} />
               <div className="flex gap-2"><button className="btn flex-1" onClick={send} disabled={!text.trim()}>{t.supportSend}</button><button className="btn btn-ghost" onClick={close}>{t.admClose}</button></div>
             </div>
@@ -766,10 +801,12 @@ function AudiencePicker({ value, onChange }: { value: Aud; onChange: (a: Aud) =>
     <div className="space-y-2">
       <b className="text-sm">{t.anAudience}</b>
       <div className="grid grid-cols-2 gap-2">
-        <select className="field !py-1" aria-label={t.anLang} value={value.lang ?? ''} onChange={e => onChange({ ...value, lang: e.target.value || undefined })}><option value="">{t.anLang}: {t.anAny}</option><option value="ar">العربية</option><option value="en">English</option></select>
-        <select className="field !py-1" aria-label={t.anPlan} value={value.plan ?? ''} onChange={e => onChange({ ...value, plan: e.target.value || undefined })}><option value="">{t.anPlan}: {t.anAny}</option>{['free', 'family', 'heritage'].map(p => <option key={p} value={p}>{t.plans[p]}</option>)}</select>
+        <Picker className="!w-auto" label={t.anLang} value={value.lang ?? ''} onChange={v => onChange({ ...value, lang: v || undefined })}
+          options={[{ value: '', label: `${t.anLang}: ${t.anAny}` }, { value: 'ar', label: 'العربية' }, { value: 'en', label: 'English' }]} />
+        <Picker className="!w-auto" label={t.anPlan} value={value.plan ?? ''} onChange={v => onChange({ ...value, plan: v || undefined })}
+          options={[{ value: '', label: `${t.anPlan}: ${t.anAny}` }, ...['free', 'family', 'heritage'].map(p => ({ value: p, label: t.plans[p] }))]} />
         <input className="field !py-1" dir="ltr" inputMode="numeric" placeholder={t.anCountry} value={value.country ?? ''} onChange={e => onChange({ ...value, country: e.target.value.replace(/\D/g, '').slice(0, 4) || undefined })} />
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!value.managersOnly} onChange={e => onChange({ ...value, managersOnly: e.target.checked || undefined })} />{t.anManagers}</label>
+        <Toggle checked={!!value.managersOnly} onChange={v => onChange({ ...value, managersOnly: v || undefined })} label={t.anManagers} />
       </div>
       <p className="text-xs text-muted">{t.anReach}: {n ?? '—'} {t.anPeople}</p>
     </div>
@@ -815,7 +852,7 @@ function AnnounceTab() {
         <h3 className="font-bold text-green">{t.anNewNotice}</h3>
         <div className="grid grid-cols-2 gap-2"><input className="field !py-1" placeholder={t.anTitleAr} value={notice.titleAr} onChange={e => setNotice({ ...notice, titleAr: e.target.value })} /><input className="field !py-1" dir="ltr" placeholder={t.anTitleEn} value={notice.titleEn} onChange={e => setNotice({ ...notice, titleEn: e.target.value })} />
           <textarea className="field !py-1" rows={3} placeholder={t.anBodyAr} value={notice.bodyAr} onChange={e => setNotice({ ...notice, bodyAr: e.target.value })} /><textarea className="field !py-1" dir="ltr" rows={3} placeholder={t.anBodyEn} value={notice.bodyEn} onChange={e => setNotice({ ...notice, bodyEn: e.target.value })} /></div>
-        <div className="flex gap-2"><select className="field !py-1" value={notice.level} onChange={e => setNotice({ ...notice, level: e.target.value })}>{Object.entries(t.anLevels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select><input className="field !w-24 !py-1" inputMode="numeric" aria-label={t.anDays} placeholder={t.anDays} value={notice.days} onChange={e => setNotice({ ...notice, days: e.target.value.replace(/\D/g, '') })} /></div>
+        <div className="flex gap-2"><Picker className="!w-auto" label={t.anNewNotice} value={notice.level} onChange={v => setNotice({ ...notice, level: v })} options={Object.entries(t.anLevels).map(([k, v]) => ({ value: k, label: v as string }))} /><input className="field !w-24 !py-1" inputMode="numeric" aria-label={t.anDays} placeholder={t.anDays} value={notice.days} onChange={e => setNotice({ ...notice, days: e.target.value.replace(/\D/g, '') })} /></div>
         <AudiencePicker value={nAud} onChange={setNAud} />
         <button className="btn w-full" onClick={() => run(async () => { await api('/admin/announcements', { body: { ...notice, days: Number(notice.days) || 7, audience: nAud } }); setNotice({ titleAr: '', titleEn: '', bodyAr: '', bodyEn: '', level: 'info', days: '7' }); })}>{t.anPublish}</button>
         <ul className="space-y-1.5">{anns.length === 0 ? <li className="text-sm text-muted">{t.anNone}</li> : anns.slice(0, 8).map(a => (
@@ -847,7 +884,7 @@ function AnnounceTab() {
 interface OpsInfo {
   jobs: Array<{ name: string; lastOkAt: string | null; lastRunAt: string | null; lastError: string | null; overdue: boolean; failing: boolean }>;
   errors: Array<{ id: number; at: string; kind: string; route: string | null; message: string }>; errors1h: number; errors24h: number;
-  providers: { sms: { provider: string; real: boolean; usedToday: number; dailyCap: number }; push: { devices: number }; ai: { configured: boolean }; offsite: { kind: string; ready: boolean; lastSnapshotAt: string | null; lastError: string | null }; payments: { connected: boolean; mode?: 'test' | 'live' | null; webhook?: boolean }; database: { megabytes: number | null } };
+  providers: { sms: { provider: string; real: boolean; usedToday: number; dailyCap: number }; push: { devices: number }; ai: { configured: boolean; provider: string | null; model: string | null }; offsite: { kind: string; ready: boolean; lastSnapshotAt: string | null; lastError: string | null }; payments: { connected: boolean; mode?: 'test' | 'live' | null; webhook?: boolean }; database: { megabytes: number | null } };
   costs: { hostingUSD: number; smsEachUSD: number; budgetUSD: number; smsMonth: number; smsCost: number; storageCost: number; aiCalls: number; aiCost: number; total: number; percentOfBudget: number | null };
   appConfig: { minVersion: string; latestVersion: string; messageAr: string; messageEn: string };
   restore: { pending: { id: string; at: string } | null; last: { at: string | null; id: string | null; error: string | null } };
@@ -896,7 +933,8 @@ function OpsTab() {
         <ul className="space-y-1.5">
           {row(t.opSms, p.sms.real, p.sms.real ? `${p.sms.provider} · ${p.sms.usedToday}/${p.sms.dailyCap}` : t.opSmsFake)}
           {row(t.opPush, true, String(p.push.devices))}
-          {row(t.opAi, p.ai.configured, p.ai.configured ? t.opOn : t.opAiOff)}
+          {/* Which provider and model, not just "on": the owner pays per provider and the rates differ, so the name is the useful fact. */}
+          {row(t.opAi, p.ai.configured, p.ai.configured ? `${p.ai.provider} · ${p.ai.model}` : t.opAiOff)}
           {row(t.opOffsite, p.offsite.ready && !p.offsite.lastError, p.offsite.lastError ?? (p.offsite.lastSnapshotAt ? p.offsite.lastSnapshotAt.slice(0, 16) : p.offsite.kind))}
           {row(t.opPayments, p.payments.connected && !!p.payments.webhook, p.payments.connected ? `${p.payments.mode === 'live' ? t.pmLive : t.pmTest}${p.payments.webhook ? '' : ' · ' + t.pmWebhook + ': ' + t.pmMissing}` : t.opPaymentsOff)}
           {row(t.opDb, true, p.database.megabytes === null ? '—' : `${p.database.megabytes} MB`)}
@@ -1068,14 +1106,29 @@ export function Admin() {
   const tabs = TABS[role];
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-3"><h2 className="flex-1 text-lg font-bold text-green">{t.adminTitle} · {t.admRoles[role]}</h2><LangSwitch /></div>
+      <header className="flex flex-wrap items-center gap-3 pb-1">
+        <div className="min-w-0 flex-1">
+          <p className="text-caption font-bold uppercase tracking-[0.16em] text-green">{t.adminTitle}</p>
+          <h2 className="text-2xl font-bold !text-ink tracking-tight">{t.admTabs[tab]}</h2>
+        </div>
+        <Badge tone="good">{t.admRoles[role]}</Badge>
+        <LangSwitch />
+      </header>
       {/* The menu is a vertical list at the side (the start side: right in Arabic, left in English). On a phone it folds into one button above the page. */}
-      <div className="md:flex md:items-start md:gap-6">
+      <div className="md:flex md:items-start md:gap-7">
         <button className="md:hidden w-full flex items-center justify-between card px-4 py-2.5 text-sm font-bold" aria-expanded={menuOpen} onClick={() => setMenuOpen(o => !o)}>
-          <span>{t.admTabs[tab]}</span><span aria-hidden>{menuOpen ? '▴' : '▾'}</span>
+          <span className="flex items-center gap-2"><Icon name={TAB_ICON[tab]} className="w-4.5 h-4.5" />{t.admTabs[tab]}</span><span aria-hidden>{menuOpen ? '▴' : '▾'}</span>
         </button>
-        <nav role="tablist" aria-orientation="vertical" className={`${menuOpen ? 'flex' : 'hidden'} md:flex flex-col gap-0.5 mt-2 md:mt-0 md:w-52 md:shrink-0 md:sticky md:top-3 card p-1.5`}>
-          {tabs.map(k => <button key={k} role="tab" aria-selected={tab === k} onClick={() => { setTab(k); setMenuOpen(false); }} className={`text-start px-3 py-2 rounded-xl text-sm flex items-center gap-2 ${tab === k ? 'bg-green-soft text-green font-bold' : 'text-muted hover:bg-green-soft/50'}`}><span className="flex-1">{t.admTabs[k]}</span>{k === 'support' && openCases > 0 && <span className="text-[11px] min-w-5 text-center rounded-full bg-gold/25 text-gold-dark px-1.5">{openCases}</span>}</button>)}
+        <nav role="tablist" aria-orientation="vertical" className={`${menuOpen ? 'flex' : 'hidden'} md:flex flex-col gap-1 mt-2 md:mt-0 md:w-60 md:shrink-0 md:sticky md:top-3 card p-2`}>
+          {tabs.map(k => (
+            <button key={k} role="tab" aria-selected={tab === k} onClick={() => { setTab(k); setMenuOpen(false); }}
+              className={`text-start px-3 py-2.5 rounded-xl text-sm flex items-center gap-2.5 transition-colors duration-[var(--dur-instant)]
+                ${tab === k ? 'bg-green-soft text-green font-bold' : 'text-muted hover:bg-green-soft/50 hover:text-green'}`}>
+              <Icon name={TAB_ICON[k]} className="w-4.5 h-4.5 shrink-0" />
+              <span className="flex-1 truncate">{t.admTabs[k]}</span>
+              {k === 'support' && openCases > 0 && <span className="text-[11px] font-bold min-w-5 text-center rounded-full bg-gold/25 text-gold-dark px-1.5">{openCases}</span>}
+            </button>
+          ))}
         </nav>
         <div className="flex-1 min-w-0 mt-3 md:mt-0 space-y-4">
       {tab === 'agent' && <AgentTab />}

@@ -119,3 +119,46 @@ test('two approvals at the same moment run the action once', async () => {
   assert.deepEqual([a.status, b.status].sort(), [200, 409]);
   assert.equal(Number(one("SELECT COUNT(*) n FROM admin_audit WHERE action = 'support.close'")!.n), before + 1, 'the real endpoint ran once');
 });
+
+test('the same agent works through OpenAI without a line of its own code changing', async () => {
+  // The point of server/lib/ai.ts: the agent reasons, calls tools and proposes identically whichever provider is paid for.
+  // Here the fake speaks OpenAI's dialect — function calls with JSON-string arguments, a system message, tool messages back.
+  delete process.env.ANTHROPIC_API_KEY;
+  process.env.THIKRA_AI_PROVIDER = 'openai';
+  process.env.OPENAI_API_KEY = 'sk-test';
+  const sent: any[] = [];
+  let turn = 0;
+  setOpsFetch((async (url: any, init: any) => {
+    sent.push({ url: String(url), body: JSON.parse(init.body) });
+    turn++;
+    const reply = turn === 1
+      ? { choices: [{ message: { content: null, tool_calls: [
+          { id: 'c1', type: 'function', function: { name: 'open_reports', arguments: '{}' } },
+          { id: 'c2', type: 'function', function: { name: 'propose_action', arguments: JSON.stringify({ kind: 'set_flag', args: { name: 'signups_open', on: false }, reason: 'a spike of sign-ups' }) } },
+        ] } }], usage: { prompt_tokens: 120, completion_tokens: 40 } }
+      : { choices: [{ message: { content: 'Sign-ups look like a spike; I proposed closing them for your approval.' } }], usage: { prompt_tokens: 200, completion_tokens: 25 } };
+    return new Response(JSON.stringify(reply), { status: 200 });
+  }) as typeof fetch);
+
+  const out = (await call(owner.cookie, '/api/admin/agent/ask', { question: 'what is going on with sign-ups?', lang: 'en' })).json;
+  assert.equal(out.source, 'model');
+  assert.match(out.answer, /proposed/);
+  assert.equal(out.proposals.length, 1, 'the proposal came through the OpenAI dialect intact');
+  assert.equal(one('SELECT source FROM agent_proposals WHERE id = ?', out.proposals[0])!.source, 'model');
+  assert.ok(out.tools.includes('open_reports') && out.tools.includes('propose_action'));
+
+  assert.match(sent[0].url, /chat\/completions$/);
+  assert.deepEqual(sent[0].body.messages[0], { role: 'system', content: SYSTEM_PROMPT }, 'the same prompt, as OpenAI takes it');
+  assert.ok(sent[0].body.tools.some((t: any) => t.function?.name === 'propose_action'));
+  // the second turn carries the tool answers as OpenAI tool messages, still labelled as people's words
+  const second = sent[1].body.messages;
+  assert.equal(second.filter((m: any) => m.role === 'tool').length, 2);
+  assert.match(JSON.stringify(second), /untrusted_text_inside/);
+  assert.ok(!JSON.stringify(sent).includes('971500880004'), 'the model never receives a full phone number, whichever provider it is');
+
+  // the model is down: the rules answer, exactly as with the other provider
+  setOpsFetch((async () => new Response('{}', { status: 503 })) as typeof fetch);
+  assert.equal((await call(owner.cookie, '/api/admin/agent/ask', { question: 'ملخص اليوم' })).json.source, 'rules');
+
+  delete process.env.THIKRA_AI_PROVIDER; delete process.env.OPENAI_API_KEY;
+});

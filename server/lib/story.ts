@@ -1,12 +1,15 @@
 import { createHash } from 'node:crypto';
+import { excerpt } from '../../core/excerpt.ts';
 import { all, one, run, type Row } from '../db.ts';
 import { archiveFor } from './archive.ts';
 import { eventMedia } from './albums.ts';
 import { flag } from './ops.ts';
+import { callModel, configured as aiConfigured, jsonFromText } from './ai.ts';
 
 // The family's year as a STORY: chapters, each narrated. Two writers behind one interface:
 //  - the built-in rules: free, instant, always available, and honest about what they are (a warm draft built from the family's own words);
-//  - a language model, when the owner configures one (THIKRA_AI_PROVIDER=anthropic + ANTHROPIC_API_KEY): real literary prose, written ONLY from the documented facts.
+//  - a language model, when the owner configures one (Anthropic or OpenAI, see server/lib/ai.ts): real literary prose, written
+//    ONLY from the documented facts.
 // A model's chapter is stored (cost is paid once, and a person may edit it); the rules' chapters are made again on every read.
 
 export type Lang = 'ar' | 'en';
@@ -72,8 +75,8 @@ const OPEN: Record<Lang, Record<string, string[]>> = {
   },
 };
 const GAP: Record<Lang, Array<[number, string]>> = {
-  ar: [[7, 'ولم يمضِ أسبوعٌ حتى تتابعت الأحداث.'], [21, 'وبعد أيامٍ قليلة،'], [60, 'ومرّت أسابيع هادئة، ثم'], [Infinity, 'وانقضت شهورٌ بين صفحات الأيام، حتى']],
-  en: [[7, 'Barely a week passed before more followed.'], [21, 'A few days later,'], [60, 'Quiet weeks went by, and then'], [Infinity, 'Months turned over in the pages of the year, until']],
+  ar: [[0, 'وفي اليوم نفسه،'], [1, 'وفي اليوم التالي،'], [7, 'وبعد أيامٍ قليلة،'], [31, 'ولم يمضِ شهرٌ حتى تتابعت الأحداث.'], [90, 'ومرّت أسابيع هادئة، ثم'], [Infinity, 'وانقضت شهورٌ بين صفحات الأيام، حتى']],
+  en: [[0, 'That same day,'], [1, 'The next day,'], [7, 'A few days later,'], [31, 'Barely a month passed before more followed.'], [90, 'Quiet weeks went by, and then'], [Infinity, 'Months turned over in the pages of the year, until']],
 };
 const SHIFT: Record<Lang, { toJoy: string; toGrave: string }> = {
   ar: { toJoy: 'وكأن الأيام أرادت أن تواسي القلوب.', toGrave: 'لكن الدنيا لا تصفو دائماً.' },
@@ -118,7 +121,8 @@ type AiFetch = typeof fetch;
 let aiFetch: AiFetch = (...a) => fetch(...a);
 /** Tests replace the network call. */
 export const setAiFetch = (f: AiFetch) => { aiFetch = f; };
-export const modelConfigured = () => process.env.THIKRA_AI_PROVIDER === 'anthropic' && !!process.env.ANTHROPIC_API_KEY;
+/** Whether ANY provider is configured (see server/lib/ai.ts): the book never cares which one it is. */
+export const modelConfigured = () => aiConfigured();
 
 const SYSTEM: Record<Lang, string> = {
   ar: `أنت كاتب أدبي محترف، تحوّل أحداث عائلة حقيقية إلى فصلٍ من قصتها. اكتب بعربية فصيحة سلسة دافئة ممتعة ومشوّقة، وانتقل من حدثٍ إلى آخر بجسور طبيعية تربط الأحداث بعضها ببعض بثقة وحرفية.
@@ -129,22 +133,19 @@ Strict rules: (1) Use ONLY the facts given; never invent names, events, details,
 
 /** One chapter written by the model. Throws when the model is unavailable or answers badly: the caller then keeps the rules' chapter. */
 export async function narrateByModel(f: ChapterFacts, lang: Lang, storyTitle: string, people: string[]): Promise<{ title: string; paragraphs: string[] }> {
-  const res = await aiFetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY ?? '', 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({
-      model: process.env.THIKRA_AI_MODEL || 'claude-sonnet-5-5', max_tokens: 2500, system: SYSTEM[lang],
-      messages: [{ role: 'user', content: JSON.stringify({ story: storyTitle, chapter: f.idx, people, events: f.events.map(e => ({ date: e.date, title: e.title, summary: e.summary, category: e.category, funny: e.kind === 'funny', tone: e.tone })) }) }],
-    }),
-  });
-  if (!res.ok) throw new Error(`model ${res.status}`);
-  const data: any = await res.json();
-  const text = String(data?.content?.[0]?.text ?? '');
-  const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
-  const out = JSON.parse(json);
+  const turn = await callModel({
+    system: SYSTEM[lang],
+    maxTokens: 2500,
+    json: true,
+    messages: [{ role: 'user', text: JSON.stringify({ story: storyTitle, chapter: f.idx, people, events: f.events.map(e => ({ date: e.date, title: e.title, summary: e.summary, category: e.category, funny: e.kind === 'funny', tone: e.tone })) }) }],
+  }, aiFetch);
+  // Count the tokens against the month's cost like the ops agent does: writing a book is the costlier of the two features and
+  // used to be invisible on the owner's budget screen.
+  run('INSERT INTO agent_usage (input_tokens, output_tokens) VALUES (?, ?)', turn.usage.input, turn.usage.output);
+  const out = jsonFromText<{ title?: unknown; paragraphs?: unknown }>(turn.text);
   const paragraphs = Array.isArray(out.paragraphs) ? out.paragraphs.map((p: unknown) => String(p).trim()).filter(Boolean).slice(0, 30) : [];
   if (!paragraphs.length) throw new Error('empty chapter');
-  return { title: String(out.title ?? '').trim().slice(0, 120) || (narrateByRules(f, lang).title), paragraphs };
+  return { title: excerpt(String(out.title ?? ''), 120) || (narrateByRules(f, lang).title), paragraphs };
 }
 
 // ---- reading and writing the story ---------------------------------------------------------------------------------------

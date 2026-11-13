@@ -129,3 +129,39 @@ test('the story: a title the family chooses, tone that follows the event, a mode
   assert.match(await (await book(a, circle, '?year=2026&lang=ar')).text(), /الفصل الأول/);
   delete process.env.THIKRA_AI_PROVIDER; delete process.env.ANTHROPIC_API_KEY;
 });
+
+test('the book is written through OpenAI too, and its tokens land on the owner\'s bill', async () => {
+  // Same feature, other provider, no change in the book's own code. The tokens matter: writing a book is the costlier of the
+  // two model features, and it used to spend them without appearing on the budget screen at all.
+  const { setAiFetch } = await import('./lib/story.ts');
+  const { one } = await import('./db.ts');
+  const a = await login('الراوية');
+  const circle = (await j(a, '/api/circles', 'POST', { name: 'آل سالم' })).id as number;
+  run("INSERT INTO archive_entries (circle_id, title, summary, category, event_date, source, kind) VALUES (?, 'تخرج سارة', 'تفاصيل التخرج', 'graduation', '2026-06-01', 'manual', 'event')", circle);
+  run('UPDATE circles SET agent_active = 1 WHERE id = ?', circle);
+
+  process.env.THIKRA_AI_PROVIDER = 'openai';
+  process.env.OPENAI_API_KEY = 'sk-test';
+  delete process.env.ANTHROPIC_API_KEY;
+  const calls: any[] = [];
+  setAiFetch((async (url: any, init: any) => {
+    calls.push({ url: String(url), body: JSON.parse(init.body) });
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: 'Sure:\n{"title":"سنة النور","paragraphs":["فقرة من أوبن إيه آي."]}' } }],
+      usage: { prompt_tokens: 1_000, completion_tokens: 500 },
+    }), { status: 200 });
+  }) as typeof fetch);
+
+  const before = Number(one("SELECT COALESCE(SUM(input_tokens),0) i FROM agent_usage")!.i);
+  const wrote = await j(a, `/api/circles/${circle}/story`, 'POST', { year: 2026 });
+  assert.deepEqual(wrote, { written: 1, model: true });
+  assert.match(calls[0].url, /chat\/completions$/);
+  assert.match(calls[0].body.messages[0].content, /لا تخترع/, 'the writer is still told to use only the facts');
+  assert.deepEqual(calls[0].body.response_format, { type: 'json_object' });
+  assert.ok(JSON.stringify(calls[0].body.messages).includes('تخرج سارة'));
+  // prose wrapped around the JSON is tolerated, as models do that
+  assert.match(await (await book(a, circle, '?year=2026&lang=ar')).text(), /سنة النور/);
+  assert.equal(Number(one("SELECT COALESCE(SUM(input_tokens),0) i FROM agent_usage")!.i), before + 1_000, 'the book\'s tokens are counted');
+
+  delete process.env.THIKRA_AI_PROVIDER; delete process.env.OPENAI_API_KEY;
+});
