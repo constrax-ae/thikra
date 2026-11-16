@@ -13,6 +13,8 @@ export const REGION = (process.env.THIKRA_REGION ?? '').trim().toLowerCase() || 
 // Without it (development only) the first person to register becomes admin, which is exactly the hole this closes for real deployments.
 export const ADMIN_PHONES = new Set((process.env.THIKRA_ADMIN_PHONES ?? '').split(',').map(x => normalizePhone(x.trim())).filter((x): x is string => !!x));
 if (PROD && ADMIN_PHONES.size === 0) console.warn('[admin] THIKRA_ADMIN_PHONES is not set: nobody can administer this platform (and nobody is made admin by registering first).');
+// Said at every start, because it is the kind of setting that gets switched on for an afternoon's demo and left on for a year.
+if (PROD && process.env.THIKRA_SHOW_SIGNIN_CODES === '1') console.warn('[auth] THIKRA_SHOW_SIGNIN_CODES=1: the sign-in code is shown on screen for EVERY number. Anyone who knows a person\'s number can sign in as them. Turn this off before real families use this server.');
 export const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 export const safeEq = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 export const today = () => new Date().toISOString().slice(0, 10);

@@ -28,6 +28,19 @@ export const callerIp = (c: Context): string | undefined => {
  */
 const DEMO_PHONES = new Set(['+966500000001', '+966500000002', '+966500000003', '+966500000004', '+966500000005']);
 const demoLogin = (phone: string) => process.env.THIKRA_DEMO_MODE === '1' && DEMO_PHONES.has(phone);
+
+/**
+ * THIKRA_SHOW_SIGNIN_CODES=1 shows the sign-in code on screen for EVERY number, not just the fake
+ * demo ones. It exists so the owner can hand the live site to someone before an SMS provider is
+ * bought, and it is the one setting here that trades away a real protection:
+ *
+ *   while it is on, anyone who knows a person's phone number can sign in AS that person,
+ *   read their family's messages and see their photos.
+ *
+ * So it is off unless explicitly set, it has no effect once a real SMS provider is configured
+ * (then the code is sent, never shown), and the server says so loudly at every start.
+ */
+const showCodesToEveryone = () => process.env.THIKRA_SHOW_SIGNIN_CODES === '1';
 type OtpResult = { ok: true; devCode?: string } | { ok: false; status: 400 | 403 | 429 | 502 | 503; error: string };
 /** Create a code for a number and send it: the limits, the SMS budget and the provider are the same for sign-in and for changing a number. */
 export async function issueOtp(c: Context, phone: string, wanted: unknown): Promise<OtpResult> {
@@ -38,7 +51,7 @@ export async function issueOtp(c: Context, phone: string, wanted: unknown): Prom
   // A country the owner blocked from the admin screen gets no code, in any mode.
   if (isBlockedCode(phone)) { logSms(phone, 'blocked', sms.name); return { ok: false, status: 403, error: 'sms_blocked' }; }
   // Production never reveals the code; it is only sent by SMS. Refuse early when the number may not receive one (cost protection).
-  const real = (PROD && !demoLogin(phone)) || sms.name !== 'console';   // production never reveals a code, except the fake demo numbers in demo mode
+  const real = (PROD && !demoLogin(phone) && !showCodesToEveryone()) || sms.name !== 'console';   // production never reveals a code, except the fake demo numbers in demo mode, or while THIKRA_SHOW_SIGNIN_CODES is on
   if (real) {
     if (!allowedCountry(phone, ALLOWED_CODES)) { logSms(phone, 'blocked', sms.name); return { ok: false, status: 403, error: 'sms_blocked' }; }
     if (!takeDailyBudget(SMS_DAILY_CAP)) { console.error('[sms] daily cap reached'); logSms(phone, 'capped', sms.name); return { ok: false, status: 503, error: 'sms_unavailable' }; }
