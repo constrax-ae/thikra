@@ -6,7 +6,7 @@
   "scripts": {
     "dev:server": "tsx watch --env-file-if-exists=.env server/index.ts",
     "dev:web": "vite --config web/vite.config.ts",
-    "build": "vite build --config web/vite.config.ts",
+    "build": "vite build --config web/vite.config.ts && node scripts/seal-html.mjs",
     "start": "tsx --env-file-if-exists=.env server/index.ts",
     "test": "node --import tsx --test server/*.test.ts core/*.test.ts web/*.test.ts",
     "typecheck": "tsc --noEmit",

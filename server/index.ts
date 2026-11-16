@@ -88,7 +88,11 @@ const caching = (path: string, c: Context) => {
 // An unknown API address is a JSON 404, never the web page (a client must not mistake the page for data).
 app.all('/api/*', c => c.json({ error: 'not_found' }, 404));
 app.use('/*', serveStatic({ root: './dist', onFound: caching }));
-app.get('*', serveStatic({ path: './dist/index.html', onFound: caching }));
+// The page is app.html, not index.html: a panel host's web server serves whatever index file it finds in the
+// document root by itself, and the page would then arrive without the headers above - losing the CSP for the
+// whole session, since the first document's policy is the one that governs an SPA. scripts/seal-html.mjs
+// renames it at the end of the build so the request has to come here.
+app.get('*', serveStatic({ path: './dist/app.html', onFound: caching }));
 /** HTTP + the live gateway on one port. Exported so tests can start it on a free port. */
 export function startServer(port: number, onListening?: (port: number) => void) {
   const server = serve({ fetch: app.fetch, port }, i => onListening?.(i.port)) as import('node:http').Server;

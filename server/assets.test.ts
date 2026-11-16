@@ -55,3 +55,21 @@ test('no public asset sits under a path the web server reserves for itself', () 
       assert.ok(!text.includes(`"${path}`) && !text.includes(`'${path}`), `${name} must not serve assets from ${path}`);
   assert.ok(!existsSync('web/public/icons'), 'web/public/icons would be shadowed by Apache\'s own alias');
 });
+
+/**
+ * A panel host hands its web server a document root and lets it answer from there before the app is
+ * asked. On tamtim.com that meant / was served straight off disk: every other address carried the
+ * Content-Security-Policy from server/app.ts and the one people type did not - and on a single-page
+ * app the first document's policy is the policy for the session. Directories with no index file
+ * already fall through to the app, so the build renames the page out of the server's way.
+ */
+test('the built page is named so no web server serves it instead of the app', () => {
+  const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+  assert.match(pkg.scripts.build, /seal-html\.mjs/, 'the build seals the page');
+  assert.ok(existsSync('scripts/seal-html.mjs'), 'the sealing step exists');
+  assert.match(readFileSync('server/index.ts', 'utf8'), /serveStatic\(\{ path: '\.\/dist\/app\.html'/, 'the server serves the sealed page');
+  if (existsSync('dist')) {
+    assert.ok(!existsSync('dist/index.html'), 'a built dist must not leave an index.html in the document root');
+    assert.ok(existsSync('dist/app.html'), 'a built dist has the page under its sealed name');
+  }
+});
