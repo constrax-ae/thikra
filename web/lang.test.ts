@@ -74,3 +74,26 @@ test('a chat notice is written in the reader\'s language, older Arabic ones show
     for (const k of Object.keys(EN).filter(k => k.startsWith('sys.'))) assert.ok(pack[k], `${lang}: ${k}`);
   }
 });
+
+/**
+ * A bidi isolate belongs around a VALUE, never around a sentence.
+ *
+ * A size, a date or a price is written left-to-right whatever the page's language, so it is wrapped
+ * in <bdi dir="ltr">. Wrapping the finished sentence instead looks like the same fix and silently
+ * breaks every right-to-left language: the Arabic is then laid out left-to-right too. Live on
+ * tamtim.com, "0 KB من 5 GB مستخدمة" reached the screen reading "مستخدمة GB من 5 KB 0".
+ *
+ * Templates go through fill() in i18n.tsx, which isolates each value and leaves the sentence alone.
+ */
+test('no bidi isolate wraps a translated sentence', async () => {
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const offenders: string[] = [];
+  for (const file of readdirSync('web/src').filter(f => f.endsWith('.tsx'))) {
+    const text = readFileSync(`web/src/${file}`, 'utf8');
+    text.split('\n').forEach((line, i) => {
+      // <bdi ...>{t.something...  -> an isolate placed around a dictionary string
+      if (/<bdi[^>]*>\s*\{\s*t\./.test(line)) offenders.push(`web/src/${file}:${i + 1}`);
+    });
+  }
+  assert.deepEqual(offenders, [], `wrap the values with fill(), not the sentence:\n${offenders.join('\n')}`);
+});

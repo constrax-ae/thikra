@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from './api';
-import { useI18n } from './i18n';
+import { fill, useI18n } from './i18n';
 import { Icon } from './icons';
 
 // The page where a family decides to pay. It is a PAGE, not a dialog: choosing how much of your family's memory to
@@ -88,7 +88,7 @@ export function Plans({ circleId, onBack }: { circleId: number; onBack: () => vo
         <div className="mt-2.5 h-2 rounded-full bg-line overflow-hidden" role="progressbar" aria-valuenow={bill.archivedBytes} aria-valuemax={bill.quotaBytes}>
           <div className="h-full bg-brand rounded-full transition-[width] duration-[var(--dur-slow)] ease-[var(--ease-standard)]" style={{ width: `${used}%` }} />
         </div>
-        <p className="mt-2 text-xs text-muted"><bdi dir="ltr">{t.storUsedOf.replace('{used}', fmtBytes(bill.archivedBytes)).replace('{total}', fmtBytes(bill.quotaBytes))}</bdi></p>
+        <p className="mt-2 text-xs text-muted">{fill(t.storUsedOf, { used: fmtBytes(bill.archivedBytes), total: fmtBytes(bill.quotaBytes) })}</p>
         {/* Without this, a family that can SEE photos in its chat reads a used figure of zero and concludes the
             number is broken. The photos are real; they simply are not archived, and only the archive is charged for. */}
         <p className="mt-1.5 text-xs text-muted">{t.chatUsed}: <bdi dir="ltr">{fmtBytes(bill.chatBytes)}</bdi></p>

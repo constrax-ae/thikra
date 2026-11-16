@@ -4,7 +4,7 @@ import { Picker } from './Picker';
 import { chime, prefOn } from './prefs';
 import { Fragment, useMemo, useCallback, useEffect, useRef, useState, Suspense, lazy } from 'react';
 import { api, ApiError, toDate, type Attachment, type GalleryItem, type ArchiveEntry, type Billing, type CircleDetail, type Me, type Message } from './api';
-import { useI18n, intlLocale, speechLocale, systemText } from './i18n';
+import { fill, useI18n, intlLocale, speechLocale, systemText } from './i18n';
 import { Dialog } from './Dialog';
 import { live } from './live';
 import { Icon } from './icons';
@@ -1554,7 +1554,7 @@ function StorageCard({ circle, bill, manager, onChanged }: { circle: CircleDetai
       <div className="h-2 rounded-full bg-line overflow-hidden" role="progressbar" aria-valuenow={bill.archivedBytes} aria-valuemax={bill.quotaBytes}>
         <div className={`h-full ${full ? 'bg-danger' : almost ? 'bg-gold' : 'bg-brand'}`} style={{ width: `${pct}%` }} />
       </div>
-      <p className="text-sm"><bdi dir="ltr">{t.storUsedOf.replace('{used}', fmtBytes(bill.archivedBytes)).replace('{total}', fmtBytes(bill.quotaBytes))}</bdi></p>
+      <p className="text-sm">{fill(t.storUsedOf, { used: fmtBytes(bill.archivedBytes), total: fmtBytes(bill.quotaBytes) })}</p>
       {(full || almost) && <p role="status" className={`text-sm rounded-lg p-2 ${full ? 'text-danger bg-danger/10' : 'text-gold-dark bg-gold/15'}`}>{full ? t.storFullMsg : t.storAlmost}</p>}
       <p className="text-sm text-muted">{t.chatUsed}: <bdi dir="ltr">{fmtBytes(bill.chatBytes)}</bdi></p>
       <p className="text-sm text-muted">{t.plan}: {t.plans[bill.plan]} · {t.sponsor}: {bill.sponsor ?? t.noSponsor}</p>

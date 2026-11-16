@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, Fragment, useContext, useEffect, useState, type ReactNode } from 'react';
 
 export type Lang = 'ar' | 'en' | 'ur' | 'hi' | 'tl' | 'fr' | 'ml' | 'bn' | 'fa' | 'tr' | 'es' | 'ru' | 'zh' | 'de' | 'it' | 'pt' | 'nl' | 'pl' | 'uk' | 'el' | 'sv';
 
@@ -454,3 +454,24 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 }
 
 export const useI18n = () => useContext(Ctx);
+
+/**
+ * Fills a translated template, isolating ONLY the values that go into it.
+ *
+ * A number, a size or a date is always written left-to-right, so it has to be isolated or the bidi
+ * algorithm drags the punctuation around it to the wrong end. The temptation is to wrap the finished
+ * sentence instead, and that quietly breaks every right-to-left language: `dir="ltr"` on the whole
+ * line lays the Arabic out left-to-right, and `<bdi>` alone (which means `dir="auto"`) takes its
+ * direction from the first STRONG character - the "K" of "KB", not the Arabic that follows.
+ * On tamtim.com "0 KB من 5 GB مستخدمة" reached the screen as "مستخدمة GB من 5 KB 0".
+ *
+ * The sentence keeps the page's direction; each value gets its own isolate.
+ */
+export function fill(template: string, values: Record<string, string>) {
+  return template.split(/(\{[a-zA-Z]+\})/).map((part, i) => {
+    const key = part.length > 2 && part.startsWith('{') && part.endsWith('}') ? part.slice(1, -1) : null;
+    return key !== null && Object.prototype.hasOwnProperty.call(values, key)
+      ? <bdi key={i} dir="ltr">{values[key]}</bdi>
+      : <Fragment key={i}>{part}</Fragment>;
+  });
+}
