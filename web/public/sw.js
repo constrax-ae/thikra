@@ -8,7 +8,7 @@ self.addEventListener('push', event => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { /* not JSON: show a generic one */ }
   event.waitUntil(self.registration.showNotification(data.title || 'Thekra', {
-    body: data.body || '', tag: data.tag || 'thikra', renotify: true, icon: '/icons/icon-192.png', badge: '/icons/icon-mono-96.png',
+    body: data.body || '', tag: data.tag || 'thikra', renotify: true, icon: '/app-icons/icon-192.png', badge: '/app-icons/icon-mono-96.png',
     data: { circle: data.circle },
   }));
 });

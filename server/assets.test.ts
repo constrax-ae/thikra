@@ -21,16 +21,37 @@ test('the installable app has a normal and a maskable icon, and the page links t
   const purposes = (manifest.icons as Array<{ purpose: string }>).map(i => i.purpose);
   assert.ok(purposes.includes('any') && purposes.includes('maskable'));
   const html = readFileSync('web/index.html', 'utf8');
-  for (const href of ['/icons/favicon-32.png', '/icons/apple-touch-icon.png']) {
+  for (const href of ['/app-icons/favicon-32.png', '/app-icons/apple-touch-icon.png']) {
     assert.ok(html.includes(`href="${href}"`), `index.html links ${href}`);
     assert.ok(existsSync(`web/public${href}`), `${href} exists`);
   }
-  assert.equal(pngSize('web/public/icons/apple-touch-icon.png'), '180x180');
-  assert.equal(pngSize('web/public/icons/favicon-32.png'), '32x32');
+  assert.equal(pngSize('web/public/app-icons/apple-touch-icon.png'), '180x180');
+  assert.equal(pngSize('web/public/app-icons/favicon-32.png'), '32x32');
 });
 
 test('the icons come from the owner\'s own logo, which is kept in the repository as the source', () => {
   assert.ok(existsSync('brand/source/logo-original.png'), 'the original logo file is kept');
   assert.equal(pngSize('brand/source/logo-original.png'), '462x485');
   assert.ok(!existsSync('web/public/icon.svg'), 'no substitute logo is shipped');
+});
+
+/**
+ * Apache ships `Alias /icons/ "/usr/share/httpd/icons/"` in its stock configuration - the little
+ * images it puts beside filenames in a directory listing. On tamtim.com that alias swallowed every
+ * request for our own logo: the file was present and world-readable in the deployed build, but the
+ * web server answered 404 for /icons/logo-160.png and 403 for /icons/, and the request never
+ * reached the app at all. The sign-in page showed a broken image with no error anywhere to explain
+ * it. Any path the server reserves for itself is a path we cannot use, so this keeps us off it.
+ */
+test('no public asset sits under a path the web server reserves for itself', () => {
+  const reserved = ['/icons/', '/manual/', '/cgi-bin/', '/error/', '/doc/'];
+  const sources: Array<[string, string]> = [
+    ['web/index.html', readFileSync('web/index.html', 'utf8')],
+    ['web/public/manifest.webmanifest', readFileSync('web/public/manifest.webmanifest', 'utf8')],
+    ['web/public/sw.js', readFileSync('web/public/sw.js', 'utf8')],
+  ];
+  for (const [name, text] of sources)
+    for (const path of reserved)
+      assert.ok(!text.includes(`"${path}`) && !text.includes(`'${path}`), `${name} must not serve assets from ${path}`);
+  assert.ok(!existsSync('web/public/icons'), 'web/public/icons would be shadowed by Apache\'s own alias');
 });
