@@ -562,3 +562,14 @@ html[data-motion="off"] .sheet { animation: none; }
   *::-webkit-scrollbar-thumb { background: var(--color-line); border-radius: 9999px; border: 2px solid transparent; background-clip: padding-box; }
   *::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--color-green) 35%, var(--color-line)); background-clip: padding-box; }
 }
+
+/* The owner's logo exists in two inks - green on paper, and paper on night - and both are in the
+   page; only the one that belongs to the theme in use is shown. The theme is chosen the same way
+   every colour in this file is: the explicit data-theme wins, otherwise the device decides. */
+.logo-dark { display: none; }
+html[data-theme="dark"] .logo-light { display: none; }
+html[data-theme="dark"] .logo-dark { display: block; }
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme="light"]) .logo-light { display: none; }
+  html:not([data-theme="light"]) .logo-dark { display: block; }
+}

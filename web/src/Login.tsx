@@ -1,4 +1,5 @@
-import tile from './brand/logo-tile.png';
+import lockupLight from './brand/lockup-light.png';
+import lockupDark from './brand/lockup-dark.png';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { parsePhoneNumberFromString } from 'libphonenumber-js/min';
 import { api, ApiError } from './api';
@@ -122,8 +123,13 @@ export function Login({ onDone }: { onDone: () => void }) {
     <main className="min-h-full flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-6">
-          <img src={tile} alt="Tamtim تمتم" width={80} height={80} className="mx-auto mb-3 w-20 h-20 rounded-2xl" />
-          <h1 className="text-4xl font-bold text-green">{t.appName}</h1>
+          {/* The owner's logo, whole and on no tile: this screen has the room for it. It is drawn
+              in two inks because the app has two themes, and only the one that belongs to the
+              theme in use is displayed (.logo-light / .logo-dark in styles.css). */}
+          <h1 className="mb-4">
+            <img src={lockupLight} alt={t.appName} className="logo-light mx-auto w-64 max-w-full h-auto" />
+            <img src={lockupDark} alt={t.appName} className="logo-dark mx-auto w-64 max-w-full h-auto" />
+          </h1>
           <p className="mt-2 text-muted">{t.tagline}</p>
         </div>
 

@@ -124,35 +124,43 @@ func square(_ side: Int, _ r: CGRect, fraction: CGFloat, background: CGColor?,
 
 // ---- the icons ---------------------------------------------------------------------------------
 
+// Every icon carries the logo WHOLE - bubble, تمتم and Tamtim - the way the owner drew it. It is a
+// wide lockup in a square, so it is fitted by its width and sits a little above centre, which is how
+// a lockup with a word under it balances. Two places cannot take it and say so on the spot: the
+// 32 px favicon and the 24 px notification stencil, where the word is smaller than a pixel.
+
 print("web/public/app-icons:")
 let WEB = "web/public/app-icons"
-// Full-bleed: a phone rounds the corners itself, so the icon is a square of the logo's own cream.
-for (name, size) in [("icon-512.png", 512), ("icon-192.png", 192), ("apple-touch-icon.png", 180),
-                     ("favicon-32.png", 32)] {
-    write(square(size, MARK, fraction: 0.74, background: PAPER), "\(WEB)/\(name)")
+// Full-bleed: a phone rounds the corners itself, so the icon is a square of the logo's own paper.
+for (name, size) in [("icon-512.png", 512), ("icon-192.png", 192), ("apple-touch-icon.png", 180)] {
+    write(square(size, LOCKUP, fraction: 0.84, background: PAPER), "\(WEB)/\(name)")
 }
-// Maskable: Android may crop this to a circle, so the mark stays inside the safe middle.
-write(square(512, MARK, fraction: 0.56, background: PAPER), "\(WEB)/icon-maskable-512.png")
-// The notification badge: Android throws the colours away and keeps the shape, so give it one colour.
-// It stays an outline rather than a filled blob: the bubble is drawn with gaps (the chin is a separate
-// stroke), so there is no inside to fill - and at 24 px the ring with its two eyes still reads as this logo.
+// At 32 px the word is two pixels tall: the bubble alone is what is left of the logo at that size.
+write(square(32, MARK, fraction: 0.74, background: PAPER), "\(WEB)/favicon-32.png")
+// Maskable: Android may crop this to a circle, so the logo stays inside the safe middle.
+write(square(512, LOCKUP, fraction: 0.64, background: PAPER), "\(WEB)/icon-maskable-512.png")
+// The notification badge: Android throws the colours away and keeps the shape, at about 24 px. The
+// bubble, in one colour. It stays an outline rather than a filled blob because the bubble is drawn
+// with gaps (the chin is its own stroke), so there is no inside to fill.
 write(square(96, MARK, fraction: 0.86, background: nil, tint: (255, 255, 255)), "\(WEB)/icon-mono-96.png")
 
-// The tile the app itself shows (the header and the sign-in screen) is imported by the code, not
+// The tile the app itself shows beside its name in the header. It is imported by the code, not
 // fetched by name: the bundler gives it a content-hashed filename, so a new logo reaches people the
 // moment they load the page. A fixed name under the document root would not - see docs/DEPLOY.md.
+// The name is already spelled out next to it in the app's own face, so this one is the bubble: the
+// whole lockup at 40 px would put the word below the width of a stroke.
 write(square(320, MARK, fraction: 0.74, background: PAPER), "web/src/brand/logo-tile.png")
 
 print("mobile/assets:")
 let APP = "mobile/assets"
-write(square(1024, MARK, fraction: 0.74, background: PAPER), "\(APP)/icon.png")
-write(square(512, MARK, fraction: 0.74, background: PAPER), "\(APP)/splash-icon.png")   // the sign-in tile
-write(square(160, MARK, fraction: 0.74, background: PAPER), "\(APP)/logo.png")          // the header tile
+write(square(1024, LOCKUP, fraction: 0.84, background: PAPER), "\(APP)/icon.png")
+write(square(512, LOCKUP, fraction: 0.84, background: PAPER), "\(APP)/splash-icon.png")   // the sign-in tile
+write(square(160, MARK, fraction: 0.74, background: PAPER), "\(APP)/logo.png")            // the header tile, 48 px on screen
 write(square(48, MARK, fraction: 0.74, background: PAPER), "\(APP)/favicon.png")
 // Android's adaptive icon is three layers it moves and masks independently.
 let bg = bitmap(1024, 1024); bg.setFillColor(PAPER); bg.fill(CGRect(x: 0, y: 0, width: 1024, height: 1024))
 write(bg.makeImage()!, "\(APP)/android-icon-background.png")
-write(square(1024, MARK, fraction: 0.52, background: nil), "\(APP)/android-icon-foreground.png")
+write(square(1024, LOCKUP, fraction: 0.60, background: nil), "\(APP)/android-icon-foreground.png")
 write(square(1024, MARK, fraction: 0.52, background: nil, tint: (255, 255, 255)), "\(APP)/android-icon-monochrome.png")
 
 // ---- the splash --------------------------------------------------------------------------------
@@ -225,21 +233,21 @@ splash("\(APP)/splash-dark.png", background: NIGHT, dark: true,
 // ---- things to look at, and the store's 1024 ----------------------------------------------------
 
 print("brand/out:")
-write(square(1024, MARK, fraction: 0.74, background: PAPER), "brand/out/icon-1024.png")   // App Store / Play
+write(square(1024, LOCKUP, fraction: 0.84, background: PAPER), "brand/out/icon-1024.png")   // App Store / Play
 write(inkImage(LOCKUP, pxW: 1600), "brand/out/lockup.png")                                // transparent, for decks
-write(square(512, MARK, fraction: 0.74, background: rgb(0x1F, 0x4D, 0x3F), invert: true),
+write(square(512, LOCKUP, fraction: 0.84, background: rgb(0x1F, 0x4D, 0x3F), invert: true),
       "brand/out/icon-512-on-green.png")                                                  // the inverse, to compare
 
 // A sheet of the sizes an icon really lives at, light and dark, plus the circular mask.
 let sheet = bitmap(900, 370)
 sheet.setFillColor(PAPER); sheet.fill(CGRect(x: 0, y: 0, width: 900, height: 370))
-let standard = square(512, MARK, fraction: 0.74, background: PAPER)
+let standard = square(512, LOCKUP, fraction: 0.84, background: PAPER)
 var x: CGFloat = 20
 for size in [180, 120, 80, 48, 32] {
     sheet.draw(standard, in: CGRect(x: x, y: 370 - 20 - CGFloat(size), width: CGFloat(size), height: CGFloat(size)))
     x += CGFloat(size) + 16
 }
-let maskable = square(512, MARK, fraction: 0.56, background: PAPER)
+let maskable = square(512, LOCKUP, fraction: 0.64, background: PAPER)
 sheet.saveGState()
 sheet.addEllipse(in: CGRect(x: x + 20, y: 150, width: 200, height: 200)); sheet.clip()
 sheet.draw(maskable, in: CGRect(x: x + 20, y: 150, width: 200, height: 200))
@@ -252,3 +260,20 @@ for size in [80, 48, 32] {
 }
 write(sheet.makeImage()!, "brand/out/icon-preview.png")
 print("done")
+
+// ---- the logo itself, for the screens that have room for it -------------------------------------
+
+// The sign-in screen shows the owner's logo whole - bubble, تمتم and Tamtim - not the mark cut out
+// of it. Two inks, because the app has two themes: green on paper, and the same artwork with its
+// green turned to paper for the night theme (the amber is right on both). Both are transparent, so
+// they sit on whatever the page is. The code imports them, so each gets a content-hashed filename.
+write(inkImage(LOCKUP, pxW: 900), "web/src/brand/lockup-light.png")
+write(inkImageDark(LOCKUP, pxW: 900), "web/src/brand/lockup-dark.png")
+
+// ---- the logo itself, for the screens with room for it ------------------------------------------
+
+// The sign-in screen shows the logo whole and large, on no tile at all. Two inks, because the app
+// has two themes: green on paper, and the same artwork with its green turned to paper for the night
+// theme (the amber is right on both). Transparent, so each sits on whatever the page is.
+write(inkImage(LOCKUP, pxW: 900), "web/src/brand/lockup-light.png")
+write(inkImageDark(LOCKUP, pxW: 900), "web/src/brand/lockup-dark.png")

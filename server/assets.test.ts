@@ -107,10 +107,12 @@ test('the page opts out of browser translation', () => {
 test('the logo the app draws is a bundled asset, not a fixed path under the document root', () => {
   for (const file of ['web/src/icons.tsx', 'web/src/Login.tsx']) {
     const src = readFileSync(file, 'utf8');
-    assert.match(src, /^import tile from '\.\/brand\/logo-tile\.png';$/m, `${file} imports the tile`);
-    assert.ok(!src.includes('/app-icons/logo-'), `${file} must not fetch the tile by name`);
+    assert.match(src, /^import \w+ from '\.\/brand\/[\w-]+\.png';$/m, `${file} imports its logo from web/src/brand`);
+    assert.ok(!src.includes('/app-icons/'), `${file} must not fetch a logo by name from the document root`);
   }
-  assert.ok(existsSync('web/src/brand/logo-tile.png'), 'and the tile is built into the sources');
+  for (const art of ['logo-tile.png', 'lockup-light.png', 'lockup-dark.png'])
+    assert.ok(existsSync(`web/src/brand/${art}`), `web/src/brand/${art} is built into the sources`);
   if (existsSync('dist/assets'))
-    assert.ok(readdirSync('dist/assets').some(f => /^logo-tile-.+\.png$/.test(f)), 'a built dist has it content-hashed');
+    for (const art of ['logo-tile', 'lockup-light', 'lockup-dark'])
+      assert.ok(readdirSync('dist/assets').some(f => new RegExp(`^${art}-.+\\.png$`).test(f)), `a built dist has ${art} content-hashed`);
 });
