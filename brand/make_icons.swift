@@ -121,6 +121,7 @@ func square(_ side: Int, _ r: CGRect, fraction: CGFloat, background: CGColor?,
     return ctx.makeImage()!
 }
 
+
 // ---- the icons ---------------------------------------------------------------------------------
 
 print("web/public/app-icons:")
@@ -133,6 +134,8 @@ for (name, size) in [("icon-512.png", 512), ("icon-192.png", 192), ("apple-touch
 // Maskable: Android may crop this to a circle, so the mark stays inside the safe middle.
 write(square(512, MARK, fraction: 0.56, background: PAPER), "\(WEB)/icon-maskable-512.png")
 // The notification badge: Android throws the colours away and keeps the shape, so give it one colour.
+// It stays an outline rather than a filled blob: the bubble is drawn with gaps (the chin is a separate
+// stroke), so there is no inside to fill - and at 24 px the ring with its two eyes still reads as this logo.
 write(square(96, MARK, fraction: 0.86, background: nil, tint: (255, 255, 255)), "\(WEB)/icon-mono-96.png")
 
 print("mobile/assets:")
