@@ -1,0 +1,9 @@
+# The service worker and the manifest have fixed names too, and both describe the app itself - a
+# stale one keeps the old name on a push notification and on an installed home-screen app. Only
+# these two: everything under /assets/ carries a hash of its own content in its name and must stay
+# cacheable forever. See web/public/app-icons/.htaccess for the whole story.
+<IfModule mod_headers.c>
+  <FilesMatch "^(sw\.js|manifest\.webmanifest)$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
+</IfModule>
