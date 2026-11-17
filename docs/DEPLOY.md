@@ -121,21 +121,23 @@ STRIPE_PRICE_HERITAGE_MONTH=price_…   STRIPE_PRICE_HERITAGE_YEAR=price_…
 - **اختبار:** `server/offsite.test.ts` يشغّل خوادم حقيقية: قرص يُمسح، وملف قديم يعود، وقرص أحدث لا يُستبدل.
 - **جُرّب على تخزين ريبليت الحقيقي (2026-10-21):** بعد إنشاء الحاوية وإعادة النشر ظهرت في الحاوية `db/manifest.json` و`db/thikra.db.gz` و`db/daily/` و`blobs/` بعد دقيقة من الإقلاع. **لم تُجرَّب بعدُ الاستعادة من التخزين الحقيقي** (جُرّبت على مجلد بخوادم حقيقية): تُجرَّب بأن يُنشأ شيء على الموقع العام ثم يُعاد النشر فيبقى. حدّ الخسارة: دقائق.
 
-## الملفات الثابتة خلف لوحة الاستضافة (Plesk/nginx)
+## الملفات الثابتة خلف لوحة الاستضافة (Plesk)
 
-على tamtim.com يردّ **nginx** بنفسه على كل ملف موجود في جذر المستند (`/httpdocs/dist`)، فلا يمرّ الطلب على التطبيق ولا تصل ترويسات التخزين التي يضعها `server/index.ts`. وما يرسله nginx هو `Last-Modified` **بلا `Cache-Control` إطلاقاً**، فيُقدّر المتصفّح الصلاحية بنفسه: نحو عُشر عمر الملف. ملف جالس منذ شهر يبقى في ذاكرة المتصفّح **أياماً** بعد تغييره، ولا ينفع تحديث قسري.
+على tamtim.com يردّ **خادم الويب نفسه** على كل ملف موجود في جذر المستند (`/httpdocs/dist`) قبل أن يصل الطلب إلى التطبيق، فترويسات التخزين التي يضعها `server/index.ts` لا تصل إليها. وما كان يُرسَل هو `Last-Modified` **بلا `Cache-Control` إطلاقاً**، فيُقدّر المتصفّح الصلاحية بنفسه: نحو عُشر عمر الملف. ملف جالس منذ شهر يبقى في ذاكرة المتصفّح **أياماً** بعد تغييره، ولا ينفع تحديث قسري.
 
-ظهر هذا يوم استُبدل الشعار: الموقع كان ينشر الشعار الجديد وكل متصفّح زار الموقع قبلها يرسم القديم.
+ظهر هذا يوم استُبدل الشعار: الموقع ينشر الشعار الجديد وكل متصفّح زار الموقع قبلها يرسم القديم.
 
-**ما يرسمه التطبيق لنفسه** لم يعد ملفاً باسم ثابت: `web/src/brand/logo-tile.png` يستورده الكود، فيحمل اسماً ببصمة محتواه (`/assets/logo-tile-<hash>.png`) ويصل فوراً. أما ما يطلبه المتصفّح والهاتف بالاسم (الأيقونات، `manifest.webmanifest`، `sw.js`، الخطوط) فيحتاج قاعدة في الاستضافة. في **Websites & Domains ← Apache & nginx Settings ← Additional nginx directives**:
+**الحل جزآن، وكلاهما في المستودع:**
 
-```nginx
-# أسماء ثابتة يجب أن يسأل عنها المتصفّح في كل مرة
-location ~* ^/(app-icons/|manifest\.webmanifest$|sw\.js$) { add_header Cache-Control "no-cache"; }
-# أسماء فيها بصمة المحتوى: لا تتغيّر أبداً تحت الاسم نفسه
-location ^~ /assets/ { add_header Cache-Control "public, max-age=31536000, immutable"; }
-# الخطوط لا تتغيّر عملياً
-location ^~ /fonts/  { add_header Cache-Control "public, max-age=2592000"; }
+1. **ما يرسمه التطبيق لنفسه** لم يعد ملفاً باسم ثابت. `web/src/brand/logo-tile.png` يستورده الكود، فيحمل اسماً ببصمة محتواه (`/assets/logo-tile-<hash>.png`): شعار جديد = رابط جديد لم تره أي ذاكرة. يحرسه اختبار في `server/assets.test.ts`.
+2. **ما يطلبه المتصفّح والهاتف بالاسم** (الأيقونات، `manifest.webmanifest`، `sw.js`) لا يستطيع أن يتحرّك، فترويسته تأتي من ملفات `.htaccess` في `web/public/` و`web/public/app-icons/` و`web/public/assets/` — ينسخها البناء إلى `dist/`.
+
+**شرط واحد في اللوحة:** هذه القواعد ينفّذها Apache، فيجب أن يكون **Apache** هو من يخدم الملفات الثابتة لا nginx. في **Websites & Domains ← Hosting & DNS ← Apache & nginx Settings**، خانة **Smart static files processing** يجب أن تبقى **مطفأة**. (لوحة GoDaddy هذه لا تعرض حقل «Additional nginx directives» أصلاً، فلا بديل عنه.)
+
+تحقّق بعد أي نشر:
+
+```bash
+curl -sI https://tamtim.com/sw.js              | grep -i cache-control   # no-cache
+curl -sI https://tamtim.com/app-icons/icon-512.png | grep -i cache-control   # no-cache
+curl -sI https://tamtim.com/assets/<أي ملف>    | grep -i cache-control   # immutable
 ```
-
-تحقّق بعد الحفظ: `curl -sI https://tamtim.com/sw.js | grep -i cache-control`.
