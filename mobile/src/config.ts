@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 
 /**
- * Where the Thekra server is: EXPO_PUBLIC_API_URL, read from mobile/.env (see mobile/.env.example)
+ * Where the Tamtim server is: EXPO_PUBLIC_API_URL, read from mobile/.env (see mobile/.env.example)
  * or from the build's environment. Expo bakes it into the app when the JavaScript is bundled.
  *
  * Blank means NOT SET, as on the server (server/env.ts): a ".env" line left empty gives an empty

@@ -1,9 +1,9 @@
 {
-  "name": "ذكرى · Thekra",
-  "short_name": "ذكرى",
+  "name": "تمتم · Tamtim",
+  "short_name": "تمتم",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f4f1e8",
+  "background_color": "#f5f1e8",
   "theme_color": "#1f4d3f",
   "icons": [
     {

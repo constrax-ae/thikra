@@ -65,7 +65,7 @@ app.post('/api/admin/support/:id/reply', requireAdmin('support'), async c => {
   run("UPDATE support_cases SET status = 'answered', updated_at = datetime('now') WHERE id = ?", id);
   // tell the person on their devices (never the answer's text, only that there is one)
   const who = one('SELECT k.user_id AS id, u.lang FROM support_cases k JOIN users u ON u.id = k.user_id WHERE k.id = ?', id);
-  if (who) pushToUser(who.id, { title: 'Thekra', body: words(who.lang).support, circle: 0, tag: `support-${id}`, url: '/#/you' }).catch(e => console.error('[push]', e));
+  if (who) pushToUser(who.id, { title: 'Tamtim', body: words(who.lang).support, circle: 0, tag: `support-${id}`, url: '/#/you' }).catch(e => console.error('[push]', e));
   audit(c, 'support.reply', { type: 'support_case', id });   // the text itself is not copied into the audit log
   return c.json({ ok: true });
 });

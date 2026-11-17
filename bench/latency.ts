@@ -189,7 +189,7 @@ try {
     receivers.push(cookie);
   }
 
-  console.log(`Thekra latency benchmark | ${external || 'local server'} | ${RECEIVERS} receivers | ${MODE === 'ws' ? 'live WebSocket gateway' : `clients poll every ${POLL_MS} ms`}\n`);
+  console.log(`Tamtim latency benchmark | ${external || 'local server'} | ${RECEIVERS} receivers | ${MODE === 'ws' ? 'live WebSocket gateway' : `clients poll every ${POLL_MS} ms`}\n`);
   const writes = await writeLatency(base, sender, circle);
   console.log('Writing a message (server cost only):');
   console.log(`  one at a time      p50 ${round(writes.sequential.p50)} ms | p95 ${round(writes.sequential.p95)} ms | p99 ${round(writes.sequential.p99)} ms`);

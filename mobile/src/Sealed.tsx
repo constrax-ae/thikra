@@ -33,7 +33,7 @@ const errText = (e: unknown) => { const c = e instanceof ApiError ? e.code : 'ge
 /**
  * Sealed letters: write today, delivered on the day — the web's page (web/src/Sealed.tsx)
  * for the phone. The disclosure comes first, because this version keeps the content on
- * Thekra's servers. Then the family's waiting envelopes, the form, and your own letters.
+ * Tamtim's servers. Then the family's waiting envelopes, the form, and your own letters.
  */
 export function SealedScreen({ me, onBack, circleId }: { me: { id: number }; onBack: () => void; circleId?: number }) {
   const p = usePalette();

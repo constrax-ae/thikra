@@ -26,7 +26,7 @@ async function pushOwners(items: Item[]): Promise<number> {
   let sent = 0;
   for (const o of all("SELECT id, lang FROM users WHERE admin_role = 'owner' AND suspended_at IS NULL")) {
     const body = items.slice(0, 3).map(i => (textLang(o.lang) === 'en' ? i.en : i.ar)).join(' · ');
-    sent += await pushToUser(o.id, { title: textLang(o.lang) === 'en' ? 'Thekra: needs you' : 'ذكرى: يحتاج قرارك', body, circle: 0, tag: 'agent-alert', url: '/#/admin' }).catch(() => 0);
+    sent += await pushToUser(o.id, { title: textLang(o.lang) === 'en' ? 'Tamtim: needs you' : 'تمتم: يحتاج قرارك', body, circle: 0, tag: 'agent-alert', url: '/#/admin' }).catch(() => 0);
   }
   return sent;
 }

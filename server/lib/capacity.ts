@@ -62,7 +62,7 @@ export async function checkQuotaAlerts(): Promise<number> {
     if (level <= was) continue;
     warned++;
     for (const m of all("SELECT u.id, u.lang FROM circle_members cm JOIN users u ON u.id = cm.user_id WHERE cm.circle_id = ? AND cm.role IN ('owner','admin')", r.id)) {
-      pushToUser(m.id, { title: 'Thekra', body: quotaText(m.lang, String(c.name), level), circle: r.id, tag: `quota-${r.id}`, url: `/#/circle/${r.id}` }).catch(e => console.error('[push]', e));
+      pushToUser(m.id, { title: 'Tamtim', body: quotaText(m.lang, String(c.name), level), circle: r.id, tag: `quota-${r.id}`, url: `/#/circle/${r.id}` }).catch(e => console.error('[push]', e));
     }
   }
   run('UPDATE quota_alerts SET level = 0 WHERE level != 0 AND circle_id NOT IN (SELECT circle_id FROM circle_usage)');   // the rollup already holds exactly the families that have archived files

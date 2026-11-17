@@ -29,10 +29,17 @@ test('the installable app has a normal and a maskable icon, and the page links t
   assert.equal(pngSize('web/public/app-icons/favicon-32.png'), '32x32');
 });
 
+/**
+ * The icons are built from the owner's own logo and nothing else. It is a VECTOR file now, which is
+ * what lets `swift brand/make_icons.swift` render a sharp 1024 for the stores and a clean one-colour
+ * notification badge - neither was possible from the old 462 px bitmap. Keep the source in the repo:
+ * an icon that cannot be rebuilt is an icon that slowly goes wrong.
+ */
 test('the icons come from the owner\'s own logo, which is kept in the repository as the source', () => {
-  assert.ok(existsSync('brand/source/logo-original.png'), 'the original logo file is kept');
-  assert.equal(pngSize('brand/source/logo-original.png'), '462x485');
+  assert.ok(existsSync('brand/source/tamtim-logo.pdf'), 'the owner\'s logo file is kept, as a vector');
+  assert.ok(existsSync('brand/make_icons.swift'), 'and the script that builds every icon from it');
   assert.ok(!existsSync('web/public/icon.svg'), 'no substitute logo is shipped');
+  assert.equal(pngSize('brand/out/icon-1024.png'), '1024x1024', 'the store icon is built and kept');
 });
 
 /**

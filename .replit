@@ -1,4 +1,4 @@
-# Thekra on Replit. For development and demos: do not keep real family data on Replit's disk.
+# Tamtim on Replit. For development and demos: do not keep real family data on Replit's disk.
 # Replit runs Node 20, which has no node:sqlite, so the app falls back to a WebAssembly SQLite automatically.
 modules = ["nodejs-20"]
 run = "pnpm install && pnpm build && pnpm start"

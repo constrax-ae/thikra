@@ -63,7 +63,7 @@ app.post('/api/admin/broadcasts', requireAdmin('announce'), async c => {
   const me = c.get('user');
   if (b.test === true) {
     const lang = textLang(me.lang) === 'en' ? bodyEn : bodyAr;
-    const sent = await pushToUser(me.id, { title: 'Thekra', body: lang, circle: 0, tag: 'bc-test', url: '/#/' }).catch(() => 0);
+    const sent = await pushToUser(me.id, { title: 'Tamtim', body: lang, circle: 0, tag: 'bc-test', url: '/#/' }).catch(() => 0);
     const id = Number(run("INSERT INTO broadcasts (body_ar, body_en, audience, scheduled_at, status, test, sent, skipped, created_by, done_at) VALUES (?, ?, '{}', datetime('now'), 'sent', 1, ?, ?, ?, datetime('now'))", bodyAr, bodyEn, sent > 0 ? 1 : 0, sent > 0 ? 0 : 1, me.id).lastInsertRowid);
     audit(c, 'broadcast.test', { type: 'broadcast', id });
     return c.json({ id, sent });

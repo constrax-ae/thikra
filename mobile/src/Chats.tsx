@@ -182,7 +182,7 @@ export function Chats({ onOpen, onUnread }: { onOpen: (c: Chat) => void; onUnrea
   const header = (
     <View style={{ paddingHorizontal: space.lg, gap: space.lg, paddingBottom: space.sm }}>
       {/* One header row, the way a phone heads its main screen: the app icon, the page title
-          with its eyebrow, and the one primary action. (The separate "Thekra" wordmark row and a
+          with its eyebrow, and the one primary action. (The separate "Tamtim" wordmark row and a
           Memory shortcut used to sit above this; the icon already carries the brand, and Memory
           is a tab right below.) */}
       <AppHeader eyebrow={t.hubEyebrow} title={t.hubTitle}
@@ -356,7 +356,7 @@ function Onboarding({ onCreate, onJoin }: { onCreate: () => void; onJoin: () => 
   );
 }
 
-/** What Thekra is for, in three lines (the web's FeatureList). */
+/** What Tamtim is for, in three lines (the web's FeatureList). */
 export function FeatureList() {
   const p = usePalette();
   const items: Array<[IconName, string, string]> = [

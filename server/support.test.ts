@@ -82,7 +82,7 @@ test('support: when staff answer, the person is notified on their devices (that 
     await call(staff.cookie, `/api/admin/support/${id}/reply`, { body: 'ردّنا السري عليك' });
     await new Promise(r => setTimeout(r, 80));
     assert.equal(sent.length, 1);
-    assert.equal(sent[0].url, '/#/you'); assert.match(sent[0].body, /ذكرى/);
+    assert.equal(sent[0].url, '/#/you'); assert.match(sent[0].body, /تمتم/);
     assert.ok(!JSON.stringify(sent[0]).includes('السري'), 'the answer\'s text never goes in a notification');
   } finally { setTransport(null); }
 });
