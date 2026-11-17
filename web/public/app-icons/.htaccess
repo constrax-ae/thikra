@@ -1,0 +1,10 @@
+# These icons are fetched by the browser and the phone under fixed names - favicon, touch icon,
+# the manifest's icons - so a new logo arrives under the SAME url and a cache can hide it. The
+# panel host answers for the document root itself, so the Cache-Control in server/index.ts never
+# reaches them, and what the web server sends is Last-Modified with no Cache-Control at all: a
+# browser then guesses the freshness, roughly a tenth of the file's age, and an icon that had sat
+# there a month stays cached for days after it changes. Seen on tamtim.com the day the logo
+# changed. Ask every time; the file is 40 KB and the answer is usually 304.
+<IfModule mod_headers.c>
+  Header set Cache-Control "no-cache"
+</IfModule>
