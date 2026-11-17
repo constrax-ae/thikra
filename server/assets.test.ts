@@ -73,3 +73,16 @@ test('the built page is named so no web server serves it instead of the app', ()
     assert.ok(existsSync('dist/app.html'), 'a built dist has the page under its sealed name');
   }
 });
+
+/**
+ * Chrome offers to translate an Arabic page to an English-speaking visitor almost every time. When it
+ * accepts, it rewrites the text nodes React is holding, and the next navigation throws
+ * "removeChild: the node to be removed is not a child of this node" - a white screen, no recovery.
+ * Seen live on tamtim.com. The app already speaks 21 languages and has its own picker, so there is
+ * nothing to gain and a whole session to lose.
+ */
+test('the page opts out of browser translation', () => {
+  const html = readFileSync('web/index.html', 'utf8');
+  assert.match(html, /<html[^>]*\stranslate="no"/, 'the document declares translate="no"');
+  assert.match(html, /<meta\s+name="google"\s+content="notranslate"\s*\/?>/, 'and tells Google not to offer it');
+});

@@ -1,9 +1,16 @@
 <!doctype html>
-<html lang="ar" dir="rtl">
+<html lang="ar" dir="rtl" translate="no">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#1f4d3f" />
+    <!-- Do not let the browser translate this page.
+         The app speaks 21 languages itself and has its own language picker, so a browser translation
+         adds nothing - and it costs everything: Chrome rewrites the text nodes under React's feet, and
+         the next navigation dies with "removeChild: the node to be removed is not a child of this node",
+         leaving a white screen. An Arabic-first app is offered that translation constantly, so this is
+         not an edge case. Seen live on tamtim.com before this line existed. -->
+    <meta name="google" content="notranslate" />
     <link rel="icon" type="image/png" sizes="32x32" href="/app-icons/favicon-32.png" />
     <link rel="apple-touch-icon" href="/app-icons/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
