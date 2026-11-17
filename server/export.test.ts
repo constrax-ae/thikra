@@ -21,7 +21,7 @@ async function login(name: string) {
 const j = async (cookie: string, path: string, method = 'GET', body?: unknown) =>
   (await app.request(path, { method, headers: { 'content-type': 'application/json', cookie }, body: body === undefined ? undefined : JSON.stringify(body) })).json() as Promise<any>;
 
-test('the export has what you could see and nothing else, with the real files, and needs no Thekra to read', async () => {
+test('the export has what you could see and nothing else, with the real files, and needs no Tamtim to read', async () => {
   const a = await login('سارة'), b = await login('خالد');
   const circle = (await j(a, '/api/circles', 'POST', { name: 'العائلة' })).id as number;
   await j(b, '/api/circles/join', 'POST', { code: (await j(a, `/api/circles/${circle}`)).inviteCode });

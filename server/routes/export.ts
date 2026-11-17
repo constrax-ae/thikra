@@ -8,7 +8,7 @@ import { limited } from '../lib/helpers.ts';
 import { strToU8, zipSync } from 'fflate';
 import { readStory } from '../lib/story.ts';
 
-// A zip of everything you can see, as plain JSON plus the original files: no lock-in, readable without Thekra (README.txt inside).
+// A zip of everything you can see, as plain JSON plus the original files: no lock-in, readable without Tamtim (README.txt inside).
 // It contains only what you could read in the app: messages you deleted for yourself, and ones deleted for everyone, are not in it.
 app.get('/api/me/export', async c => {
   const u = c.get('user');
@@ -77,7 +77,7 @@ app.get('/api/me/export', async c => {
   const cases = all('SELECT id, subject, status, created_at AS createdAt FROM support_cases WHERE user_id = ? ORDER BY id', u.id).map(k => ({ ...k, messages: all('SELECT from_staff AS fromStaff, body, created_at AS createdAt FROM support_messages WHERE case_id = ? ORDER BY id', k.id) }));
   if (cases.length) json('support-messages-i-wrote.json', cases);
   if (omitted.length) json('omitted-files.json', { reason: `the export is limited to ${EXPORT_MAX_BYTES / 1048576} MB of files`, files: omitted });
-  files['README.txt'] = strToU8(`Thekra data export\n\nEverything you could see in the app, as plain files:\n- profile.json: your details and your circles\n- circles/<id>-<name>/messages.json: the messages (JSON), with the files they carry under files/\n- archive.json / people.json: what the agent documented and the family record (family circles)\n- albums/: the family's albums (pictures and voices), with album.json for each\n- story-<year>.json: the family story, chapter by chapter\n- sealed-messages-i-wrote.json: letters you sealed that have not opened yet\n- support-messages-i-wrote.json: what you wrote to the Thekra team, and its answers\n\nMessages you deleted for yourself, and messages deleted for everyone, are not included.\nYou do not need Thekra to read any of this: every file is JSON or the original photo/video/document.\n`);
+  files['README.txt'] = strToU8(`Tamtim data export\n\nEverything you could see in the app, as plain files:\n- profile.json: your details and your circles\n- circles/<id>-<name>/messages.json: the messages (JSON), with the files they carry under files/\n- archive.json / people.json: what the agent documented and the family record (family circles)\n- albums/: the family's albums (pictures and voices), with album.json for each\n- story-<year>.json: the family story, chapter by chapter\n- sealed-messages-i-wrote.json: letters you sealed that have not opened yet\n- support-messages-i-wrote.json: what you wrote to the Tamtim team, and its answers\n\nMessages you deleted for yourself, and messages deleted for everyone, are not included.\nYou do not need Tamtim to read any of this: every file is JSON or the original photo/video/document.\n`);
   const zip = zipSync(files, { level: 0 }); // level 0: media is already compressed, and it keeps the request fast
   return new Response(zip, { headers: { 'content-type': 'application/zip', 'content-disposition': `attachment; filename="thikra-export-${new Date().toISOString().slice(0, 10)}.zip"`, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' } });
 });

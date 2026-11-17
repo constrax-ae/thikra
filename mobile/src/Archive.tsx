@@ -28,7 +28,7 @@ const monthOf = (iso: string) => {
 
 /**
  * One circle's archive: what the agent documented from this family's messages — the
- * thing Thekra does that WhatsApp does not. Same shape as the web's Archive tab: search,
+ * thing Tamtim does that WhatsApp does not. Same shape as the web's Archive tab: search,
  * the family story book, then the events by month on a gold rail.
  */
 export function Archive({ chat, detail }: { chat: Chat; detail: CircleDetail | null }) {

@@ -28,7 +28,7 @@ import { FadeIn } from './src/ui';
 import { loadLang, useLang } from './src/i18n';
 
 /**
- * Thekra for the phone.
+ * Tamtim for the phone.
  *
  * The three tabs are the web's three places — chats, memory, you — so someone who uses
  * both finds the same things in the same order. A chat opens over the whole screen, the
@@ -45,9 +45,9 @@ function Root() {
   // Tajawal with the web's vertical-metric correction baked in (assets/fonts, see theme.ts):
   // the stock files sit text high in every button and field.
   const [fontsLoaded, fontError] = useFonts({
-    'Thekra-Regular': require('./assets/fonts/Tajawal_400Regular.ttf'),
-    'Thekra-Medium': require('./assets/fonts/Tajawal_500Medium.ttf'),
-    'Thekra-Bold': require('./assets/fonts/Tajawal_700Bold.ttf'),
+    'Tamtim-Regular': require('./assets/fonts/Tajawal_400Regular.ttf'),
+    'Tamtim-Medium': require('./assets/fonts/Tajawal_500Medium.ttf'),
+    'Tamtim-Bold': require('./assets/fonts/Tajawal_700Bold.ttf'),
   });
   const fonts = fontsLoaded || !!fontError;
   const [me, setMe] = useState<Me | null | undefined>(undefined);   // undefined = still checking the saved session

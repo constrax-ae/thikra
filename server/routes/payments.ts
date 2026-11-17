@@ -28,11 +28,11 @@ app.post('/api/circles/:id/checkout', async c => {
   const def = plans()[b.plan as PlanId];
   const amountCents = Math.round((interval === 'year' ? def.priceYearly : def.priceMonthly) * 100);
   if (!Number.isFinite(amountCents) || amountCents < 50) return c.json({ error: 'invalid_value' }, 400);
-  const name = one('SELECT name FROM circles WHERE id = ?', a.circleId)?.name ?? 'Thekra';
+  const name = one('SELECT name FROM circles WHERE id = ?', a.circleId)?.name ?? 'Tamtim';
   const base = baseUrl(c);
   try {
     // The Price the owner created in Stripe for this plan and interval, when there is one; otherwise an inline price from our own table.
-    const s = await createCheckout({ circleId: a.circleId, plan: b.plan, interval, amountCents, currency: def.currency, productName: `Thekra ${b.plan}: ${String(name).slice(0, 60)}`, priceId: priceId(b.plan, interval), successUrl: `${base}/?paid=1#/circle/${a.circleId}/settings`, cancelUrl: `${base}/#/circle/${a.circleId}/settings` });
+    const s = await createCheckout({ circleId: a.circleId, plan: b.plan, interval, amountCents, currency: def.currency, productName: `Tamtim ${b.plan}: ${String(name).slice(0, 60)}`, priceId: priceId(b.plan, interval), successUrl: `${base}/?paid=1#/circle/${a.circleId}/settings`, cancelUrl: `${base}/#/circle/${a.circleId}/settings` });
     return c.json({ url: s.url });
   } catch (e) { return stripeFail(c, e); }
 });

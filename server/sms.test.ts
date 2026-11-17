@@ -51,7 +51,7 @@ test('cost protection helpers: allowed countries and the daily cap', () => {
   assert.equal(takeDailyBudget(3, new Date('2026-10-20T00:01:00Z')), true, 'a new day starts again');
   resetDailyBudget();
   assert.match(otpText('123456', 'ar'), /123456/);
-  assert.match(otpText('123456', 'en'), /Thekra code: 123456/);
+  assert.match(otpText('123456', 'en'), /Tamtim code: 123456/);
 });
 
 test('with a real-style provider the code goes by SMS only: never in the response; failures leave no usable code; countries and the daily cap apply', async () => {
@@ -69,7 +69,7 @@ test('with a real-style provider the code goes by SMS only: never in the respons
   assert.equal(sent.length, 1);
   const code = sent[0].text.match(/(\d{6})/)![1];
   assert.equal(sent[0].to, '+966500000401');
-  assert.match(sent[0].text, /Thekra code/, 'in the language the app asked for');
+  assert.match(sent[0].text, /Tamtim code/, 'in the language the app asked for');
   assert.equal((await verify('+966500000401', code)).status, 200, 'the SMS code logs in');
 
   assert.equal((await req('+971500000402')).status, 403, 'a country that is not on the list gets nothing (and costs nothing)');
@@ -108,15 +108,15 @@ test('an HTTP provider sends exactly the request its configuration describes', a
   const { p, seen } = http({
     THIKRA_SMS_URL: 'https://sms.example.test/v1/send',
     THIKRA_SMS_HEADERS: '{"Authorization":"Bearer secret-token"}',
-    THIKRA_SMS_BODY: '{"to":"{to}","local":"{to_digits}","message":"{text}","sender":"Thekra"}',
+    THIKRA_SMS_BODY: '{"to":"{to}","local":"{to_digits}","message":"{text}","sender":"Tamtim"}',
   });
-  await p.send('+971500112233', 'Thekra code: 123456');
+  await p.send('+971500112233', 'Tamtim code: 123456');
   assert.equal(seen.length, 1);
   assert.equal(seen[0].url, 'https://sms.example.test/v1/send');
   assert.equal(seen[0].method, 'POST');
   assert.equal(seen[0].headers.authorization, 'Bearer secret-token');
   assert.equal(seen[0].headers['content-type'], 'application/json', 'JSON unless the configuration says otherwise');
-  assert.deepEqual(JSON.parse(seen[0].body!), { to: '+971500112233', local: '971500112233', message: 'Thekra code: 123456', sender: 'Thekra' });
+  assert.deepEqual(JSON.parse(seen[0].body!), { to: '+971500112233', local: '971500112233', message: 'Tamtim code: 123456', sender: 'Tamtim' });
 });
 
 test('a GET-style provider puts the number and message in the URL, percent-encoded', async () => {
@@ -125,12 +125,12 @@ test('a GET-style provider puts the number and message in the URL, percent-encod
     THIKRA_SMS_URL: 'https://sms.example.test/send?user=u&pass=p&to={to_digits}&body={text}',
     THIKRA_SMS_METHOD: 'get',
   });
-  await p.send('+966501234567', 'رمز ذكرى: 445566');
+  await p.send('+966501234567', 'رمز تمتم: 445566');
   assert.equal(seen[0].method, 'GET');
   assert.equal(seen[0].body, undefined, 'a GET carries no body');
   const u = new URL(seen[0].url);
   assert.equal(u.searchParams.get('to'), '966501234567');
-  assert.equal(u.searchParams.get('body'), 'رمز ذكرى: 445566', 'the Arabic text arrives as written');
+  assert.equal(u.searchParams.get('body'), 'رمز تمتم: 445566', 'the Arabic text arrives as written');
   assert.ok(!seen[0].url.includes(' '), 'nothing is left unencoded in a URL');
 });
 

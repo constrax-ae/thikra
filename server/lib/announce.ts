@@ -61,7 +61,7 @@ export function cardsFor(userId: number): Card[] {
   if (m.on && (!m.until || n < m.until)) {
     const live = !m.from || m.from <= n;
     out.push({ id: 'maintenance', level: 'maintenance', titleAr: live ? 'صيانة مؤقتة' : 'صيانة مجدولة', titleEn: live ? 'Maintenance' : 'Scheduled maintenance',
-      bodyAr: m.messageAr || (live ? 'التطبيق للقراءة فقط الآن. سنعود قريباً.' : `ستكون ذكرى للقراءة فقط ابتداءً من ${String(m.from).slice(0, 16)} (UTC).`), bodyEn: m.messageEn || (live ? 'The app is read-only for now. We will be back soon.' : `Thekra will be read-only from ${String(m.from).slice(0, 16)} (UTC).`), until: m.until, upcoming: !live });
+      bodyAr: m.messageAr || (live ? 'التطبيق للقراءة فقط الآن. سنعود قريباً.' : `سيكون تمتم للقراءة فقط ابتداءً من ${String(m.from).slice(0, 16)} (UTC).`), bodyEn: m.messageEn || (live ? 'The app is read-only for now. We will be back soon.' : `Tamtim will be read-only from ${String(m.from).slice(0, 16)} (UTC).`), until: m.until, upcoming: !live });
   }
   for (const a of all("SELECT * FROM announcements WHERE status = 'active' AND starts_at <= ? AND ends_at > ? AND id NOT IN (SELECT announcement_id FROM announcement_acks WHERE user_id = ?) ORDER BY id DESC LIMIT 5", n, n, userId)) {
     if (!inAudience(userId, parseAudience(a.audience))) continue;
@@ -87,7 +87,7 @@ export async function runBroadcasts(): Promise<number> {
       const users = audienceAfter(audience, cursor, page);
       if (!users.length) break;
       for (const u of users) {
-        const n = await pushToUser(u.id, { title: 'Thekra', body: textLang(u.lang) === 'en' ? b.body_en : b.body_ar, circle: 0, tag: `bc-${b.id}`, url: '/#/' }).catch(() => 0);
+        const n = await pushToUser(u.id, { title: 'Tamtim', body: textLang(u.lang) === 'en' ? b.body_en : b.body_ar, circle: 0, tag: `bc-${b.id}`, url: '/#/' }).catch(() => 0);
         if (n > 0) sent++; else skipped++;
         cursor = u.id;
       }

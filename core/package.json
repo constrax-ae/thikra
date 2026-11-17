@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Thekra's shared rules: agent engine, AI gate, moments, WhatsApp import, phone helpers, sequence timeline. Pure TypeScript with no server or UI dependency, so the server, the web client and the future mobile app run the same code.",
+  "description": "Tamtim's shared rules: agent engine, AI gate, moments, WhatsApp import, phone helpers, sequence timeline. Pure TypeScript with no server or UI dependency, so the server, the web client and the future mobile app run the same code.",
   "exports": {
     "./agent": "./agent.ts",
     "./gate": "./gate.ts",

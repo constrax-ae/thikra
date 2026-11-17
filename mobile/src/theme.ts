@@ -76,7 +76,7 @@ export const text = {
  * button and field. Regenerate with fontTools if the font is ever updated.
  * The web renders "bold" at 500 (owner's rule: calm type), so `bold` is Medium and `heavy` is 700.
  */
-export const font = { regular: 'Thekra-Regular', medium: 'Thekra-Medium', bold: 'Thekra-Medium', heavy: 'Thekra-Bold' };
+export const font = { regular: 'Tamtim-Regular', medium: 'Tamtim-Medium', bold: 'Tamtim-Medium', heavy: 'Tamtim-Bold' };
 
 /** Three elevation levels, green-tinted in light mode like the web's --shadow-e1..e3. */
 export const elevation = (p: Palette, level: 1 | 2 | 3) => ({

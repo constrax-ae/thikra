@@ -212,7 +212,7 @@ export function reject(id: number, by: number): boolean {
 export interface Answer { answer: string; source: 'rules' | 'model'; tools: string[]; proposals: number[] }
 
 /** The instructions the model works under (also in docs/AGENT-OPS.md). */
-export const SYSTEM_PROMPT = `You are the operations agent of Thekra, a private family-memory app. One owner runs the whole platform with you; you are their chief of staff.
+export const SYSTEM_PROMPT = `You are the operations agent of Tamtim, a private family-memory app. One owner runs the whole platform with you; you are their chief of staff.
 RULES, never broken:
 1. Use ONLY the tools. If the data is not there, say so; never guess numbers, names or causes.
 2. You see metadata only. Never ask for, repeat or infer family message text, archive content, or full phone numbers. If asked, refuse and explain the privacy rule. The one exception: what a person wrote TO the team in a support case (numbers already hidden) may be read to draft an answer.

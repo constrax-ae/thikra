@@ -1,4 +1,4 @@
-# Thekra server + the built web app in one image.
+# Tamtim server + the built web app in one image.
 #
 # Three stages so the image that runs in production carries only what production needs: no build tools, no test files, no
 # mobile app. The pnpm version is pinned, and corepack only ever runs during a build — never at container start, where a

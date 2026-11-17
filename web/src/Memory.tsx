@@ -6,7 +6,7 @@ import { Icon } from './icons';
 
 interface Entry { id: number; title: string; summary: string; category: string | null; eventDate: string; kind: string; circleId: number; circleName: string }
 
-/** The "Memory" tab: Thekra's own addition. One timeline of everything the agent documented across all your family circles. */
+/** The "Memory" tab: Tamtim's own addition. One timeline of everything the agent documented across all your family circles. */
 export function Memory({ onOpenArchive }: { onOpenArchive: (id: number) => void }) {
   const { t, lang } = useI18n();
   const [entries, setEntries] = useState<Entry[] | null>(null);

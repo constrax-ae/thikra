@@ -20,4 +20,4 @@ export function verifyCode(secret: string, code: unknown, lastStep = 0, now = Da
   for (const step of [s, s - 1, s + 1]) if (step > lastStep && codeAt(secret, step) === code.trim()) return step;
   return null;
 }
-export const otpauthUri = (secret: string, account: string, issuer = 'Thekra') => `otpauth://totp/${encodeURIComponent(issuer)}:${encodeURIComponent(account)}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=30`;
+export const otpauthUri = (secret: string, account: string, issuer = 'Tamtim') => `otpauth://totp/${encodeURIComponent(issuer)}:${encodeURIComponent(account)}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=30`;

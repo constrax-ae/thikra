@@ -23,7 +23,7 @@ export function notifyMembers(circleId: number, row: Row) {
     const text = String(row.body || row.transcript || '').slice(0, 90);
     const what = row.kind === 'voice' ? words.voice : att === 'image' ? words.photo : att === 'video' ? words.video : att ? words.file : text;
     const body = !r.preview ? words.msg : circle.kind === 'direct' ? what : `${row.author ?? ''}: ${what}${att && text ? ' ' + text : ''}`;
-    const title = !r.preview ? 'Thekra' : circle.kind === 'direct' ? (row.author ?? 'Thekra') : circle.name;
+    const title = !r.preview ? 'Tamtim' : circle.kind === 'direct' ? (row.author ?? 'Tamtim') : circle.name;
     pushToUser(r.id, { title, body, circle: circleId, tag: `circle-${circleId}` }).catch(e => console.error('[push]', e));
   }
 }

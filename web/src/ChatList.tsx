@@ -390,7 +390,7 @@ export function HeroArt({ size = 'md' }: { size?: 'md' | 'lg' }) {
   );
 }
 
-/** What Thekra is for, in three lines. Shown under the first-run empty state and the welcome pane. */
+/** What Tamtim is for, in three lines. Shown under the first-run empty state and the welcome pane. */
 export function FeatureList({ layout = 'stack' }: { layout?: 'stack' | 'row' }) {
   const { t } = useI18n();
   const items: Array<[IconName, string, string]> = [

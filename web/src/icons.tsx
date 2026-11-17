@@ -80,7 +80,7 @@ export function Icon({ name, className = 'w-5 h-5' }: { name: IconName; classNam
   );
 }
 
-/** The wordmark in the header: the app icon (owner's ذكرى calligraphy) and the name. */
+/** The wordmark in the header: the app icon (the owner's smiling speech bubble) and the name. */
 export function Wordmark({ name }: { name: string }) {
   return (
     <span className="flex items-center gap-2.5">

@@ -96,7 +96,7 @@ function InstallHelp() {
   );
 }
 
-/** "You": the settings page, grouped the way WhatsApp users expect, with Thekra's own additions where they belong. */
+/** "You": the settings page, grouped the way WhatsApp users expect, with Tamtim's own additions where they belong. */
 /** Two-step verification: a 6-digit PIN asked after the SMS code, so a stolen SIM or a leaked code alone is not enough. */
 function TwoStep({ has, onDone }: { has: boolean; onDone: () => void }) {
   const { t } = useI18n();

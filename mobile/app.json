@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "ذكرى · Thekra",
+    "name": "تمتم · Tamtim",
     "slug": "thekra",
     "version": "0.1.0",
     "orientation": "portrait",
@@ -14,7 +14,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#1f4d3f",
+        "backgroundColor": "#f5f1e8",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"

@@ -37,7 +37,7 @@ app.get('/api/auth/handoff/:token', async c => {
   const held = (await state.kv.get(key(token))) as { userId: number; path: string } | undefined;
   await state.kv.del(key(token));   // single use, whatever happens next
   if (!held || !/^\/api\/circles\/\d+\/book\?year=\d{4}(&lang=[a-z]{2,3})?$/.test(held.path)) {
-    return c.html('<!doctype html><meta name="viewport" content="width=device-width"><p style="font-family:system-ui;padding:24px">This link has expired. Open the story again from the Thekra app.</p>', 410);
+    return c.html('<!doctype html><meta name="viewport" content="width=device-width"><p style="font-family:system-ui;padding:24px">This link has expired. Open the story again from the Tamtim app.</p>', 410);
   }
   startSession(c, held.userId);
   return c.redirect(held.path, 302);

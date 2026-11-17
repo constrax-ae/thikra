@@ -6,7 +6,7 @@ import { all, one, run } from '../db.ts';
 export const FLAGS = {
   signups_open: { default: true, description: 'New accounts may be created (turn off to stop sign-ups during an incident or an invite-only period).' },
   agent_enabled: { default: true, description: 'The memory agent runs at all (turn off to stop every circle\'s agent at once, for example when its cost or behaviour needs a pause).' },
-  sealed_after_death: { default: false, description: 'Letters that open after the author\'s death (concluded by the agent). Off by default: Thekra offers only letters tied to an event and letters scheduled on dates. Letters already written keep working.' },
+  sealed_after_death: { default: false, description: 'Letters that open after the author\'s death (concluded by the agent). Off by default: Tamtim offers only letters tied to an event and letters scheduled on dates. Letters already written keep working.' },
   sealed_enabled: { default: true, description: 'New sealed letters may be written (letters already sealed keep their schedule).' },
 } as const;
 export type FlagName = keyof typeof FLAGS;

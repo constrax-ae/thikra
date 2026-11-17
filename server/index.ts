@@ -135,6 +135,6 @@ export function startServer(port: number, onListening?: (port: number) => void) 
   return server;
 }
 if (process.env.THIKRA_NO_LISTEN !== '1') {
-  startServer(Number(process.env.PORT ?? 8787), p => console.log(`Thekra API on http://localhost:${p}`));
+  startServer(Number(process.env.PORT ?? 8787), p => console.log(`Tamtim API on http://localhost:${p}`));
 }
 

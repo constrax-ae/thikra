@@ -1,4 +1,4 @@
-// The languages Thekra speaks. The screens are translated into all of them; what the SERVER writes (codes by SMS, notifications) is written in the person's language
+// The languages Tamtim speaks. The screens are translated into all of them; what the SERVER writes (codes by SMS, notifications) is written in the person's language
 // where we have it, in Arabic for Arabic speakers, and in English for everybody else (never Arabic for someone who cannot read it).
 export const LANGS = ['ar', 'en', 'ur', 'hi', 'tl', 'fr', 'ml', 'bn', 'fa', 'tr', 'es', 'ru', 'zh', 'de', 'it', 'pt', 'nl', 'pl', 'uk', 'el', 'sv'] as const;
 export type AnyLang = typeof LANGS[number];

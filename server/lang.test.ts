@@ -8,10 +8,10 @@ const { otpText } = await import('./sms.ts');
 const { normLang, textLang, isLang, LANGS } = await import('./lib/lang.ts');
 
 test('the sign-in code is worded in the person\'s language; a language without a template gets English, never Arabic', () => {
-  assert.equal(otpText('123456', 'ar'), 'رمز ذكرى: 123456. لا تشاركه مع أحد.');
-  assert.equal(otpText('123456', 'en'), 'Thekra code: 123456. Do not share it with anyone.');
-  assert.match(otpText('123456', 'fr'), /Code Thekra : 123456/);
-  assert.match(otpText('123456', 'es'), /Código de Thekra: 123456/);
+  assert.equal(otpText('123456', 'ar'), 'رمز تمتم: 123456. لا تشاركه مع أحد.');
+  assert.equal(otpText('123456', 'en'), 'Tamtim code: 123456. Do not share it with anyone.');
+  assert.match(otpText('123456', 'fr'), /Code Tamtim : 123456/);
+  assert.match(otpText('123456', 'es'), /Código de Tamtim: 123456/);
   assert.match(otpText('123456', 'zh'), /验证码：123456/);
   assert.match(otpText('123456', 'tl'), /Huwag itong ibahagi/);
   assert.match(otpText('123456', 'hi'), /कोड: 123456/);
