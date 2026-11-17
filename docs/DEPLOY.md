@@ -120,3 +120,22 @@ STRIPE_PRICE_HERITAGE_MONTH=price_…   STRIPE_PRICE_HERITAGE_YEAR=price_…
 - **المراقبة:** الإدارة، «نظرة عامة»: حالة النسخة الخارجية وآخر لقطة وأي خطأ.
 - **اختبار:** `server/offsite.test.ts` يشغّل خوادم حقيقية: قرص يُمسح، وملف قديم يعود، وقرص أحدث لا يُستبدل.
 - **جُرّب على تخزين ريبليت الحقيقي (2026-10-21):** بعد إنشاء الحاوية وإعادة النشر ظهرت في الحاوية `db/manifest.json` و`db/thikra.db.gz` و`db/daily/` و`blobs/` بعد دقيقة من الإقلاع. **لم تُجرَّب بعدُ الاستعادة من التخزين الحقيقي** (جُرّبت على مجلد بخوادم حقيقية): تُجرَّب بأن يُنشأ شيء على الموقع العام ثم يُعاد النشر فيبقى. حدّ الخسارة: دقائق.
+
+## الملفات الثابتة خلف لوحة الاستضافة (Plesk/nginx)
+
+على tamtim.com يردّ **nginx** بنفسه على كل ملف موجود في جذر المستند (`/httpdocs/dist`)، فلا يمرّ الطلب على التطبيق ولا تصل ترويسات التخزين التي يضعها `server/index.ts`. وما يرسله nginx هو `Last-Modified` **بلا `Cache-Control` إطلاقاً**، فيُقدّر المتصفّح الصلاحية بنفسه: نحو عُشر عمر الملف. ملف جالس منذ شهر يبقى في ذاكرة المتصفّح **أياماً** بعد تغييره، ولا ينفع تحديث قسري.
+
+ظهر هذا يوم استُبدل الشعار: الموقع كان ينشر الشعار الجديد وكل متصفّح زار الموقع قبلها يرسم القديم.
+
+**ما يرسمه التطبيق لنفسه** لم يعد ملفاً باسم ثابت: `web/src/brand/logo-tile.png` يستورده الكود، فيحمل اسماً ببصمة محتواه (`/assets/logo-tile-<hash>.png`) ويصل فوراً. أما ما يطلبه المتصفّح والهاتف بالاسم (الأيقونات، `manifest.webmanifest`، `sw.js`، الخطوط) فيحتاج قاعدة في الاستضافة. في **Websites & Domains ← Apache & nginx Settings ← Additional nginx directives**:
+
+```nginx
+# أسماء ثابتة يجب أن يسأل عنها المتصفّح في كل مرة
+location ~* ^/(app-icons/|manifest\.webmanifest$|sw\.js$) { add_header Cache-Control "no-cache"; }
+# أسماء فيها بصمة المحتوى: لا تتغيّر أبداً تحت الاسم نفسه
+location ^~ /assets/ { add_header Cache-Control "public, max-age=31536000, immutable"; }
+# الخطوط لا تتغيّر عملياً
+location ^~ /fonts/  { add_header Cache-Control "public, max-age=2592000"; }
+```
+
+تحقّق بعد الحفظ: `curl -sI https://tamtim.com/sw.js | grep -i cache-control`.

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 
 const manifest = JSON.parse(readFileSync('web/public/manifest.webmanifest', 'utf8'));
 const pngSize = (path: string) => {
@@ -92,4 +92,25 @@ test('the page opts out of browser translation', () => {
   const html = readFileSync('web/index.html', 'utf8');
   assert.match(html, /<html[^>]*\stranslate="no"/, 'the document declares translate="no"');
   assert.match(html, /<meta\s+name="google"\s+content="notranslate"\s*\/?>/, 'and tells Google not to offer it');
+});
+
+/**
+ * The panel host's nginx answers for the document root itself, and it sends static files with NO
+ * Cache-Control - only Last-Modified. A browser then caches them heuristically, for roughly a tenth
+ * of their age, so a file that had sat there a month keeps coming from the cache for days after it
+ * changes. The new logo went live on tamtim.com and every browser that had already been there kept
+ * drawing the old one, hard reload included. So the tile the app draws for itself is imported, not
+ * fetched by name: the bundler gives it a content-hashed filename, and a new logo is a new url.
+ * (The icons the BROWSER and the phone fetch - favicon, touch icon, manifest - must keep fixed
+ * names; docs/DEPLOY.md has the nginx rule that makes those revalidate.)
+ */
+test('the logo the app draws is a bundled asset, not a fixed path under the document root', () => {
+  for (const file of ['web/src/icons.tsx', 'web/src/Login.tsx']) {
+    const src = readFileSync(file, 'utf8');
+    assert.match(src, /^import tile from '\.\/brand\/logo-tile\.png';$/m, `${file} imports the tile`);
+    assert.ok(!src.includes('/app-icons/logo-'), `${file} must not fetch the tile by name`);
+  }
+  assert.ok(existsSync('web/src/brand/logo-tile.png'), 'and the tile is built into the sources');
+  if (existsSync('dist/assets'))
+    assert.ok(readdirSync('dist/assets').some(f => /^logo-tile-.+\.png$/.test(f)), 'a built dist has it content-hashed');
 });

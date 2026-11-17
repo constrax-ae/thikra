@@ -28,7 +28,8 @@ swift brand/make_icons.swift        # من جذر المستودع، ولا يح
 
 | الوجهة | الملفات |
 |---|---|
-| `web/public/app-icons/` | `icon-512`، `icon-192`، `apple-touch-icon` (180)، `logo-160`، `favicon-32`، `icon-maskable-512`، `icon-mono-96` |
+| `web/public/app-icons/` | `icon-512`، `icon-192`، `apple-touch-icon` (180)، `favicon-32`، `icon-maskable-512`، `icon-mono-96` — ما يطلبه المتصفّح والهاتف بالاسم |
+| `web/src/brand/` | `logo-tile.png` — المربّع الذي يرسمه التطبيق نفسه (الرأس وشاشة الدخول). يستورده الكود فيعطيه المُجمِّع اسماً ببصمة محتواه، فيصل الشعار الجديد فوراً ولا يعلق في ذاكرة المتصفّح |
 | `mobile/assets/` | `icon` (1024)، `splash-icon`، `logo`، `favicon`، طبقات أندرويد الثلاث، `splash-light`، `splash-dark` |
 | `brand/out/` | `icon-1024` (للمتاجر)، `lockup.png` (بخلفية شفافة)، `icon-512-on-green` (البديل المعكوس)، `icon-preview` (ورقة معاينة) |
 

@@ -1,3 +1,4 @@
+import tile from './brand/logo-tile.png';
 // One line-icon set for the whole app (replaces emoji, which render differently on every phone and look cheap).
 // 24×24, 1.75 stroke, currentColor: icons take the text colour, so they follow the light and dark themes automatically.
 import type { ReactElement } from 'react';
@@ -84,7 +85,7 @@ export function Icon({ name, className = 'w-5 h-5' }: { name: IconName; classNam
 export function Wordmark({ name }: { name: string }) {
   return (
     <span className="flex items-center gap-2.5">
-      <img src="/app-icons/logo-160.png" alt="" width={40} height={40} className="w-10 h-10 rounded-xl elevated-1" />
+      <img src={tile} alt="" width={40} height={40} className="w-10 h-10 rounded-xl elevated-1" />
       <span className="text-2xl font-bold text-green tracking-tight">{name}</span>
     </span>
   );

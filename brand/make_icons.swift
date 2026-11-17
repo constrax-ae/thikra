@@ -128,7 +128,7 @@ print("web/public/app-icons:")
 let WEB = "web/public/app-icons"
 // Full-bleed: a phone rounds the corners itself, so the icon is a square of the logo's own cream.
 for (name, size) in [("icon-512.png", 512), ("icon-192.png", 192), ("apple-touch-icon.png", 180),
-                     ("logo-160.png", 160), ("favicon-32.png", 32)] {
+                     ("favicon-32.png", 32)] {
     write(square(size, MARK, fraction: 0.74, background: PAPER), "\(WEB)/\(name)")
 }
 // Maskable: Android may crop this to a circle, so the mark stays inside the safe middle.
@@ -137,6 +137,11 @@ write(square(512, MARK, fraction: 0.56, background: PAPER), "\(WEB)/icon-maskabl
 // It stays an outline rather than a filled blob: the bubble is drawn with gaps (the chin is a separate
 // stroke), so there is no inside to fill - and at 24 px the ring with its two eyes still reads as this logo.
 write(square(96, MARK, fraction: 0.86, background: nil, tint: (255, 255, 255)), "\(WEB)/icon-mono-96.png")
+
+// The tile the app itself shows (the header and the sign-in screen) is imported by the code, not
+// fetched by name: the bundler gives it a content-hashed filename, so a new logo reaches people the
+// moment they load the page. A fixed name under the document root would not - see docs/DEPLOY.md.
+write(square(320, MARK, fraction: 0.74, background: PAPER), "web/src/brand/logo-tile.png")
 
 print("mobile/assets:")
 let APP = "mobile/assets"

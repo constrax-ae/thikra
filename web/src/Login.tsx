@@ -1,3 +1,4 @@
+import tile from './brand/logo-tile.png';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { parsePhoneNumberFromString } from 'libphonenumber-js/min';
 import { api, ApiError } from './api';
@@ -121,7 +122,7 @@ export function Login({ onDone }: { onDone: () => void }) {
     <main className="min-h-full flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-6">
-          <img src="/app-icons/logo-160.png" alt="Tamtim تمتم" width={80} height={80} className="mx-auto mb-3 w-20 h-20 rounded-2xl" />
+          <img src={tile} alt="Tamtim تمتم" width={80} height={80} className="mx-auto mb-3 w-20 h-20 rounded-2xl" />
           <h1 className="text-4xl font-bold text-green">{t.appName}</h1>
           <p className="mt-2 text-muted">{t.tagline}</p>
         </div>
