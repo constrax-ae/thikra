@@ -10,7 +10,8 @@ const apply = (t: Theme) => { if (t === 'system') document.documentElement.remov
 // Applied before the first paint, so a dark-mode user never sees a white flash.
 if (typeof document !== 'undefined') apply(read());
 
-/** Light, dark, or follow the device (dark is the default). Remembered on this device. */
+/** Light, dark, or follow the device. LIGHT is the default - the brand is paper and green, and
+ *  that is what a first-time visitor should see, whatever their phone is set to. Remembered per device. */
 export function useTheme() {
   const [theme, set] = useState<Theme>(read);
   useEffect(() => {
