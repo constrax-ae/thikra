@@ -1,5 +1,3 @@
-import lockupLight from './brand/lockup-light.png';
-import lockupDark from './brand/lockup-dark.png';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { parsePhoneNumberFromString } from 'libphonenumber-js/min';
 import { api, ApiError } from './api';
@@ -7,7 +5,7 @@ import { LangPicker, MachineNote } from './LangPicker';
 import { useI18n, intlLocale } from './i18n';
 import { Dialog } from './Dialog';
 import { BusyButton } from './States';
-import { Icon } from './icons';
+import { Icon, Wordmark } from './icons';
 import { callingCode, flagEmoji, formatTyped, guessCountry, listCountries, type CountryCode } from '../../core/phone';
 
 const CODE_LENGTH = 6;
@@ -123,12 +121,9 @@ export function Login({ onDone }: { onDone: () => void }) {
     <main className="min-h-full flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-6">
-          {/* The owner's logo, whole and on no tile: this screen has the room for it. It is drawn
-              in two inks because the app has two themes, and only the one that belongs to the
-              theme in use is displayed (.logo-light / .logo-dark in styles.css). */}
-          <h1 className="mb-4">
-            <img src={lockupLight} alt={t.appName} className="logo-light mx-auto w-64 max-w-full h-auto" />
-            <img src={lockupDark} alt={t.appName} className="logo-dark mx-auto w-64 max-w-full h-auto" />
+          {/* The owner's logo in the app's language (Arabic or English), large: this screen has the room. */}
+          <h1 className="mb-4 flex justify-center">
+            <Wordmark name={t.appName} className="w-64 max-w-full h-auto" />
           </h1>
           <p className="mt-2 text-muted">{t.tagline}</p>
         </div>
