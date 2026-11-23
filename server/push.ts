@@ -5,7 +5,7 @@
 import webpush from 'web-push';
 import { one, run, all } from './db.ts';
 
-export interface PushPayload { title: string; body: string; circle: number; tag: string; url?: string }
+export interface PushPayload { title: string; body: string; circle: number; tag: string; url?: string; enc?: 1 }
 export type Transport = (sub: { endpoint: string; keys: { p256dh: string; auth: string } }, payload: string) => Promise<void>;
 
 // VAPID keys identify this server to push services. Generated once and kept in the database so subscriptions survive restarts.

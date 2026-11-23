@@ -187,3 +187,24 @@ test('regression (found by the crash test): a client that missed more than one p
   assert.deepEqual(got, got.map((_, i) => i + 1), 'the pages must be the oldest first with no gap');
   c.ws.close();
 });
+
+test('typing and recording: the others are told which one (and who), the sender is not, and an unknown kind is plain typing', async () => {
+  const { a, b, circle } = await family();
+  const me = await connect(a);
+  const other = await connect(b);
+  try {
+  me.send({ t: 'typing', circle, on: true, kind: 'voice' });
+  const rec = await other.next(f => f.t === 'typing');
+  assert.deepEqual({ kind: rec.kind, on: rec.on, name: rec.name, circle: rec.circle }, { kind: 'voice', on: true, name: 'ناصر', circle });
+  await new Promise(r => setTimeout(r, 600));   // the relay is limited to two a second per person
+  other.frames.length = 0;
+  me.send({ t: 'typing', circle, on: true, kind: 'dancing' });
+  assert.equal((await other.next(f => f.t === 'typing')).kind, 'text');
+  await new Promise(r => setTimeout(r, 600));
+  other.frames.length = 0;
+  me.send({ t: 'typing', circle, on: false });
+  const stop = await other.next(f => f.t === 'typing');
+  assert.deepEqual({ kind: stop.kind, on: stop.on }, { kind: 'text', on: false }, 'an older client sends no kind at all');
+  assert.equal(me.frames.filter(f => f.t === 'typing').length, 0);
+  } finally { me.ws.terminate(); other.ws.terminate(); }   // a failed assertion must not leave sockets that keep the run alive
+});

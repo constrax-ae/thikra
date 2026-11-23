@@ -2,10 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError, toDate, type CircleSummary, type Kind } from './api';
 import { useI18n, intlLocale, systemText } from './i18n';
 import { Dialog } from './Dialog';
+import { live } from './live';
 import { ChatListSkeleton, ErrorState } from './States';
 import { Icon, type IconName } from './icons';
+import { typingLabel, useTyping } from './typing';
+import { Avatar, PersonAvatar } from './Groups';
+import { BroadcastLists } from './Broadcast';
+import { PinGate, useLock } from './Privacy';
+import { deviceLock } from './lock';
+import { onChatChange, openDirect, useE2ee } from './e2ee';
+import { ChatTypeBadge } from './E2eeUi';
 
-interface Person { id: number; name: string; via: string; chatId: number | null }
+interface Person { id: number; name: string; via: string; chatId: number | null; avatarAt?: string | null }
 type Filter = 'all' | 'unread' | 'favourites' | 'groups' | 'archived';
 
 /** WhatsApp-style list time: time today, "Yesterday", weekday within the week, otherwise the date. */
@@ -27,10 +35,19 @@ export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) =
   const [query, setQuery] = useState('');
   const [menu, setMenu] = useState<CircleSummary | null>(null);
   const [sheet, setSheet] = useState<null | 'new' | 'chat' | 'group' | 'circle' | 'join'>(null);
+  const [broadcast, setBroadcast] = useState(false);
+  const [folder, setFolder] = useState(false);                         // the locked chats
+  const [locking, setLocking] = useState<CircleSummary | null>(null);   // a chat waiting for the PIN before it is locked
+  const lock = useLock();
   const [field, setField] = useState('');
   const [error, setError] = useState('');
   const [people, setPeople] = useState<Person[]>([]);
   const pressTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const { on: e2on, e2ee } = useE2ee();
+  const [devicePreview, setDevicePreview] = useState<Record<number, { text: string; kind: string; userId: number | null }>>({});
+  const me_id = useRef<number | null>(null);
+  useEffect(() => { api<{ id: number }>('/me').then(m => { me_id.current = m.id; }).catch(() => {}); }, []);
+  const typersOf = useTyping(0);   // "typing…" / "recording audio…" in place of the last message while it lasts
 
   // A failed load used to be swallowed, which looked exactly like "you have no chats".
   // The flag is cleared on the next success, so a blip during the 8s refresh never
@@ -40,13 +57,47 @@ export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) =
   useEffect(() => {
     load();
     const timer = setInterval(load, 8000); // the badges and previews stay fresh while the list is on screen
-    return () => clearInterval(timer);
+    // A chat made or joined elsewhere (someone opened a private chat with you, approved your request) appears at once.
+    const off = live.on(f => { if (f.t === 'member_added') load(); });
+    return () => { clearInterval(timer); off(); };
   }, [load]);
+
+  // Hear every chat in the list live, including ones created or joined after the page loaded (and again after a reconnect).
+  useEffect(() => {
+    const ids = (list ?? []).map(c => c.id);
+    live.join(ids);
+    return live.on(f => { if (f.t === 'open') live.join(ids); });
+  }, [list]);
+
+  // An encrypted chat's last message is read here, on the device (the server only knows that there is one).
+  const encKey = (list ?? []).filter(c => c.encrypted).map(c => `${c.id}:${c.lastAt}`).join();
+  useEffect(() => {
+    if (!e2ee || !list) return;
+    let live = true;
+    const refresh = async () => {
+      const out: Record<number, { text: string; kind: string; userId: number | null }> = {};
+      for (const c of list.filter(x => x.encrypted).slice(0, 30)) {
+        let p = await e2ee.preview(c.id).catch(() => null);
+        // Nothing read here yet, or a newer message arrived while this chat was closed (a broadcast, a message in another chat):
+        // read the newest few on this device so the line under the name is the real last message, not the one before it.
+        const ms = (v: string) => /(Z|[+-]\d\d:?\d\d)$/.test(v) ? Date.parse(v) : toDate(v).getTime();   // the server's "YYYY-MM-DD HH:MM:SS" (UTC) or a full ISO time
+        const stale = !!p?.at && !!c.lastAt && ms(c.lastAt) > ms(p.at) + 1000;
+        if ((!p && c.lastKind) || stale) { await e2ee.history(c.id, `after=0&limit=${stale ? 10 : 30}`).catch(() => []); p = await e2ee.preview(c.id).catch(() => null); }
+        if (p) out[c.id] = p;
+      }
+      if (live) setDevicePreview(out);
+    };
+    refresh();
+    const off = onChatChange(() => { refresh(); });
+    return () => { live = false; off(); };
+  }, [e2ee, encKey]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { api<Person[]>('/people').then(setPeople).catch(() => {}); }, [list?.length]);
 
   const fail = (e: unknown) => setError(t.errors[e instanceof ApiError ? e.code : 'generic'] ?? t.errors.generic);
-  const all = list ?? [];
+  // A locked chat is not in the main list, the filters or the search: it lives only under "Locked chats", behind the PIN of this device.
+  const lockedChats = (list ?? []).filter(c => c.locked);
+  const all = (list ?? []).filter(c => !c.locked);
   const visible = all.filter(c => !c.archived);
   const counts = {
     unread: visible.filter(c => c.unread > 0 || c.markedUnread).length,
@@ -79,7 +130,7 @@ export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) =
   }, [people, filter, query]);
   async function openPerson(p: Person) {
     setError('');
-    try { const r = await api<{ id: number }>('/direct', { body: { userId: p.id } }); onOpen(r.id); } catch (e) { fail(e); }
+    try { const r = await openDirect({ userId: p.id }); onOpen(r.id); } catch (e) { fail(e); }
   }
 
   async function pref(c: CircleSummary, body: object) {
@@ -91,9 +142,13 @@ export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) =
     e.preventDefault(); setError('');
     try {
       let r: { id: number };
-      if (sheet === 'chat') r = await api('/direct', { body: { phone: field.trim() } });
+      if (sheet === 'chat') r = await openDirect({ phone: field.trim() });
       else if (sheet === 'join') r = await api('/circles/join', { body: { code: field.trim() } });
-      else r = await api('/circles', { body: { name: field, kind: (sheet === 'group' ? 'group' : 'circle') as Kind } });
+      else {
+        // With encryption on, a group is private (encrypted) and a family circle is readable by the server: chosen here, once, never changed.
+        r = await api('/circles', { body: { name: field, kind: (sheet === 'group' ? 'group' : 'circle') as Kind, ...(e2on && sheet === 'group' ? { encrypted: true } : {}) } });
+        if (e2on && sheet === 'group') e2ee?.startChat(r.id).catch(() => undefined);
+      }
       // Reload before navigating: the list drives the sidebar's onboarding card, and
       // without this the person who just made their first circle is still told to
       // "start with your family" until the 8s refresh catches up.
@@ -101,13 +156,28 @@ export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) =
     } catch (err) { fail(err); }
   }
 
-  // The preview line. Emoji used to stand in for the attachment kind; they render
-  // differently on every platform and look cheap next to the rest of the app, so this
-  // uses the line-icon set, which also takes the text colour in both themes.
-  const KIND_ICON: Record<string, IconName> = { image: 'image', video: 'video', voice: 'mic', file: 'file', deleted: 'ban' };
+  // The preview line. Line icons from the app's set stand for the attachment kind (never
+  // emoji: they render differently on every platform and ignore the theme's text colour).
+  const KIND_ICON: Record<string, IconName> = { image: 'image', video: 'video', voice: 'mic', file: 'file', deleted: 'ban', contact: 'you', location: 'pin', sticker: 'smile', gif: 'smile' };
+  const KIND_WORD = (k: string) => ({ image: t.photoWord, video: t.videoWord, voice: t.voiceWord, file: t.fileWord, deleted: t.deletedPreview, text: '', gif: t.gifWord, sticker: t.stickerWord, contact: t.contactWord, location: t.locationWord } as Record<string, string>)[k] ?? '';
   const Preview = ({ c }: { c: CircleSummary }) => {
+    const typing = typingLabel(typersOf(c.id), t, c.kind !== 'direct');
+    if (typing) return <span className="truncate text-green font-medium">{typing}</span>;
+    if (c.lastKind === 'encrypted') {
+      // An encrypted chat's last message is read on this device; the server only knows there is one.
+      const p = devicePreview[c.id];
+      if (!p) return <><Icon name="lock" className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{t.e2ee.previewGeneric}</span></>;
+      const ic = KIND_ICON[p.kind];
+      return (
+        <>
+          {p.userId === me_id.current && <span className="shrink-0">{t.youLabel}:</span>}
+          {ic && <Icon name={ic} className="w-3.5 h-3.5 shrink-0" />}
+          <span className="truncate">{p.text || KIND_WORD(p.kind)}</span>
+        </>
+      );
+    }
     if (!c.lastKind) return <>{c.members === 1 ? t.oneMember : `${c.members} ${t.members}`}</>;
-    const word = { image: t.photoWord, video: t.videoWord, voice: t.voiceWord, file: t.fileWord, deleted: t.deletedPreview, text: '' }[c.lastKind] ?? '';
+    const word = KIND_WORD(c.lastKind);
     const body = c.lastKind === 'deleted' ? word : systemText(c.lastText, t) || word;
     const who = c.lastFromMe ? t.youLabel : c.lastAuthor && c.kind !== 'direct' ? c.lastAuthor : '';
     const ic = KIND_ICON[c.lastKind];
@@ -166,16 +236,18 @@ export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) =
           onContextMenu={e => { e.preventDefault(); setMenu(c); }}
           onTouchStart={() => { pressTimer.current = setTimeout(() => setMenu(c), 500); }}
           onTouchEnd={() => clearTimeout(pressTimer.current)} onTouchMove={() => clearTimeout(pressTimer.current)}>
-          <Avatar c={c} />
+          <Avatar name={c.name} kind={c.kind} photo={c.photo} person={c.kind === 'direct' && c.peerId ? { id: c.peerId, avatarAt: c.peerAvatarAt } : null} />
           <span className="min-w-0 flex-1">
-            <span className="flex items-baseline gap-2">
+            <span className="flex items-center gap-2">
               <span className={`truncate flex-1 text-[0.95rem] font-bold text-ink`}><bdi>{c.name}</bdi></span>
+              {e2on && <ChatTypeBadge encrypted={c.encrypted} kind={c.kind} />}
               <span className={`text-caption shrink-0 tabular-nums ${unread && !c.muted ? 'text-green font-bold' : 'text-muted'}`}>{listTime(c.lastAt, lang, t)}</span>
             </span>
             <span className="flex items-center gap-2 mt-1">
               <span className={`flex items-center gap-1.5 min-w-0 flex-1 text-sm ${unread ? 'text-ink' : 'text-muted'}`}>
                 <Preview c={c} />
               </span>
+              {c.mentioned && <span role="img" aria-label={t.mentionedYou} title={t.mentionedYou} className="shrink-0 w-5 h-5 rounded-full bg-brand text-white text-caption font-bold flex items-center justify-center">@</span>}
               {c.muted && <Icon name="mute" className="w-3.5 h-3.5 text-muted shrink-0" />}
               {c.pinned && <Icon name="pin" className="w-3.5 h-3.5 text-muted shrink-0" />}
               {unread && (
@@ -252,6 +324,13 @@ export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) =
         </div>
       )}
 
+      {lockedChats.length > 0 && (
+        <button className="row-interactive w-full px-3 py-3 rounded-2xl text-start flex items-center gap-3.5 bg-card border border-line elevated-1" onClick={() => setFolder(true)}>
+          <span aria-hidden className="w-12 h-12 rounded-2xl bg-green-soft text-green flex items-center justify-center shrink-0"><Icon name="lock" className="w-6 h-6" /></span>
+          <span className="min-w-0 flex-1"><b className="block">{t.priv.lockedChats}</b><span className="block text-sm text-muted">{t.priv.lockedCount.replace('{n}', String(lockedChats.length))}</span></span>
+          <Icon name="chevron" className="w-4 h-4 text-muted -rotate-90 rtl:rotate-90" />
+        </button>
+      )}
       {error && !sheet && <p role="alert" className="text-sm text-danger">{error}</p>}
 
       {list === null ? (loadFailed ? <ErrorState onRetry={load} /> : <ChatListSkeleton />) : (
@@ -275,7 +354,7 @@ export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) =
               {peopleShown.map((p, i) => (
                 <li key={p.id} className="animate-slide-up" style={{ animationDelay: `${Math.min(i, 8) * 35}ms` }}>
                   <button className="row-interactive w-full px-3 py-3 rounded-2xl text-start flex items-center gap-3.5" onClick={() => openPerson(p)}>
-                    <span className="w-12 h-12 rounded-full bg-green-soft text-green flex items-center justify-center font-bold shrink-0 text-lg">{p.name.slice(0, 1)}</span>
+                    <PersonAvatar id={p.id} name={p.name} avatarAt={p.avatarAt} className="w-12 h-12 text-lg" />
                     <span className="min-w-0 flex-1"><b className="block truncate">{p.name}</b><span className="block text-sm text-muted truncate">{p.via}</span></span>
                     <Icon name="chats" className="w-5 h-5 text-muted shrink-0" />
                   </button>
@@ -307,7 +386,7 @@ export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) =
       {menu && (
         <Dialog onClose={() => setMenu(null)} label={t.chatOptions}>
           <div className="flex items-center gap-3">
-            <Avatar c={menu} />
+            <Avatar name={menu.name} kind={menu.kind} photo={menu.photo} person={menu.kind === 'direct' && menu.peerId ? { id: menu.peerId, avatarAt: menu.peerAvatarAt } : null} />
             <h2 className="text-lg font-bold truncate">{menu.name}</h2>
           </div>
           <div className="mt-4 flex flex-col gap-2">
@@ -322,20 +401,44 @@ export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) =
             <button className="btn btn-ghost" onClick={() => pref(menu, { favourite: !menu.favourite })}>{menu.favourite ? t.removeFavourite : t.addFavourite}</button>
             <button className="btn btn-ghost" onClick={() => pref(menu, { archived: !menu.archived })}>{menu.archived ? t.unarchiveChat : t.archiveChat}</button>
             {menu.unread === 0 && !menu.markedUnread && <button className="btn btn-ghost" onClick={() => pref(menu, { markedUnread: true })}>{t.markUnread}</button>}
+            <button className="btn btn-ghost" onClick={() => { const c = menu; setMenu(null); if (lock.unlocked) pref(c, { locked: true }); else setLocking(c); }}>{t.priv.lockChat}</button>
             <button className="btn btn-ghost" onClick={() => setMenu(null)}>{t.cancel}</button>
           </div>
         </Dialog>
       )}
+      {locking && <PinGate onClose={() => setLocking(null)} onDone={() => { const c = locking; setLocking(null); pref(c, { locked: true }); }} />}
+      {folder && (lock.unlocked ? (
+        <Dialog onClose={() => setFolder(false)} label={t.priv.lockedChats}>
+          <h2 className="text-lg font-bold flex items-center gap-2"><Icon name="lock" className="w-5 h-5 text-green" />{t.priv.lockedChats}</h2>
+          <ul className="mt-3 space-y-0.5 max-h-72 overflow-y-auto">
+            {lockedChats.map(c => <li key={c.id}><button className="row-interactive w-full p-2 rounded-xl text-start flex items-center gap-3" onClick={() => { setFolder(false); onOpen(c.id); }}><Avatar name={c.name} kind={c.kind} photo={c.photo} person={c.kind === 'direct' && c.peerId ? { id: c.peerId, avatarAt: c.peerAvatarAt } : null} className="w-9 h-9 text-base" /><b className="truncate flex-1">{c.name}</b>
+                    {e2on && <ChatTypeBadge encrypted={c.encrypted} kind={c.kind} />}{c.unread > 0 && <span className="w-2.5 h-2.5 rounded-full bg-brand" aria-label={t.unreadCount} />}</button></li>)}
+          </ul>
+          <div className="mt-4 flex gap-2"><button className="btn btn-primary flex-1" onClick={() => { deviceLock.lock(); setFolder(false); }}>{t.priv.lockNow}</button><button className="btn btn-ghost" onClick={() => setFolder(false)}>{t.close}</button></div>
+        </Dialog>
+      ) : <PinGate onClose={() => setFolder(false)} onDone={() => {}} otherDevice={!lock.hasPin} />)}
+      {broadcast && <BroadcastLists onClose={() => setBroadcast(false)} />}
 
       {sheet && (
         <Dialog onClose={() => { setSheet(null); setError(''); }} label={sheetTitle}>
           <h2 className="text-lg font-bold">{sheetTitle}</h2>
           {sheet === 'new' ? (
             <div className="mt-3 flex flex-col gap-1">
-              {([['chat', 'chats', t.newChat], ['group', 'group', t.newGroup], ['circle', 'heart', t.newFamilyCircle], ['join', 'link', t.joinWithInvite]] as const).map(([k, ic, label]) => (
-                <button key={k} className="row-interactive w-full flex items-center gap-3 p-2.5 rounded-xl text-start" onClick={() => setSheet(k)}>
+              {e2on && <p className="text-xs text-muted px-1 pb-1">{t.e2ee.chooseFixed}</p>}
+              {([
+                ['chat', 'chats', e2on ? t.e2ee.optDirect : t.newChat, e2on ? t.e2ee.optDirectHelp : '', e2on],
+                ['group', 'group', e2on ? t.e2ee.optGroup : t.newGroup, e2on ? t.e2ee.optGroupHelp : '', e2on],
+                ['circle', 'heart', e2on ? t.e2ee.optCircle : t.newFamilyCircle, e2on ? t.e2ee.optCircleHelp : '', false],
+                ['join', 'link', t.joinWithInvite, '', false],
+                ['broadcast', 'send', t.priv.broadcast, '', false],
+              ] as const).map(([k, ic, label, help, locked]) => (
+                <button key={k} className="row-interactive w-full flex items-center gap-3 p-2.5 rounded-xl text-start"
+                  onClick={() => { if (k === 'broadcast') { setSheet(null); setBroadcast(true); } else setSheet(k); }}>
                   <span className="w-10 h-10 rounded-xl bg-green-soft text-green flex items-center justify-center shrink-0"><Icon name={ic} className="w-5 h-5" /></span>
-                  <span className="flex-1 font-bold">{label}</span>
+                  <span className="flex-1 min-w-0">
+                    <span className="flex items-center gap-1.5 font-bold">{label}{locked && <Icon name="lock" className="w-3.5 h-3.5 text-green" />}</span>
+                    {help && <span className="block text-xs text-muted">{help}</span>}
+                  </span>
                   <Icon name="chevron" className="w-4 h-4 text-muted -rotate-90 rtl:rotate-90" />
                 </button>
               ))}
@@ -344,9 +447,12 @@ export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) =
             <form onSubmit={submit} className="mt-3 space-y-2">
               <input className="field" autoFocus required dir={sheet === 'group' || sheet === 'circle' ? undefined : 'ltr'}
                 inputMode={sheet === 'chat' ? 'tel' : undefined} maxLength={60}
-                placeholder={sheet === 'chat' ? t.phoneNumber : sheet === 'join' ? t.inviteCode : t.circleName}
+                placeholder={sheet === 'chat' ? t.phoneNumber : sheet === 'join' ? t.inviteCode : sheet === 'group' ? t.groupNameHint : t.circleName}
                 value={field} onChange={e => setField(e.target.value)} />
               {sheet === 'circle' && <p className="text-xs text-muted">{t.kindCircle}</p>}
+              {e2on && sheet === 'circle' && <p className="text-xs text-gold-dark">{t.e2ee.optCircleHelp}</p>}
+              {e2on && sheet === 'group' && <><p className="text-xs text-green flex items-center gap-1.5"><Icon name="lock" className="w-3.5 h-3.5 shrink-0" />{t.e2ee.optGroupHelp}</p><p className="text-xs text-gold-dark">{t.e2ee.notAudited}</p><p className="text-xs text-gold-dark">{t.e2ee.lostWarn}</p></>}
+              {e2on && sheet === 'chat' && <><p className="text-xs text-green flex items-center gap-1.5"><Icon name="lock" className="w-3.5 h-3.5 shrink-0" />{t.e2ee.optDirectHelp}</p><p className="text-xs text-gold-dark">{t.e2ee.notAudited}</p><p className="text-xs text-gold-dark">{t.e2ee.lostWarn}</p></>}
               {error && <p role="alert" className="text-sm text-danger">{error}</p>}
               <div className="flex gap-2">
                 <button className="btn flex-1">{sheet === 'chat' ? t.startChat : sheet === 'join' ? t.join : t.create}</button>
@@ -357,18 +463,6 @@ export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) =
         </Dialog>
       )}
     </div>
-  );
-}
-
-/** A family circle is the heart of the product, so it is the one avatar that carries the brand
- *  fill and a gold ring. Groups are rounded squares with the group glyph, a person is a circle. */
-function Avatar({ c }: { c: Pick<CircleSummary, 'kind' | 'name'> }) {
-  return (
-    <span className={`w-12 h-12 flex items-center justify-center font-bold shrink-0 text-lg
-      ${c.kind === 'direct' ? 'rounded-full' : 'rounded-2xl'}
-      ${c.kind === 'circle' ? 'bg-brand text-white ring-2 ring-gold/50 ring-offset-2 ring-offset-paper' : 'bg-green-soft text-green'}`}>
-      {c.kind === 'group' ? <Icon name="group" className="w-6 h-6" /> : c.name.slice(0, 1).toUpperCase()}
-    </span>
   );
 }
 

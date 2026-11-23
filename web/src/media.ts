@@ -1,4 +1,4 @@
-import { readQuality } from './quality';
+import { readQuality, type Quality } from './quality';
 
 // ---- attachments: prepare on the device, so less is uploaded and the receiver sees a preview at once --------------
 
@@ -15,13 +15,18 @@ const toJpeg = (img: CanvasImageSource, srcW: number, srcH: number, max: number,
   canvas.toBlob(b => res(b ? { blob: b, w, h } : null), 'image/jpeg', quality);
 });
 
-/** A phone photo of 4 MB becomes about 300 KB at 1600 px, plus a 320 px thumbnail. Anything that cannot be decoded is sent as it is. */
-export async function prepare(file: File): Promise<{ file: File; thumb: Blob | null; w: number | null; h: number | null }> {
+/**
+ * Compression on the device. Standard: a phone photo of 4 MB becomes about 300 KB at 1600 px. HD: up to 4096 px at high quality.
+ * Either way a 320 px thumbnail is made, and the camera's own file is kept whenever it is already the smaller one.
+ * A video is not re-encoded (browsers cannot do it reliably): it gets a poster frame and is sent as it is. Anything that cannot be decoded is sent as it is.
+ */
+export async function prepare(file: File, quality: Quality = readQuality()): Promise<{ file: File; thumb: Blob | null; w: number | null; h: number | null }> {
   try {
     if (file.type.startsWith('image/') && file.type !== 'image/gif') {
       const img = await loadImage(file);
-      const big = await toJpeg(img, img.naturalWidth, img.naturalHeight, 1600, 0.82), small = await toJpeg(img, img.naturalWidth, img.naturalHeight, 320, 0.7);
-      const use = readQuality() === 'standard' && big && big.blob.size < file.size ? big : null;   // "original" keeps the camera's file; the thumbnail is still made
+      const hd = quality === 'original';
+      const big = await toJpeg(img, img.naturalWidth, img.naturalHeight, hd ? 4096 : 1600, hd ? 0.9 : 0.82), small = await toJpeg(img, img.naturalWidth, img.naturalHeight, 320, 0.7);
+      const use = big && big.blob.size < file.size ? big : null;
       return { file: use ? new File([use.blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' }) : file, thumb: small?.blob ?? null, w: use?.w ?? img.naturalWidth, h: use?.h ?? img.naturalHeight };
     }
     if (file.type.startsWith('video/')) {

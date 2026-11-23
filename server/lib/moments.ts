@@ -7,6 +7,9 @@ import { collectSealedEvidence } from './sealed.ts';
 import { count, log, timed } from '../metrics.ts';
 import { isReadOnly } from '../billing.ts';
 import { today } from '../app.ts';
+import { storeMentions } from './polls.ts';
+import { attachLinkPreview } from './cards.ts';
+import { EncryptedChat, isEncrypted } from './e2ee.ts';
 
 // ---- moments and conflicts ----------------------------------------------------------
 // The agent never writes in the chat. Conflicts are recorded in the archive only, hidden for 24h
@@ -63,6 +66,7 @@ function detectAndRecord(circleId: number) {
     conflict ? sqlTime(Date.now() + 24 * 3600_000) : null);
 }
 export function afterMessage(circleId: number, userId: number, text: string, messageId?: number) {
+  if (isEncrypted(circleId)) return;   // nothing is read or derived from an encrypted chat
   try {
     if (messageId) collectSealedEvidence(circleId, messageId, userId, text);
     settleConflicts(circleId);
@@ -81,7 +85,8 @@ export function blockedInDirect(circleId: number, userId: number): boolean {
       WHERE o.circle_id = ? AND o.user_id != ? LIMIT 1`, userId, userId, circleId, userId);
 }
 /** Shared by the HTTP route and the WebSocket gateway, so both behave identically. */
-export function sendText(circleId: number, userId: number, body: string, clientMsgId: string | null, replyTo: number | null = null, forwardCount = 0) {
+export function sendText(circleId: number, userId: number, body: string, clientMsgId: string | null, replyTo: number | null = null, forwardCount = 0, mentions?: unknown, preview?: unknown) {
+  if (isEncrypted(circleId)) throw new EncryptedChat();   // an encrypted chat takes only ciphertext (POST /api/circles/:id/e2ee/messages)
   if (blockedInDirect(circleId, userId)) throw Object.assign(new Error('blocked'), { code: 'blocked' });
   // A reply must quote a message of this same circle; anything else is silently sent as a plain message.
   if (replyTo !== null && !one('SELECT 1 FROM messages WHERE id = ? AND circle_id = ?', replyTo, circleId)) replyTo = null;
@@ -89,6 +94,8 @@ export function sendText(circleId: number, userId: number, body: string, clientM
   const sent = stored.value;
   if (sent.duplicate) { count('send_duplicate'); return sent; }
   count('send_ok');
+  storeMentions(circleId, sent.id, userId, mentions);
+  if (preview !== undefined && preview !== null) attachLinkPreview(circleId, sent.id, userId, body, preview);   // the link card the sender's device asked for   // before the message is announced, so the push and the live frame carry them
   // The sender has obviously seen their own chat up to here: moves their marks silently (no event, it would only be noise).
   run('UPDATE circle_members SET read_seq = MAX(read_seq, ?), delivered_seq = MAX(delivered_seq, ?) WHERE circle_id = ? AND user_id = ?', sent.seq, sent.seq, circleId, userId);
   // The trace of one message on the server: how long storing took and how long the push to everyone took.
@@ -125,12 +132,31 @@ export function messagesChanged(circleId: number, userId: number, afterRev: numb
   if (rows.length) markDelivered(circleId, userId, Math.max(...rows.map(r => r.seq as number)));
   return decorate(circleId, rows);
 }
+/** The page a screen shows at a time when scrolling back through a chat. */
+export const PAGE = 50;
+/** A page size from a client: whole, at least 1, at most SYNC_PAGE; anything unreadable is the default. */
+export const clampPage = (limit: unknown, fallback = PAGE) => {
+  const n = Number(limit);
+  return Number.isFinite(n) ? Math.min(SYNC_PAGE, Math.max(1, Math.floor(n))) : fallback;
+};
+/**
+ * Scrolling up: the newest `limit` messages OLDER than `beforeSeq`, returned oldest first. The cursor is the seq of the oldest
+ * message on screen, so messages that arrive meanwhile never shift a page, and nothing is skipped or repeated.
+ * Old history is not "received" now: unlike the calls that fetch new messages, this moves no delivered mark.
+ */
+export function messagesBefore(circleId: number, userId: number, beforeSeq: number, limit = PAGE) {
+  const rows = all(
+    `SELECT * FROM (SELECT ${MSG_COLS} FROM messages m LEFT JOIN users u ON u.id = m.user_id
+       WHERE m.circle_id = ? AND m.seq < ? AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
+       ORDER BY m.seq DESC LIMIT ${clampPage(limit)}) ORDER BY seq`, circleId, beforeSeq, userId);
+  return decorate(circleId, rows);
+}
 /** Opening a chat: the latest page of messages after an id (0 = from the start of the chat view). */
-export function messagesAfter(circleId: number, userId: number, afterId = 0) {
+export function messagesAfter(circleId: number, userId: number, afterId = 0, limit = SYNC_PAGE) {
   const rows = all(
     `SELECT * FROM (SELECT ${MSG_COLS} FROM messages m LEFT JOIN users u ON u.id = m.user_id
        WHERE m.circle_id = ? AND m.id > ? AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
-       ORDER BY m.id DESC LIMIT ${SYNC_PAGE}) ORDER BY id`, circleId, afterId, userId);
+       ORDER BY m.id DESC LIMIT ${clampPage(limit, SYNC_PAGE)}) ORDER BY id`, circleId, afterId, userId);
   if (rows.length) markDelivered(circleId, userId, Math.max(...rows.map(r => r.seq as number)));
   return decorate(circleId, rows);
 }
@@ -141,3 +167,10 @@ export const isFile = (v: unknown): v is File =>
 export const AUDIO_MIME = new Set(['audio/webm', 'audio/mp4', 'audio/ogg', 'audio/mpeg', 'audio/wav']);
 /** Other names phones give the same formats: iOS labels its .m4a recordings "audio/x-m4a" (AAC in MP4), some Android builds "audio/aac" or "audio/x-wav". They are stored under the accepted name. */
 export const AUDIO_ALIAS: Record<string, string> = { 'audio/x-m4a': 'audio/mp4', 'audio/m4a': 'audio/mp4', 'audio/aac': 'audio/mp4', 'audio/x-wav': 'audio/wav', 'audio/wave': 'audio/wav' };
+
+/** The shape of a voice note as the recording device measured it: up to 64 bars, each 0-100. Stored as JSON; null if it is not that. */
+export function cleanWaveform(raw: unknown): string | null {
+  let v: unknown; try { v = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return null; }
+  if (!Array.isArray(v) || v.length < 4 || v.length > 64 || v.some(x => typeof x !== 'number' || !Number.isFinite(x))) return null;
+  return JSON.stringify(v.map(x => Math.max(0, Math.min(100, Math.round(x)))));
+}

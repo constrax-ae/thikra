@@ -1,7 +1,7 @@
 {
  "openapi": "3.1.0",
  "info": {
-  "title": "Thekra API",
+  "title": "Tamtim API",
   "version": "0.1.0",
   "description": "Generated from the routes the server registers; summaries and shapes come from docs/api-notes.json (partial: endpoints without notes only list their path and method).\n\nLive gateway: a WebSocket at `/ws` (same session cookie). Frames (JSON, `t` = type). Client to server: `ping`, `join {circle}`, `visible {on}`, `send {circle, body, client_msg_id, reply_to?}`, `read {circle, seq}`, `typing {circle, on}`, `sync {circle, after_seq | after_rev}`. Server to client: `hello {circles}`, `pong`, `ack {client_msg_id, id, seq, duplicate}`, `err {error, client_msg_id?}`, `msg`, `update`, `changed`, `receipt`, `pins`, `typing`, `sync {messages, more}`. The socket only makes things faster: every screen still works through the HTTP endpoints."
  },
@@ -900,7 +900,7 @@
     "tags": [
      "circles"
     ],
-    "summary": "PATCH /api/circles/:id/prefs",
+    "summary": "My own settings for one chat (any subset). locked: the chat-lock flag only (the PIN stays on the device); a locked chat shows no preview in the list or a push. wallpaper: my background for this chat.",
     "parameters": [
      {
       "name": "id",
@@ -911,9 +911,65 @@
       }
      }
     ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "pinned": {
+          "type": "boolean",
+          "description": "boolean"
+         },
+         "muted": {
+          "type": "boolean",
+          "description": "boolean"
+         },
+         "muteHours": {
+          "type": "number",
+          "description": "number"
+         },
+         "archived": {
+          "type": "boolean",
+          "description": "boolean"
+         },
+         "favourite": {
+          "type": "boolean",
+          "description": "boolean"
+         },
+         "markedUnread": {
+          "type": "boolean",
+          "description": "boolean"
+         },
+         "locked": {
+          "type": "boolean",
+          "description": "boolean"
+         },
+         "wallpaper": {
+          "description": "string|null: none | dots | dusk | dunes | forest | rose | #rrggbb; null = my default"
+         }
+        }
+       }
+      }
+     }
+    },
     "responses": {
      "200": {
-      "description": "OK"
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean",
+           "description": "boolean"
+          }
+         }
+        }
+       }
+      }
      },
      "401": {
       "description": "Not signed in",
@@ -924,6 +980,22 @@
          "properties": {
           "error": {
            "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: too_many_pinned, invalid_value",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
           }
          }
         }
@@ -1721,6 +1793,9 @@
          },
          "reply_to": {
           "description": "integer: message id"
+         },
+         "preview": {
+          "description": "string: a link that is in the body and was just asked from POST /api/link-preview; attaches its card"
          }
         }
        }
@@ -1787,7 +1862,7 @@
     "tags": [
      "circles"
     ],
-    "summary": "Upload a voice message (multipart).",
+    "summary": "Send a voice note (multipart form). Keep the recording on the device until this answers, and retry with the same client_msg_id: it is stored once.",
     "parameters": [
      {
       "name": "id",
@@ -1798,6 +1873,126 @@
       }
      }
     ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "audio": {
+          "description": "file: audio/webm, mp4, ogg, mpeg or wav, up to 5 MB"
+         },
+         "duration": {
+          "description": "integer: milliseconds, as measured by the recorder"
+         },
+         "waveform": {
+          "description": "string: JSON array of 4-64 numbers 0-100, the shape measured on the device"
+         },
+         "client_msg_id": {
+          "type": "string",
+          "description": "string (max 64)"
+         },
+         "reply_to": {
+          "description": "integer: message id"
+         },
+         "transcript": {
+          "description": "string: optional, from on-device speech recognition"
+         },
+         "view_once": {
+          "description": "'1': opened one time by each recipient (one photo or video, or one voice note; no caption, thumbnail or transcript)"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "id": {
+           "type": "integer",
+           "description": "integer"
+          },
+          "seq": {
+           "type": "integer",
+           "description": "integer"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: invalid_audio, admins_only, blocked, circle_frozen",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/attachments": {
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "Send up to 10 files with a caption as ONE message (multipart form). Either `file` parts, or `upload` = ids of finished resumable uploads in order (never both). `thumb`, `w`, `h` are per file, in the same order.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "view_once": {
+          "description": "'1': opened one time by each recipient (one photo or video, or one voice note; no caption, thumbnail or transcript)"
+         }
+        }
+       }
+      }
+     }
+    },
     "responses": {
      "200": {
       "description": "OK"
@@ -1816,39 +2011,17 @@
         }
        }
       }
-     }
-    }
-   }
-  },
-  "/api/circles/{id}/attachments": {
-   "post": {
-    "tags": [
-     "circles"
-    ],
-    "summary": "Upload photos, video or documents (multipart). The server decides the type by the bytes.",
-    "parameters": [
-     {
-      "name": "id",
-      "in": "path",
-      "required": true,
-      "schema": {
-       "type": "string"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "description": "OK"
      },
-     "401": {
-      "description": "Not signed in",
+     "default": {
+      "description": "Error. `error` is one of: upload_not_found, upload_incomplete (with offset), attachment_too_large (with max and name)",
       "content": {
        "application/json": {
         "schema": {
          "type": "object",
          "properties": {
           "error": {
-           "description": "string: \"unauthorized\""
+           "type": "string",
+           "description": "string"
           }
          }
         }
@@ -3669,6 +3842,44 @@
     }
    }
   },
+  "/api/messages/{mid}/info": {
+   "get": {
+    "tags": [
+     "messages"
+    ],
+    "summary": "GET /api/messages/:mid/info",
+    "parameters": [
+     {
+      "name": "mid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/messages/{mid}/react": {
    "post": {
     "tags": [
@@ -3791,6 +4002,2901 @@
       }
      }
     ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/presence": {
+   "get": {
+    "tags": [
+     "presence"
+    ],
+    "summary": "GET /api/presence",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/photo": {
+   "put": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "PUT /api/circles/:id/photo",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "DELETE /api/circles/:id/photo",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/join-requests": {
+   "get": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "GET /api/circles/:id/join-requests",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/join-requests/{uid}": {
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "POST /api/circles/:id/join-requests/:uid",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "uid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/polls": {
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "POST /api/circles/:id/polls",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/messages/{mid}/vote": {
+   "post": {
+    "tags": [
+     "messages"
+    ],
+    "summary": "POST /api/messages/:mid/vote",
+    "parameters": [
+     {
+      "name": "mid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/messages/{mid}/poll/close": {
+   "post": {
+    "tags": [
+     "messages"
+    ],
+    "summary": "POST /api/messages/:mid/poll/close",
+    "parameters": [
+     {
+      "name": "mid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/uploads": {
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "Start a resumable upload of one file. Nothing appears in the chat until POST /api/circles/:id/attachments is called with the finished upload ids.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "name": {
+          "description": "string: file name"
+         },
+         "size": {
+          "description": "integer: total bytes (max 64 MB; a photo max 16 MB is checked at the end, by its bytes)"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "id": {
+           "type": "string",
+           "description": "string"
+          },
+          "offset": {
+           "description": "integer: 0"
+          },
+          "chunk": {
+           "description": "integer: the largest piece accepted, in bytes"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: attachment_too_large (with max), invalid_attachment, admins_only, blocked, circle_frozen, too_many_requests",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/uploads/{uid}": {
+   "get": {
+    "tags": [
+     "uploads"
+    ],
+    "summary": "How many bytes of this upload the server holds. Ask after a dropped connection and continue from there.",
+    "parameters": [
+     {
+      "name": "uid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "offset": {
+           "type": "integer",
+           "description": "integer"
+          },
+          "size": {
+           "type": "integer",
+           "description": "integer"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: upload_not_found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "put": {
+    "tags": [
+     "uploads"
+    ],
+    "summary": "Append one piece (raw bytes in the body, at most `chunk`). Accepted only if `offset` is exactly what the server holds; otherwise 409 with the real offset.",
+    "parameters": [
+     {
+      "name": "uid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "offset",
+      "in": "query",
+      "required": false,
+      "description": "where this piece starts",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "offset": {
+           "description": "integer: bytes held now"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: offset_mismatch (with offset), chunk_too_large, upload_not_found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "uploads"
+    ],
+    "summary": "Cancel an upload and delete its bytes. Always answers ok.",
+    "parameters": [
+     {
+      "name": "uid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean",
+           "description": "boolean"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/messages/{mid}/played": {
+   "post": {
+    "tags": [
+     "messages"
+    ],
+    "summary": "I started playing this voice note. Recorded once per listener; the message then lists me in playedBy and everyone gets an update frame. A no-op for the sender.",
+    "parameters": [
+     {
+      "name": "mid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean",
+           "description": "boolean"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: not_found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/link-preview": {
+   "post": {
+    "tags": [
+     "link-preview"
+    ],
+    "summary": "The preview of a link, asked by the SENDER's device while writing. The server fetches the page itself (public addresses only) and keeps the answer for a week. Then send the text message with `preview: <the same url>` to attach the card.",
+    "parameters": [],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "url": {
+          "description": "string: http(s), ports 80/443 only"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "preview": {
+           "type": "object",
+           "description": "object or null: { url, title, description, site, image (hash for /api/link-preview/image/:hash, or null) }"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: unsafe_link, too_many_requests",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/link-preview/image/{hash}": {
+   "get": {
+    "tags": [
+     "link-preview"
+    ],
+    "summary": "The picture of a stored link preview (for the card above the message box). In a sent message the picture is `card.image`, a media id.",
+    "parameters": [
+     {
+      "name": "hash",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/gifs": {
+   "get": {
+    "tags": [
+     "gifs"
+    ],
+    "summary": "Search GIFs through the server (GIPHY, family rating). Empty q = trending. Without a provider key: configured false and no items.",
+    "parameters": [
+     {
+      "name": "q",
+      "in": "query",
+      "required": false,
+      "description": "search words",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "offset",
+      "in": "query",
+      "required": false,
+      "description": "for the next page (24 per page)",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "configured": {
+           "type": "boolean",
+           "description": "boolean"
+          },
+          "items": {
+           "type": "array",
+           "description": "array of { id, title, w, h }; the thumbnail is GET /api/gifs/:gid/preview"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: too_many_requests",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/gifs/{gid}/preview": {
+   "get": {
+    "tags": [
+     "gifs"
+    ],
+    "summary": "A GIF's small thumbnail, fetched by the server. The device never contacts the provider.",
+    "parameters": [
+     {
+      "name": "gid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: gifs_off, not_found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/cards": {
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "Send a contact, a location, a sticker or a GIF. It is an ordinary message with empty text and `card` set.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "type": {
+          "description": "string: contact | location | sticker | gif"
+         },
+         "name": {
+          "description": "string: contact name (max 100)"
+         },
+         "phones": {
+          "description": "array: 1-5 phone numbers"
+         },
+         "lat": {
+          "description": "number: -90..90"
+         },
+         "lng": {
+          "description": "number: -180..180"
+         },
+         "accuracy": {
+          "description": "number: metres, optional"
+         },
+         "label": {
+          "description": "string: optional place name (max 100)"
+         },
+         "pack": {
+          "description": "string: sticker pack id (core/stickers.ts)"
+         },
+         "id": {
+          "description": "string: sticker id, or the GIF id from /api/gifs"
+         },
+         "client_msg_id": {
+          "type": "string",
+          "description": "string (max 64)"
+         },
+         "reply_to": {
+          "description": "integer: message id"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "id": {
+           "type": "integer",
+           "description": "integer"
+          },
+          "seq": {
+           "type": "integer",
+           "description": "integer"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: invalid_card, admins_only, blocked, circle_frozen, gifs_off, gif_unavailable, not_found, too_many_requests",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/disappearing": {
+   "put": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "Set the chat's disappearing-messages timer. Applies to NEW messages only (each gets expiresAt when stored). A notice (sys disappearOn/disappearOff) goes into the chat. Private chat: either person; group: owner/admins; family circle: refused.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "seconds": {
+          "description": "86400 | 604800 | 7776000 | null (off)"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean",
+           "description": "boolean"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: invalid_value, forbidden, not_in_circle",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/messages/{mid}/open": {
+   "post": {
+    "tags": [
+     "messages"
+    ],
+    "summary": "Open a view-once photo, video or voice note (once per person). After 200 the file is served for 15 minutes from /api/media/:id or /api/messages/:mid/audio, then 410 view_once_gone. Before it: 403 view_once_closed. The sender sees the person in viewOnce.openedBy.",
+    "parameters": [
+     {
+      "name": "mid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean",
+           "description": "boolean"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: not_found, view_once_closed, already_opened",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/broadcast-lists": {
+   "get": {
+    "tags": [
+     "broadcast-lists"
+    ],
+    "summary": "My broadcast lists.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "items": {
+           "description": "[{id, name, count}]"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "broadcast-lists"
+    ],
+    "summary": "Make a list of people I share a chat with (up to 100; up to 30 lists).",
+    "parameters": [],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "name": {
+          "type": "string",
+          "description": "string"
+         },
+         "members": {
+          "description": "number[]: user ids"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "id": {
+           "type": "number",
+           "description": "number"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: invalid_value, too_many_lists",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/broadcast-lists/{id}": {
+   "get": {
+    "tags": [
+     "broadcast-lists"
+    ],
+    "summary": "One of my lists with its members.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "id": {
+           "type": "number",
+           "description": "number"
+          },
+          "name": {
+           "type": "string",
+           "description": "string"
+          },
+          "members": {
+           "description": "[{id, name}]"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "patch": {
+    "tags": [
+     "broadcast-lists"
+    ],
+    "summary": "Rename a list and/or replace its members.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "name": {
+          "description": "string?"
+         },
+         "members": {
+          "description": "number[]?"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean",
+           "description": "boolean"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "broadcast-lists"
+    ],
+    "summary": "Delete a list (messages already sent stay).",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean",
+           "description": "boolean"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/broadcast-lists/{id}/chats": {
+   "post": {
+    "tags": [
+     "broadcast-lists"
+    ],
+    "summary": "The private chat id of each person on the list, creating missing chats. To send a broadcast the DEVICE sends one ordinary message into each chat (POST /api/circles/:id/messages). A person who blocked me (or whom I blocked) is left out with no sign.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "chats": {
+           "description": "[{userId, circleId}]"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/transcribe": {
+   "get": {
+    "tags": [
+     "transcribe"
+    ],
+    "summary": "Is voice-to-text set up on this server?",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "configured": {
+           "type": "boolean",
+           "description": "boolean"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "transcribe"
+    ],
+    "summary": "Turn ONE voice note into text. multipart: audio (the bytes the reader's device holds, up to 5 MB), lang (optional). Nothing is stored and the message is not changed. 10 a day per person.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "text": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: transcribe_off, invalid_audio, too_many_requests, transcribe_failed",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/keys/status": {
+   "get": {
+    "tags": [
+     "keys"
+    ],
+    "summary": "Is end-to-end encryption switched on in this server?",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "enabled": {
+           "type": "boolean",
+           "description": "boolean"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/keys/devices": {
+   "post": {
+    "tags": [
+     "keys"
+    ],
+    "summary": "Register this device for encrypted chats. Its id is part of its name inside the protocol, so it comes before its key packages.",
+    "parameters": [],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "label": {
+          "description": "string: optional, up to 40"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "deviceId": {
+           "type": "number",
+           "description": "number"
+          },
+          "identity": {
+           "description": "string: u<user>.d<device>"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: e2ee_unavailable, too_many_devices, too_many_requests",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "get": {
+    "tags": [
+     "keys"
+    ],
+    "summary": "My devices, with their identity key and how many unused key packages each has.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "id": {
+           "type": "number",
+           "description": "number"
+          },
+          "label": {
+           "description": "string|null"
+          },
+          "createdAt": {
+           "type": "string",
+           "description": "string"
+          },
+          "revokedAt": {
+           "description": "string|null"
+          },
+          "identityKey": {
+           "description": "string|null: base64"
+          },
+          "stock": {
+           "type": "number",
+           "description": "number"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/keys/devices/{did}/packages": {
+   "post": {
+    "tags": [
+     "keys"
+    ],
+    "summary": "Publish MLS key packages (and optionally one last-resort package) for my device. Each must name this device and carry its one identity key.",
+    "parameters": [
+     {
+      "name": "did",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "packages": {
+          "description": "string[]: base64, at most 50"
+         },
+         "lastResort": {
+          "description": "string: base64, replaces the previous one"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "stock": {
+           "type": "number",
+           "description": "number"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: not_found, invalid_package, too_many_packages",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/keys/devices/{did}": {
+   "delete": {
+    "tags": [
+     "keys"
+    ],
+    "summary": "Retire a device. Its packages go, and every encrypted chat of mine must change keys before anyone sends.",
+    "parameters": [
+     {
+      "name": "did",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean",
+           "description": "boolean"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: not_found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/keys/users/{uid}": {
+   "get": {
+    "tags": [
+     "keys"
+    ],
+    "summary": "The active devices of a person I share a chat with, with their identity keys (the safety number is made from them).",
+    "parameters": [
+     {
+      "name": "uid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "userId": {
+           "type": "number",
+           "description": "number"
+          },
+          "devices": {
+           "type": "array",
+           "description": "array of { id, identityKey: base64, stock }"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: not_found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/keys/users/{uid}/claim": {
+   "post": {
+    "tags": [
+     "keys"
+    ],
+    "summary": "Take one key package per device of a person, to start a chat or add them. A device with none left hands out its last-resort package.",
+    "parameters": [
+     {
+      "name": "uid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "packages": {
+           "type": "array",
+           "description": "array of { deviceId, package: base64, lastResort }"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: not_found, too_many_requests",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/keys/backup": {
+   "get": {
+    "tags": [
+     "keys"
+    ],
+    "summary": "GET /api/keys/backup",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "put": {
+    "tags": [
+     "keys"
+    ],
+    "summary": "PUT /api/keys/backup",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "keys"
+    ],
+    "summary": "DELETE /api/keys/backup",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/keys/devices/{did}/link": {
+   "put": {
+    "tags": [
+     "keys"
+    ],
+    "summary": "PUT /api/keys/devices/:did/link",
+    "parameters": [
+     {
+      "name": "did",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/keys/devices/{did}/transfer": {
+   "put": {
+    "tags": [
+     "keys"
+    ],
+    "summary": "PUT /api/keys/devices/:did/transfer",
+    "parameters": [
+     {
+      "name": "did",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "get": {
+    "tags": [
+     "keys"
+    ],
+    "summary": "GET /api/keys/devices/:did/transfer",
+    "parameters": [
+     {
+      "name": "did",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "keys"
+    ],
+    "summary": "DELETE /api/keys/devices/:did/transfer",
+    "parameters": [
+     {
+      "name": "did",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/keys/devices/{did}/transfer/{part}": {
+   "get": {
+    "tags": [
+     "keys"
+    ],
+    "summary": "GET /api/keys/devices/:did/transfer/:part",
+    "parameters": [
+     {
+      "name": "did",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "part",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/keys/devices/{did}/endorsement": {
+   "put": {
+    "tags": [
+     "keys"
+    ],
+    "summary": "PUT /api/keys/devices/:did/endorsement",
+    "parameters": [
+     {
+      "name": "did",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/e2ee": {
+   "get": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "The encryption state of a chat: epoch, the lowest epoch a message may carry, whether a new commit is required, and the members' devices with their identity keys.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "epoch": {
+           "type": "number",
+           "description": "number"
+          },
+          "minEpoch": {
+           "type": "number",
+           "description": "number"
+          },
+          "rekeyNeeded": {
+           "type": "boolean",
+           "description": "boolean"
+          },
+          "devices": {
+           "type": "array",
+           "description": "array of { userId, deviceId, identityKey }"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: not_found, not_encrypted",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/e2ee/commits": {
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "Post the commit that moves the group to the next epoch, with welcomes for added devices. Only epoch = current + 1 is accepted.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "device": {
+          "description": "number: my device"
+         },
+         "epoch": {
+          "type": "number",
+          "description": "number"
+         },
+         "commit": {
+          "description": "string: base64"
+         },
+         "welcomes": {
+          "type": "array",
+          "description": "array of { device, welcome: base64 }"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "epoch": {
+           "type": "number",
+           "description": "number"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: not_found, not_encrypted, forbidden, invalid_welcome, too_large, epoch_conflict, circle_frozen",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "get": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "The commits after an epoch, in order, for a device catching up.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "epoch": {
+           "type": "number",
+           "description": "number"
+          },
+          "userId": {
+           "type": "number",
+           "description": "number"
+          },
+          "device": {
+           "type": "number",
+           "description": "number"
+          },
+          "commit": {
+           "description": "string: base64"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: not_found, not_encrypted",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/e2ee/welcomes": {
+   "get": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "The welcomes waiting for one of my devices in this chat (query: device).",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "id": {
+           "type": "number",
+           "description": "number"
+          },
+          "epoch": {
+           "type": "number",
+           "description": "number"
+          },
+          "welcome": {
+           "description": "string: base64"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: not_found, not_encrypted, forbidden",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/e2ee/welcomes/{wid}": {
+   "delete": {
+    "tags": [
+     "e2ee"
+    ],
+    "summary": "A welcome was used: delete it.",
+    "parameters": [
+     {
+      "name": "wid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean",
+           "description": "boolean"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/circles/{id}/e2ee/messages": {
+   "post": {
+    "tags": [
+     "circles"
+    ],
+    "summary": "Send an encrypted message (MLS ciphertext made on the device). The server keeps the bytes and a plain header (kind, epoch) and never reads text.",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "ciphertext": {
+          "description": "string: base64, at most 64 KB"
+         },
+         "kind": {
+          "description": "string: text | media | voice | card | edit"
+         },
+         "epoch": {
+          "description": "number: the key epoch it was made in"
+         },
+         "clientMsgId": {
+          "description": "string: optional, makes a retry safe"
+         },
+         "replyTo": {
+          "description": "number: optional"
+         },
+         "mentions": {
+          "description": "number[]: user ids to notify"
+         },
+         "uploads": {
+          "description": "string[]: finished resumable uploads of ciphertext (media, voice)"
+         },
+         "viewOnce": {
+          "type": "boolean",
+          "description": "boolean"
+         },
+         "target": {
+          "description": "number: for edit, the message it is about"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "id": {
+           "type": "number",
+           "description": "number"
+          },
+          "seq": {
+           "type": "number",
+           "description": "number"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "description": "string: \"unauthorized\""
+          }
+         }
+        }
+       }
+      }
+     },
+     "default": {
+      "description": "Error. `error` is one of: not_found, not_encrypted, circle_frozen, blocked, admins_only, too_large, invalid_value, epoch_ahead, rekey_required, forbidden, edit_window_closed, upload_not_found, upload_incomplete",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "error": {
+           "type": "string",
+           "description": "string"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/calls/ice": {
+   "get": {
+    "tags": [
+     "calls"
+    ],
+    "summary": "GET /api/calls/ice",
+    "parameters": [],
     "responses": {
      "200": {
       "description": "OK"
