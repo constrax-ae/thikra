@@ -16,19 +16,21 @@ app.get('/api/me/export', async c => {
   const files: Record<string, Uint8Array> = {};
   const json = (path: string, v: unknown) => { files[path] = strToU8(JSON.stringify(v, null, 2)); };
   const circles = all(
-    `SELECT c.id, c.name, c.kind, cm.role FROM circles c JOIN circle_members cm ON cm.circle_id = c.id AND cm.user_id = ? WHERE c.deleted_at IS NULL ORDER BY c.id`, u.id);
+    `SELECT c.id, c.name, c.kind, c.encrypted, cm.role FROM circles c JOIN circle_members cm ON cm.circle_id = c.id AND cm.user_id = ? WHERE c.deleted_at IS NULL ORDER BY c.id`, u.id);
   json('profile.json', { exportedAt: new Date().toISOString(), name: u.name, phone: u.phone, language: u.lang, circles: circles.map(x => ({ id: x.id, name: x.name, kind: x.kind, role: x.role })) });
   let bytes = 0; const omitted: string[] = [];
   for (const ci of circles) {
     const dir = `circles/${ci.id}-${safeName(ci.kind === 'direct' ? `chat-${ci.id}` : ci.name)}`;
+    // An encrypted chat: the server holds only ciphertext it cannot read, so there is nothing useful to export. The device keeps (and can export) its own decrypted history.
+    if (ci.encrypted) { json(`${dir}/messages.json`, { encrypted: true, note: 'End-to-end encrypted: the server cannot read this chat. Export it from the app on your device.' }); continue; }
     const msgs = all(
       `SELECT m.id, m.seq, m.created_at AS time, u.name AS author, m.kind, m.body, m.transcript, m.edited_at AS editedAt, m.sealed_on AS sealedOn, m.forward_count AS forwarded
          FROM messages m LEFT JOIN users u ON u.id = m.user_id
-        WHERE m.circle_id = ? AND m.kind != 'system' AND m.deleted_at IS NULL
+        WHERE m.circle_id = ? AND m.kind != 'system' AND m.deleted_at IS NULL AND m.view_once = 0
           AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?) ORDER BY m.seq`, ci.id, u.id);
     const media = all(
       `SELECT md.id, md.message_id AS messageId, md.kind, md.mime, md.name, md.size, md.blob_hash FROM media md JOIN messages m ON m.id = md.message_id
-        WHERE md.circle_id = ? AND md.kind IN ('image','video','file','audio') AND m.deleted_at IS NULL
+        WHERE md.circle_id = ? AND md.kind IN ('image','video','file','audio') AND m.deleted_at IS NULL AND m.view_once = 0
           AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?) ORDER BY md.id`, ci.id, u.id);
     const reactions = all(`SELECT r.message_id AS messageId, u.name, r.emoji FROM reactions r JOIN users u ON u.id = r.user_id JOIN messages m ON m.id = r.message_id WHERE m.circle_id = ?`, ci.id);
     const fileOf = new Map<number, string>();

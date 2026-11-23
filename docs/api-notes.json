@@ -218,7 +218,8 @@
     "request": {
       "body": "string: up to 4000 characters",
       "client_msg_id": "string: up to 64 characters",
-      "reply_to": "integer: message id"
+      "reply_to": "integer: message id",
+      "preview": "string: a link that is in the body and was just asked from POST /api/link-preview; attaches its card"
     },
     "response": {
       "id": "integer",
@@ -253,10 +254,38 @@
     }
   },
   "POST /api/circles/:id/attachments": {
-    "summary": "Upload photos, video or documents (multipart). The server decides the type by the bytes."
+    "summary": "Send up to 10 files with a caption as ONE message (multipart form). Either `file` parts, or `upload` = ids of finished resumable uploads in order (never both). `thumb`, `w`, `h` are per file, in the same order.",
+    "errors": [
+      "upload_not_found",
+      "upload_incomplete (with offset)",
+      "attachment_too_large (with max and name)"
+    ],
+    "request": {
+      "view_once": "'1': opened one time by each recipient (one photo or video, or one voice note; no caption, thumbnail or transcript)"
+    }
   },
   "POST /api/circles/:id/voice": {
-    "summary": "Upload a voice message (multipart)."
+    "summary": "Send a voice note (multipart form). Keep the recording on the device until this answers, and retry with the same client_msg_id: it is stored once.",
+    "request": {
+      "audio": "file: audio/webm, mp4, ogg, mpeg or wav, up to 5 MB",
+      "duration": "integer: milliseconds, as measured by the recorder",
+      "waveform": "string: JSON array of 4-64 numbers 0-100, the shape measured on the device",
+      "client_msg_id": "string (max 64)",
+      "reply_to": "integer: message id",
+      "transcript": "string: optional, from on-device speech recognition",
+      "view_once": "'1': opened one time by each recipient (one photo or video, or one voice note; no caption, thumbnail or transcript)"
+    },
+    "response": {
+      "id": "integer",
+      "seq": "integer"
+    },
+    "errors": [
+      "invalid_audio",
+      "admins_only",
+      "blocked",
+      "circle_frozen"
+    ],
+    "status": 201
   },
   "GET /api/circles/:id/search": {
     "summary": "Arabic-aware search inside one chat.",
@@ -513,5 +542,421 @@
       "ok": "boolean",
       "removed": "integer"
     }
+  },
+  "POST /api/messages/:mid/played": {
+    "summary": "I started playing this voice note. Recorded once per listener; the message then lists me in playedBy and everyone gets an update frame. A no-op for the sender.",
+    "response": {
+      "ok": "boolean"
+    },
+    "errors": [
+      "not_found"
+    ]
+  },
+  "POST /api/circles/:id/uploads": {
+    "summary": "Start a resumable upload of one file. Nothing appears in the chat until POST /api/circles/:id/attachments is called with the finished upload ids.",
+    "request": {
+      "name": "string: file name",
+      "size": "integer: total bytes (max 64 MB; a photo max 16 MB is checked at the end, by its bytes)"
+    },
+    "response": {
+      "id": "string",
+      "offset": "integer: 0",
+      "chunk": "integer: the largest piece accepted, in bytes"
+    },
+    "errors": [
+      "attachment_too_large (with max)",
+      "invalid_attachment",
+      "admins_only",
+      "blocked",
+      "circle_frozen",
+      "too_many_requests"
+    ],
+    "status": 201
+  },
+  "GET /api/uploads/:uid": {
+    "summary": "How many bytes of this upload the server holds. Ask after a dropped connection and continue from there.",
+    "response": {
+      "offset": "integer",
+      "size": "integer"
+    },
+    "errors": [
+      "upload_not_found"
+    ]
+  },
+  "PUT /api/uploads/:uid": {
+    "summary": "Append one piece (raw bytes in the body, at most `chunk`). Accepted only if `offset` is exactly what the server holds; otherwise 409 with the real offset.",
+    "query": {
+      "offset": "where this piece starts"
+    },
+    "response": {
+      "offset": "integer: bytes held now"
+    },
+    "errors": [
+      "offset_mismatch (with offset)",
+      "chunk_too_large",
+      "upload_not_found"
+    ]
+  },
+  "DELETE /api/uploads/:uid": {
+    "summary": "Cancel an upload and delete its bytes. Always answers ok.",
+    "response": {
+      "ok": "boolean"
+    }
+  },
+  "POST /api/link-preview": {
+    "summary": "The preview of a link, asked by the SENDER's device while writing. The server fetches the page itself (public addresses only) and keeps the answer for a week. Then send the text message with `preview: <the same url>` to attach the card.",
+    "request": {
+      "url": "string: http(s), ports 80/443 only"
+    },
+    "response": {
+      "preview": "object or null: { url, title, description, site, image (hash for /api/link-preview/image/:hash, or null) }"
+    },
+    "errors": [
+      "unsafe_link",
+      "too_many_requests"
+    ]
+  },
+  "GET /api/link-preview/image/:hash": {
+    "summary": "The picture of a stored link preview (for the card above the message box). In a sent message the picture is `card.image`, a media id."
+  },
+  "GET /api/gifs": {
+    "summary": "Search GIFs through the server (GIPHY, family rating). Empty q = trending. Without a provider key: configured false and no items.",
+    "query": {
+      "q": "search words",
+      "offset": "for the next page (24 per page)"
+    },
+    "response": {
+      "configured": "boolean",
+      "items": "array of { id, title, w, h }; the thumbnail is GET /api/gifs/:gid/preview"
+    },
+    "errors": [
+      "too_many_requests"
+    ]
+  },
+  "GET /api/gifs/:gid/preview": {
+    "summary": "A GIF's small thumbnail, fetched by the server. The device never contacts the provider.",
+    "errors": [
+      "gifs_off",
+      "not_found"
+    ]
+  },
+  "POST /api/circles/:id/cards": {
+    "summary": "Send a contact, a location, a sticker or a GIF. It is an ordinary message with empty text and `card` set.",
+    "request": {
+      "type": "string: contact | location | sticker | gif",
+      "name": "string: contact name (max 100)",
+      "phones": "array: 1-5 phone numbers",
+      "lat": "number: -90..90",
+      "lng": "number: -180..180",
+      "accuracy": "number: metres, optional",
+      "label": "string: optional place name (max 100)",
+      "pack": "string: sticker pack id (core/stickers.ts)",
+      "id": "string: sticker id, or the GIF id from /api/gifs",
+      "client_msg_id": "string (max 64)",
+      "reply_to": "integer: message id"
+    },
+    "response": {
+      "id": "integer",
+      "seq": "integer"
+    },
+    "errors": [
+      "invalid_card",
+      "admins_only",
+      "blocked",
+      "circle_frozen",
+      "gifs_off",
+      "gif_unavailable",
+      "not_found",
+      "too_many_requests"
+    ],
+    "status": 201
+  },
+  "PUT /api/circles/:id/disappearing": {
+    "summary": "Set the chat's disappearing-messages timer. Applies to NEW messages only (each gets expiresAt when stored). A notice (sys disappearOn/disappearOff) goes into the chat. Private chat: either person; group: owner/admins; family circle: refused.",
+    "request": {
+      "seconds": "86400 | 604800 | 7776000 | null (off)"
+    },
+    "response": {
+      "ok": "boolean"
+    },
+    "errors": [
+      "invalid_value",
+      "forbidden",
+      "not_in_circle"
+    ]
+  },
+  "POST /api/messages/:mid/open": {
+    "summary": "Open a view-once photo, video or voice note (once per person). After 200 the file is served for 15 minutes from /api/media/:id or /api/messages/:mid/audio, then 410 view_once_gone. Before it: 403 view_once_closed. The sender sees the person in viewOnce.openedBy.",
+    "response": {
+      "ok": "boolean"
+    },
+    "errors": [
+      "not_found",
+      "view_once_closed",
+      "already_opened"
+    ]
+  },
+  "GET /api/broadcast-lists": {
+    "summary": "My broadcast lists.",
+    "response": {
+      "items": "[{id, name, count}]"
+    }
+  },
+  "POST /api/broadcast-lists": {
+    "summary": "Make a list of people I share a chat with (up to 100; up to 30 lists).",
+    "request": {
+      "name": "string",
+      "members": "number[]: user ids"
+    },
+    "response": {
+      "id": "number"
+    },
+    "errors": [
+      "invalid_value",
+      "too_many_lists"
+    ]
+  },
+  "GET /api/broadcast-lists/:id": {
+    "summary": "One of my lists with its members.",
+    "response": {
+      "id": "number",
+      "name": "string",
+      "members": "[{id, name}]"
+    }
+  },
+  "PATCH /api/broadcast-lists/:id": {
+    "summary": "Rename a list and/or replace its members.",
+    "request": {
+      "name": "string?",
+      "members": "number[]?"
+    },
+    "response": {
+      "ok": "boolean"
+    }
+  },
+  "DELETE /api/broadcast-lists/:id": {
+    "summary": "Delete a list (messages already sent stay).",
+    "response": {
+      "ok": "boolean"
+    }
+  },
+  "POST /api/broadcast-lists/:id/chats": {
+    "summary": "The private chat id of each person on the list, creating missing chats. To send a broadcast the DEVICE sends one ordinary message into each chat (POST /api/circles/:id/messages). A person who blocked me (or whom I blocked) is left out with no sign.",
+    "response": {
+      "chats": "[{userId, circleId}]"
+    }
+  },
+  "GET /api/transcribe": {
+    "summary": "Is voice-to-text set up on this server?",
+    "response": {
+      "configured": "boolean"
+    }
+  },
+  "POST /api/transcribe": {
+    "summary": "Turn ONE voice note into text. multipart: audio (the bytes the reader's device holds, up to 5 MB), lang (optional). Nothing is stored and the message is not changed. 10 a day per person.",
+    "response": {
+      "text": "string"
+    },
+    "errors": [
+      "transcribe_off",
+      "invalid_audio",
+      "too_many_requests",
+      "transcribe_failed"
+    ]
+  },
+  "PATCH /api/circles/:id/prefs": {
+    "summary": "My own settings for one chat (any subset). locked: the chat-lock flag only (the PIN stays on the device); a locked chat shows no preview in the list or a push. wallpaper: my background for this chat.",
+    "request": {
+      "pinned": "boolean",
+      "muted": "boolean",
+      "muteHours": "number",
+      "archived": "boolean",
+      "favourite": "boolean",
+      "markedUnread": "boolean",
+      "locked": "boolean",
+      "wallpaper": "string|null: none | dots | dusk | dunes | forest | rose | #rrggbb; null = my default"
+    },
+    "response": {
+      "ok": "boolean"
+    },
+    "errors": [
+      "too_many_pinned",
+      "invalid_value"
+    ]
+  },
+  "GET /api/keys/status": {
+    "summary": "Is end-to-end encryption switched on in this server?",
+    "response": {
+      "enabled": "boolean"
+    }
+  },
+  "POST /api/keys/devices": {
+    "summary": "Register this device for encrypted chats. Its id is part of its name inside the protocol, so it comes before its key packages.",
+    "request": {
+      "label": "string: optional, up to 40"
+    },
+    "response": {
+      "deviceId": "number",
+      "identity": "string: u<user>.d<device>"
+    },
+    "errors": [
+      "e2ee_unavailable",
+      "too_many_devices",
+      "too_many_requests"
+    ]
+  },
+  "GET /api/keys/devices": {
+    "summary": "My devices, with their identity key and how many unused key packages each has.",
+    "response": {
+      "id": "number",
+      "label": "string|null",
+      "createdAt": "string",
+      "revokedAt": "string|null",
+      "identityKey": "string|null: base64",
+      "stock": "number"
+    }
+  },
+  "POST /api/keys/devices/:did/packages": {
+    "summary": "Publish MLS key packages (and optionally one last-resort package) for my device. Each must name this device and carry its one identity key.",
+    "request": {
+      "packages": "string[]: base64, at most 50",
+      "lastResort": "string: base64, replaces the previous one"
+    },
+    "response": {
+      "stock": "number"
+    },
+    "errors": [
+      "not_found",
+      "invalid_package",
+      "too_many_packages"
+    ]
+  },
+  "DELETE /api/keys/devices/:did": {
+    "summary": "Retire a device. Its packages go, and every encrypted chat of mine must change keys before anyone sends.",
+    "response": {
+      "ok": "boolean"
+    },
+    "errors": [
+      "not_found"
+    ]
+  },
+  "GET /api/keys/users/:uid": {
+    "summary": "The active devices of a person I share a chat with, with their identity keys (the safety number is made from them).",
+    "response": {
+      "userId": "number",
+      "devices": "array of { id, identityKey: base64, stock }"
+    },
+    "errors": [
+      "not_found"
+    ]
+  },
+  "POST /api/keys/users/:uid/claim": {
+    "summary": "Take one key package per device of a person, to start a chat or add them. A device with none left hands out its last-resort package.",
+    "response": {
+      "packages": "array of { deviceId, package: base64, lastResort }"
+    },
+    "errors": [
+      "not_found",
+      "too_many_requests"
+    ]
+  },
+  "GET /api/circles/:id/e2ee": {
+    "summary": "The encryption state of a chat: epoch, the lowest epoch a message may carry, whether a new commit is required, and the members' devices with their identity keys.",
+    "response": {
+      "epoch": "number",
+      "minEpoch": "number",
+      "rekeyNeeded": "boolean",
+      "devices": "array of { userId, deviceId, identityKey }"
+    },
+    "errors": [
+      "not_found",
+      "not_encrypted"
+    ]
+  },
+  "POST /api/circles/:id/e2ee/commits": {
+    "summary": "Post the commit that moves the group to the next epoch, with welcomes for added devices. Only epoch = current + 1 is accepted.",
+    "request": {
+      "device": "number: my device",
+      "epoch": "number",
+      "commit": "string: base64",
+      "welcomes": "array of { device, welcome: base64 }"
+    },
+    "response": {
+      "epoch": "number"
+    },
+    "errors": [
+      "not_found",
+      "not_encrypted",
+      "forbidden",
+      "invalid_welcome",
+      "too_large",
+      "epoch_conflict",
+      "circle_frozen"
+    ]
+  },
+  "GET /api/circles/:id/e2ee/commits": {
+    "summary": "The commits after an epoch, in order, for a device catching up.",
+    "response": {
+      "epoch": "number",
+      "userId": "number",
+      "device": "number",
+      "commit": "string: base64"
+    },
+    "errors": [
+      "not_found",
+      "not_encrypted"
+    ]
+  },
+  "GET /api/circles/:id/e2ee/welcomes": {
+    "summary": "The welcomes waiting for one of my devices in this chat (query: device).",
+    "response": {
+      "id": "number",
+      "epoch": "number",
+      "welcome": "string: base64"
+    },
+    "errors": [
+      "not_found",
+      "not_encrypted",
+      "forbidden"
+    ]
+  },
+  "DELETE /api/e2ee/welcomes/:wid": {
+    "summary": "A welcome was used: delete it.",
+    "response": {
+      "ok": "boolean"
+    }
+  },
+  "POST /api/circles/:id/e2ee/messages": {
+    "summary": "Send an encrypted message (MLS ciphertext made on the device). The server keeps the bytes and a plain header (kind, epoch) and never reads text.",
+    "request": {
+      "ciphertext": "string: base64, at most 64 KB",
+      "kind": "string: text | media | voice | card | edit",
+      "epoch": "number: the key epoch it was made in",
+      "clientMsgId": "string: optional, makes a retry safe",
+      "replyTo": "number: optional",
+      "mentions": "number[]: user ids to notify",
+      "uploads": "string[]: finished resumable uploads of ciphertext (media, voice)",
+      "viewOnce": "boolean",
+      "target": "number: for edit, the message it is about"
+    },
+    "response": {
+      "id": "number",
+      "seq": "number"
+    },
+    "errors": [
+      "not_found",
+      "not_encrypted",
+      "circle_frozen",
+      "blocked",
+      "admins_only",
+      "too_large",
+      "invalid_value",
+      "epoch_ahead",
+      "rekey_required",
+      "forbidden",
+      "edit_window_closed",
+      "upload_not_found",
+      "upload_incomplete"
+    ]
   }
 }

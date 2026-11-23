@@ -3,15 +3,16 @@ import { MSG_COLS } from '../lib/messages.ts';
 import { all, one, run } from '../db.ts';
 import { app } from '../app.ts';
 import { blockedInDirect, sendText } from '../lib/moments.ts';
-import { circleAccess, decorate, isFrozen, limited, membership } from '../lib/helpers.ts';
+import { circleAccess, decorate, isFrozen, limited, membership, mayPost } from '../lib/helpers.ts';
+import { isEncrypted } from '../lib/e2ee.ts';
 
 // ---- stars and forwarding -------------------------------------------------------------------
 
 // A personal bookmark: only you see it, and it never changes the message for anyone else.
 app.post('/api/messages/:mid/star', async c => {
-  const m = one('SELECT id, circle_id, kind, deleted_at FROM messages WHERE id = ?', Number(c.req.param('mid')));
+  const m = one('SELECT id, circle_id, kind, deleted_at, view_once FROM messages WHERE id = ?', Number(c.req.param('mid')));
   const user = c.get('user');
-  if (!m || !membership(m.circle_id, user.id) || m.kind === 'system' || m.deleted_at) return c.json({ error: 'not_found' }, 404);
+  if (!m || !membership(m.circle_id, user.id) || m.kind === 'system' || m.deleted_at || m.view_once) return c.json({ error: 'not_found' }, 404);
   const b = await c.req.json().catch(() => ({}));
   if (b.on === false) run('DELETE FROM stars WHERE user_id = ? AND message_id = ?', user.id, m.id);
   else run('INSERT OR IGNORE INTO stars (user_id, message_id) VALUES (?, ?)', user.id, m.id);
@@ -30,16 +31,20 @@ app.get('/api/circles/:id/starred', c => {
 // Forward a text message you can see into another circle you belong to. It carries a hop count (shown as "Forwarded",
 // then "Forwarded many times"), is never read by the archive agent, and the quoted-reply link does not travel with it.
 app.post('/api/messages/:mid/forward', async c => {
-  const m = one('SELECT id, circle_id, kind, body, forward_count, deleted_at FROM messages WHERE id = ?', Number(c.req.param('mid')));
+  const m = one('SELECT id, circle_id, kind, body, forward_count, deleted_at, view_once FROM messages WHERE id = ?', Number(c.req.param('mid')));
   const user = c.get('user');
-  if (!m || !membership(m.circle_id, user.id) || m.kind !== 'text' || m.deleted_at) return c.json({ error: 'not_found' }, 404);
+  if (!m || !membership(m.circle_id, user.id) || m.kind !== 'text' || m.deleted_at || m.view_once) return c.json({ error: 'not_found' }, 404);
+  if (one('SELECT 1 FROM polls WHERE message_id = ?', m.id) || one("SELECT 1 FROM message_cards WHERE message_id = ? AND type != 'link'", m.id)) return c.json({ error: 'not_found' }, 404);   // a poll is not text to pass around
+  if (isEncrypted(m.circle_id)) return c.json({ error: 'encrypted_chat' }, 409);   // forwarding is done on the device: decrypt, then encrypt for the other chat
   const b = await c.req.json().catch(() => ({}));
   const targets = [...new Set((Array.isArray(b.circles) ? b.circles : []).map(Number).filter(Number.isInteger))] as number[];
   if (!targets.length || targets.length > MANY_TIMES) return c.json({ error: 'invalid_targets' }, 400);
   if (targets.some(t => !membership(t, user.id))) return c.json({ error: 'not_found' }, 404);
+  if (targets.some(t => isEncrypted(t))) return c.json({ error: 'encrypted_chat' }, 409);   // and nothing readable is put into an encrypted chat
   if (targets.some(t => isFrozen(t))) return c.json({ error: 'circle_frozen' }, 423);
   if (await limited(`fwd:${user.id}`, 30, 60_000)) return c.json({ error: 'too_many_requests' }, 429);
   if (targets.some(t => blockedInDirect(t, user.id))) return c.json({ error: 'blocked' }, 403);
+  if (targets.some(t => !mayPost(t, user.id))) return c.json({ error: 'admins_only' }, 403);   // all or nothing: no half-forward
   const sent = targets.map(t => sendText(t, user.id, m.body, null, null, (m.forward_count as number) + 1).id);
   return c.json({ sent });
 });

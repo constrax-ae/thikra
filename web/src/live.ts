@@ -11,6 +11,7 @@ let retry = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let wanted = false;
 let open = false;
+const joined = new Set<number>();   // chats this socket has already asked to hear (the server also puts it in every chat it knew at connect time)
 
 function connect() {
   if (!wanted || ws) return;
@@ -18,11 +19,11 @@ function connect() {
   let sock: WebSocket;
   try { sock = new WebSocket(url); } catch { return schedule(); }
   ws = sock;
-  sock.onopen = () => { retry = 0; open = true; sendVisible(); emit({ t: 'open' }); };
+  sock.onopen = () => { retry = 0; open = true; joined.clear(); sendVisible(); emit({ t: 'open' }); };
   sock.onmessage = ev => { try { emit(JSON.parse(String(ev.data))); } catch { /* ignore a bad frame */ } };
   sock.onclose = () => {
     const was = open;
-    ws = null; open = false;
+    ws = null; open = false; joined.clear();
     if (was) emit({ t: 'close' });
     schedule();
   };
@@ -47,6 +48,15 @@ export const live = {
     return () => { listeners.delete(l); if (!listeners.size) live.stop(); };
   },
   get connected() { return open; },
+  /**
+   * Ask to hear these chats live. The server only knows the chats a person was in when the socket opened, so a chat created or joined
+   * after the page loaded gets no live messages until someone asks (the server checks membership, so asking is always safe).
+   * Idempotent per socket; while the socket is down it does nothing and the server's connect-time join covers it.
+   */
+  join(ids: number[]) {
+    if (!ws || !open) return;
+    for (const id of ids) if (!joined.has(id)) { joined.add(id); ws.send(JSON.stringify({ t: 'join', circle: id })); }
+  },
   /** true if the frame went out on the socket; false means the caller must use HTTP. */
   send(f: Frame) {
     if (!ws || !open) return false;

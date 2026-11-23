@@ -57,7 +57,7 @@ export function buildSpec(routes: Array<{ method: string; path: string }>, notes
   return {
     openapi: '3.1.0',
     info: {
-      title: 'Thekra API',
+      title: 'Tamtim API',
       version: '0.1.0',
       description: 'Generated from the routes the server registers; summaries and shapes come from docs/api-notes.json (partial: endpoints without notes only list their path and method).\n\n'
         + 'Live gateway: a WebSocket at `/ws` (same session cookie). Frames (JSON, `t` = type). Client to server: `ping`, `join {circle}`, `visible {on}`, `send {circle, body, client_msg_id, reply_to?}`, `read {circle, seq}`, `typing {circle, on}`, `sync {circle, after_seq | after_rev}`. '

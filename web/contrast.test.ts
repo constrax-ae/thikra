@@ -42,7 +42,7 @@ function pairsFor(t: 'light' | 'dark'): Array<[string, RGB, RGB]> {
     ['sent-bubble link (white/80 on green)', over(white, brand, 0.8), brand],
     ['muted unread badge (white on muted fill)', white, mutedFill],
     ['active tab label (green on paper)', green, paper],
-    ['read tick (sky-300 on brand)', rgb('#7dd3fc'), brand],
+    ['read mark (green-300 on brand)', rgb('#86efac'), brand],
     ['delivered tick (white/80 on green)', over(white, brand, 0.8), brand],
     ['green text on card', green, card],
     ['green text on paper', green, paper],
@@ -60,7 +60,6 @@ function pairsFor(t: 'light' | 'dark'): Array<[string, RGB, RGB]> {
     ['white on teal bubble', white, rgb('#0f5a5a')],
     ['white on slate bubble', white, rgb('#3d4552')],
     ['text on my default bubble (ink on soft green)', rgb('#2b3832'), rgb('#d9f2d6')],
-    ['read tick on my default bubble (soft green)', rgb('#075985'), rgb('#d9f2d6')],
     ['time on my default bubble (muted on soft green)', rgb('#3f4f47'), rgb('#d9f2d6')],
     ['danger link on paper', danger, paper],
     ['danger text on danger-soft', danger, dangerSoft],
@@ -76,6 +75,16 @@ for (const t of ['light', 'dark'] as const) {
     assert.deepEqual(failures.map(f => `${f.what}: ${f.r.toFixed(2)}`), []);
   });
 }
+
+test('the "read" mark on my bubble is a light green (the owner\'s choice) that still stands out: a sign, not text, so at least 3:1', () => {
+  // Read from the stylesheet itself, so changing the colour there re-runs this.
+  const mark = css.match(/--bubble-tick:\s*var\(--bubble-tick-user,\s*(#[0-9a-fA-F]{6})\)/)?.[1];
+  const bubble = css.match(/\.bubble-mine\s*\{[^}]*background:\s*var\(--bubble-mine,\s*(#[0-9a-fA-F]{6})\)/)?.[1];
+  assert.ok(mark && bubble, 'the read mark and my bubble colours are in styles.css');
+  const r = ratio(rgb(mark!), rgb(bubble!));
+  assert.ok(r >= 3, `visible enough for a sign: ${r.toFixed(2)}`);
+  assert.ok(r <= 4, `light, not the dark green it was: ${r.toFixed(2)}`);
+});
 
 test('plain gold is never used for text: it fails AA on paper and card (it is for fills and the logo heart)', () => {
   theme = 'light';
@@ -110,7 +119,7 @@ test('received bubbles are always white with the light tokens pinned, in both th
 });
 
 test('every member-name colour reaches 4.5:1 on the white received bubble', () => {
-  const src = readFileSync(new URL('./src/CircleView.tsx', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('./src/Groups.tsx', import.meta.url), 'utf8');
   const list = src.match(/MEMBER_COLOURS = \[([^\]]*)\]/)?.[1].match(/#[0-9a-fA-F]{6}/g) ?? [];
   assert.ok(list.length >= 8, 'at least eight colours so a family rarely shares one');
   const white: RGB = [255, 255, 255];

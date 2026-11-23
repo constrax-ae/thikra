@@ -5,13 +5,17 @@ import { all, one, run } from '../db.ts';
 import { gate } from '../../core/gate.ts';
 import { isReadOnly } from '../billing.ts';
 import { today } from '../app.ts';
+import { isEncrypted } from './e2ee.ts';
 
 // ---- messages -----------------------------------------------------------------
 
 export const MSG_COLS = `m.id, m.seq, m.rev, m.user_id AS userId, u.name AS author, m.kind, m.body, m.transcript,
   m.audio_path IS NOT NULL AS hasAudio, m.archive_status AS archiveStatus, m.score, m.category, m.reason, m.created_at AS createdAt,
-  m.deleted_at IS NOT NULL AS deleted, m.deleted_by AS deletedBy, m.reply_to AS replyToId, m.edited_at AS editedAt, m.forward_count AS forwardCount, m.sealed_on AS sealedOn`;
+  m.deleted_at IS NOT NULL AS deleted, m.deleted_by AS deletedBy, m.reply_to AS replyToId, m.edited_at AS editedAt, m.forward_count AS forwardCount, m.sealed_on AS sealedOn,
+  m.expires_at AS expiresAt, m.expired_at IS NOT NULL AS expired, m.view_once AS viewOnce,
+  m.ciphertext, m.enc_kind AS encKind, m.epoch, m.ctl_target AS target`;
 export function analyze(circleId: number, messageId: number, text: string, manual = false) {
+  if (isEncrypted(circleId)) return;   // the server cannot read an encrypted chat, and nothing is derived from it
   const circle = one('SELECT sensitivity, agent_active FROM circles WHERE id = ?', circleId)!;
   if (!circle.agent_active || !flag('agent_enabled') || isReadOnly(circleId)) return;
   const msg = one('SELECT m.*, u.name AS author FROM messages m LEFT JOIN users u ON u.id = m.user_id WHERE m.id = ?', messageId)!;
