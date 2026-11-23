@@ -1,4 +1,8 @@
-import tile from './brand/logo-tile.png';
+import logoEn from './brand/logo-en.svg';
+import logoEnDark from './brand/logo-en-dark.svg';
+import logoAr from './brand/logo-ar.svg';
+import logoArDark from './brand/logo-ar-dark.svg';
+import { useI18n } from './i18n';
 // One line-icon set for the whole app (replaces emoji, which render differently on every phone and look cheap).
 // 24×24, 1.75 stroke, currentColor: icons take the text colour, so they follow the light and dark themes automatically.
 import type { ReactElement } from 'react';
@@ -81,12 +85,19 @@ export function Icon({ name, className = 'w-5 h-5' }: { name: IconName; classNam
   );
 }
 
-/** The wordmark in the header: the app icon (the owner's smiling speech bubble) and the name. */
-export function Wordmark({ name }: { name: string }) {
+/**
+ * The owner's logo, as they asked for it: the Arabic lockup (bubble + تمتم) when the app is in
+ * Arabic, the English one (bubble + Tamtim) in every other language. Each comes in two inks -
+ * green on paper, and the green turned to paper for the night theme - and only the one for the
+ * theme in use is shown (.logo-light / .logo-dark in styles.css). The amber stays on both.
+ */
+export function Wordmark({ name, className = 'h-12 w-auto' }: { name: string; className?: string }) {
+  const { lang } = useI18n();
+  const ar = lang === 'ar';
   return (
-    <span className="flex items-center gap-2.5">
-      <img src={tile} alt="" width={40} height={40} className="w-10 h-10 rounded-xl elevated-1" />
-      <span className="text-2xl font-bold text-green tracking-tight">{name}</span>
+    <span className="flex items-center">
+      <img src={ar ? logoAr : logoEn} alt={name} className={`logo-light ${className}`} />
+      <img src={ar ? logoArDark : logoEnDark} alt={name} className={`logo-dark ${className}`} />
     </span>
   );
 }

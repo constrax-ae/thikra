@@ -105,14 +105,16 @@ test('the page opts out of browser translation', () => {
  * names; docs/DEPLOY.md has the nginx rule that makes those revalidate.)
  */
 test('the logo the app draws is a bundled asset, not a fixed path under the document root', () => {
+  // icons.tsx holds the one Wordmark; Login draws that same component.
+  assert.match(readFileSync('web/src/icons.tsx', 'utf8'), /^import \w+ from '\.\/brand\/[\w-]+\.svg';$/m, 'icons.tsx imports its logo from web/src/brand');
   for (const file of ['web/src/icons.tsx', 'web/src/Login.tsx']) {
     const src = readFileSync(file, 'utf8');
-    assert.match(src, /^import \w+ from '\.\/brand\/[\w-]+\.png';$/m, `${file} imports its logo from web/src/brand`);
     assert.ok(!src.includes('/app-icons/'), `${file} must not fetch a logo by name from the document root`);
   }
-  for (const art of ['logo-tile.png', 'lockup-light.png', 'lockup-dark.png'])
+  // The owner's lockups: English and Arabic, each in a light and a dark ink.
+  for (const art of ['logo-en.svg', 'logo-en-dark.svg', 'logo-ar.svg', 'logo-ar-dark.svg'])
     assert.ok(existsSync(`web/src/brand/${art}`), `web/src/brand/${art} is built into the sources`);
   if (existsSync('dist/assets'))
-    for (const art of ['logo-tile', 'lockup-light', 'lockup-dark'])
-      assert.ok(readdirSync('dist/assets').some(f => new RegExp(`^${art}-.+\\.png$`).test(f)), `a built dist has ${art} content-hashed`);
+    for (const art of ['logo-en', 'logo-en-dark', 'logo-ar', 'logo-ar-dark'])
+      assert.ok(readdirSync('dist/assets').some(f => new RegExp(`^${art}-[\\w-]{8}\\.svg$`).test(f)), `a built dist has ${art} content-hashed`);
 });
