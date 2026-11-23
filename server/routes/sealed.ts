@@ -8,6 +8,7 @@ import { circleAccess, isFrozen, isManager, limited, membership, systemMessage }
 import { cleanName, sniff } from '../sniff.ts';
 import { dropBlobIfUnused } from '../lib/deletes.ts';
 import { isFile } from '../lib/moments.ts';
+import { isEncrypted } from '../lib/e2ee.ts';
 
 // Seal a message for the circle (default) or for one member (delivered into your one-to-one chat; date trigger only).
 // JSON for text, multipart (field `file`) for voice/video/photo. Fields: body, trigger (date|event|death), unlockAt, occasion, yearly, recipientId, duration.
@@ -15,6 +16,7 @@ app.post('/api/circles/:id/sealed', async c => {
   const a = circleAccess(c);
   if (!a) return c.json({ error: 'not_found' }, 404);
   if (!flag('sealed_enabled')) return c.json({ error: 'feature_off' }, 403);
+  if (isEncrypted(a.circleId)) return c.json({ error: 'encrypted_chat' }, 409);   // a letter's text would wait readable on the server until it opens
   if (isFrozen(a.circleId)) return c.json({ error: 'circle_frozen' }, 423);
   if (await limited(`seal:${a.user.id}`, 20, 3600_000)) return c.json({ error: 'too_many_requests' }, 429);
   const multipart = (c.req.header('content-type') ?? '').includes('multipart/form-data');

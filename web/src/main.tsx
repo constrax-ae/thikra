@@ -6,9 +6,16 @@ import { api, type Me } from './api';
 import { I18nProvider, useI18n } from './i18n';
 import { EmptyState } from './States';
 import { ChatList, ChatWelcome } from './ChatList';
+import { endSending, startSending } from './sending';
+import { forgetDevice, startE2ee, stopE2ee } from './e2ee';
+import { deviceLock } from './lock';
+import { dropPush, hashFromPath, rebindPush } from './push';
 
 import { CircleView } from './CircleView';
+import { ScreenGuard } from './ScreenGuard';
 import { Notices } from './Notices';
+import { CallProvider } from './CallUi';
+import { PersonAvatar } from './Groups';
 import { Icon, Wordmark, type IconName } from './icons';
 // After an update, a browser that still holds the OLD app asks for a screen file the server no longer has ("Failed to fetch dynamically
 // imported module") and would show a blank page. Reload once to pick up the new app; the flag stops a loop if the file is really missing.
@@ -49,7 +56,9 @@ function parseHash(): Route {
 function JoinByLink({ code, onDone }: { code: string; onDone: (id: number | null) => void }) {
   const { t } = useI18n();
   const [failed, setFailed] = useState(false);
-  useEffect(() => { api<{ id: number }>('/circles/join', { body: { code } }).then(r => onDone(r.id)).catch(() => setFailed(true)); }, [code]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const [waiting, setWaiting] = useState(false);   // the group approves newcomers: the request was sent, nothing more is shown until an admin decides
+  useEffect(() => { api<{ id?: number; pending?: boolean }>('/circles/join', { body: { code } }).then(r => (r.pending || !r.id ? setWaiting(true) : onDone(r.id))).catch(() => setFailed(true)); }, [code]);   // eslint-disable-line react-hooks/exhaustive-deps
+  if (waiting) return <div className="max-w-2xl mx-auto px-4 py-20 text-center"><p role="status" className="text-lg font-bold">{t.requestSent}</p><p className="text-muted mt-2">{t.requestSentNote}</p><button className="btn mt-6" onClick={() => onDone(null)}>{t.back}</button></div>;
   return <div className="max-w-2xl mx-auto px-4 py-20 text-center">{failed ? <><p role="alert" className="text-danger">{t.errors.invalid_invite ?? t.errors.generic}</p><button className="btn mt-4" onClick={() => onDone(null)}>{t.back}</button></> : <p className="text-muted">…</p>}</div>;
 }
 
@@ -84,18 +93,35 @@ function App() {
 
   const wide = useWide();
   const go = (hash: string) => { location.hash = hash; };
+  // A tapped notification asks the open tab to show its chat (sw.js sends this).
+  useEffect(() => {
+    const sw = navigator.serviceWorker;
+    if (!sw) return;
+    const on = (e: MessageEvent) => { const h = e.data?.t === 'open' ? hashFromPath(e.data.path) : null; if (h) location.hash = h; };
+    sw.addEventListener('message', on);
+    return () => sw.removeEventListener('message', on);
+  }, []);
   const toCircles = useCallback(() => go('/'), []);
   /** The address for a circle's tab: the chat tab is the bare circle, so the URL stays short. */
   const circleHash = (id: number, tab?: string) => `/circle/${id}${!tab || tab === 'chat' ? '' : `/${tab}`}`;
+
+  // Messages written without a connection are sent from here, whatever screen is open, for as long as this person is signed in.
+  const myId = me?.id;
+  useEffect(() => { if (myId) startSending(myId); }, [myId]);
+  // End-to-end encryption: starts only when the server has it on; the engine keeps this device's keys and reads encrypted chats.
+  const showPreview = useCallback(() => me?.push_preview === 1, [me?.push_preview]);
+  useEffect(() => { if (myId) startE2ee(myId, showPreview); }, [myId, showPreview]);
+  // After signing in, tie this browser's existing notification subscription to the person now signed in (a shared device may hold the previous person's).
+  useEffect(() => { if (myId) rebindPush(); }, [myId]);
 
   if (me === undefined) return null;
   if (me === null) return <Suspense fallback={null}><Login onDone={loadMe} /></Suspense>;
   if (route.name === 'join') return <JoinByLink code={route.code} onDone={id => go(id ? `/circle/${id}` : '/')} />;
 
-  async function logout() { await api('/auth/logout', { method: 'POST', body: {} }); setMe(null); go('/'); }
+  async function logout() { stopE2ee(); endSending(); deviceLock.clear(); await dropPush(); await api('/auth/logout', { method: 'POST', body: {} }); setMe(null); go('/'); }
   async function deleteAccount() {
     if (!confirm(t.confirmDelete)) return;
-    try { await api('/me', { method: 'DELETE' }); setMe(null); } catch (e: any) { alert(t.errors[e.code] ?? t.errors.generic); }
+    try { await api('/me', { method: 'DELETE' }); await dropPush(); endSending(); stopE2ee(); await forgetDevice(me!.id).catch(() => {}); deviceLock.clear(); setMe(null); } catch (e: any) { alert(t.errors[e.code] ?? t.errors.generic); }
   }
 
   // The bottom tab bar is WhatsApp's: always there on the main screens, out of the way inside a chat.
@@ -138,7 +164,7 @@ function App() {
           </div>
           <footer className="shrink-0 border-t border-line p-3">
             <button onClick={() => go('/you')} data-selected={route.name === 'you' || route.name === 'sealed' || undefined} className="row-interactive w-full flex items-center gap-3 p-2 rounded-2xl text-start">
-              <span className="w-11 h-11 rounded-full bg-brand text-white flex items-center justify-center font-bold text-lg shrink-0">{(me.name || '?').slice(0, 1).toUpperCase()}</span>
+              <PersonAvatar id={me.id} name={me.name || '?'} avatarAt={me.avatar_at} className="w-11 h-11 text-lg" />
               <span className="min-w-0 flex-1">
                 <b className="block truncate text-ink">{me.name || t.tabYou}</b>
                 <span className="block text-sm text-muted truncate" dir="ltr">{me.phone}</span>
@@ -149,7 +175,7 @@ function App() {
         </aside>
         <main id="main" tabIndex={-1} aria-label={t.appName} className="flex-1 min-w-0 bg-card outline-none">
           <Suspense fallback={null}>
-            {route.name === 'circle' ? <div key={route.id} className="h-full animate-fade-in"><CircleView docked id={route.id} me={me} initialTab={route.tab} onBack={toCircles} onLeft={toCircles} onTab={t => go(circleHash((route as { id: number }).id, t))} /></div>
+            {route.name === 'circle' ? <div key={route.id} className="h-full animate-fade-in"><ScreenGuard resetKey={route.id} onBack={toCircles}><CircleView docked id={route.id} me={me} initialTab={route.tab} onBack={toCircles} onLeft={toCircles} onTab={t => go(circleHash((route as { id: number }).id, t))} /></ScreenGuard></div>
               : route.name === 'memory' ? page(<Memory onOpenArchive={id => go(`/circle/${id}/archive`)} />)
               : route.name === 'you' ? page(<You me={me} onLogout={logout} onDeleteAccount={deleteAccount} onAdmin={() => go('/admin')} onSealed={() => go('/sealed')} onChanged={loadMe} />)
               : route.name === 'sealed' ? page(<SealedPage meId={me.id} onBack={() => go('/you')} />)
@@ -191,7 +217,7 @@ function App() {
         {route.name === 'sealed' && <SealedPage meId={me.id} onBack={() => go('/you')} />}
         {route.name === 'plans' && <Plans circleId={route.id} onBack={() => go(circleHash(route.id, 'settings'))} />}
         {route.name === 'you' && <You me={me} onLogout={logout} onDeleteAccount={deleteAccount} onAdmin={() => go('/admin')} onSealed={() => go('/sealed')} onChanged={loadMe} />}
-        {route.name === 'circle' && <CircleView key={route.id} id={route.id} me={me} initialTab={route.tab} onBack={toCircles} onLeft={toCircles} onTab={t => go(circleHash(route.id, t))} />}
+        {route.name === 'circle' && <ScreenGuard resetKey={route.id} onBack={toCircles}><CircleView key={route.id} id={route.id} me={me} initialTab={route.tab} onBack={toCircles} onLeft={toCircles} onTab={t => go(circleHash(route.id, t))} /></ScreenGuard>}
         {/* Rendering null here left a blank page, which reads as a broken app rather
             than as a door that is closed. */}
         {route.name === 'admin' && (me.is_admin
@@ -220,5 +246,5 @@ function App() {
 if ('serviceWorker' in navigator && import.meta.env.PROD) navigator.serviceWorker.register('/sw.js').catch(() => {});
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode><I18nProvider><App /></I18nProvider></StrictMode>,
+  <StrictMode><I18nProvider><CallProvider><App /></CallProvider></I18nProvider></StrictMode>,
 );

@@ -1,4 +1,4 @@
-// A demo family for showing Thekra: invented people, messages, documented events, an album with pictures and a voice note, a sealed letter.
+// A demo family for showing Tamtim: invented people, messages, documented events, an album with pictures and a voice note, a sealed letter.
 // It talks to a RUNNING server over HTTP exactly like the app does, so nothing is faked and it cannot touch other circles.
 // Needs the server to show sign-in codes (the default console SMS provider, not production).
 //   pnpm demo [http://localhost:8787]

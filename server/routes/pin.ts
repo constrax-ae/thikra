@@ -6,8 +6,10 @@ import { checkOtp, issueOtp } from '../lib/auth.ts';
 import { isLang } from '../lib/lang.ts';
 import { deleteCookie, getCookie } from 'hono/cookie';
 import { normPhone, requireAuth } from '../lib/helpers.ts';
+import { isLastSeenPrivacy, presencePrivacyChanged, presenceViewers } from '../lib/presence.ts';
 import { one, run } from '../db.ts';
 import { isBanned, suspension } from '../lib/admin.ts';
+import { rekeyAllFor } from '../lib/e2ee.ts';
 
 app.post('/api/auth/pin', async c => {
   const b = await c.req.json().catch(() => ({}));
@@ -94,8 +96,14 @@ app.patch('/api/me', async c => {
     if (!isEmail(b.email)) return c.json({ error: 'bad_email' }, 400);
     email = normalizeEmail(b.email) || null;
   }
-  run('UPDATE users SET name = ?, lang = ?, read_receipts = ?, push_preview = ?, email = ? WHERE id = ?', name, lang, receipts, preview, email, u.id);
-  return c.json({ ...u, name, lang, read_receipts: receipts, push_preview: preview, email });
+  // Who may see "online" and "last seen": everyone you share a chat with, only your family circles, or nobody. An unknown value changes nothing.
+  const lastSeen = isLastSeenPrivacy(b.last_seen_privacy) ? b.last_seen_privacy : u.last_seen_privacy;
+  // 1 (the default, as in WhatsApp): an archived chat stays archived when a message arrives. 0: a new message brings it back to the list.
+  const keepArchived = typeof b.keep_archived === 'boolean' ? (b.keep_archived ? 1 : 0) : u.keep_archived;
+  const viewersBefore = lastSeen !== u.last_seen_privacy ? presenceViewers(u.id) : null;
+  run('UPDATE users SET name = ?, lang = ?, read_receipts = ?, push_preview = ?, email = ?, last_seen_privacy = ?, keep_archived = ? WHERE id = ?', name, lang, receipts, preview, email, lastSeen, keepArchived, u.id);
+  if (viewersBefore) presencePrivacyChanged(u.id, viewersBefore);   // people who can no longer see you are told to forget you now
+  return c.json({ ...u, name, lang, read_receipts: receipts, push_preview: preview, email, last_seen_privacy: lastSeen, keep_archived: keepArchived });
 });
 // Account deletion wipes the user's data (report §11, "right to be forgotten").
 app.delete('/api/me', async c => {
@@ -103,6 +111,7 @@ app.delete('/api/me', async c => {
   const owned = one('SELECT COUNT(*) n FROM circles WHERE owner_id = ?', u.id)!.n;
   if (owned > 0) return c.json({ error: 'owns_circles' }, 409);
   const avatar = one('SELECT avatar_hash FROM users WHERE id = ?', u.id)?.avatar_hash as string | null;
+  rekeyAllFor(u.id);
   run('DELETE FROM persons WHERE user_id = ?', u.id);
   run('DELETE FROM users WHERE id = ?', u.id);
   if (avatar) await dropBlobIfUnused(avatar);   // the profile picture goes with the account

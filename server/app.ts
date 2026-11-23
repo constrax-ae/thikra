@@ -48,12 +48,14 @@ app.use('*', async (c, next) => {
   if (!h.has('content-security-policy')) h.set('content-security-policy', CSP);
   h.set('x-content-type-options', 'nosniff');
   h.set('referrer-policy', 'no-referrer');
-  h.set('permissions-policy', 'microphone=(self), camera=(self), geolocation=()');
+  h.set('permissions-policy', 'microphone=(self), camera=(self), geolocation=(self)');
   if (FRAME_ANCESTORS === "'none'") h.set('x-frame-options', 'DENY');
   if (PROD) h.set('strict-transport-security', 'max-age=31536000; includeSubDomains');
 });
 // An unexpected error: the caller gets a plain JSON 500 (never a stack), and the route pattern plus a short message go to the durable error log.
 app.onError((err, c) => {
+  if ((err as { code?: string })?.code === 'encrypted_chat') return c.json({ error: 'encrypted_chat' }, 409);   // readable text sent to an encrypted chat (lib/e2ee.ts)
+  if ((err as { code?: string })?.code === 'admins_only') return c.json({ error: 'admins_only' }, 403);   // the group lets only admins send (lib/helpers.ts: mayPost)
   logError('http', c.req.routePath ?? null, err instanceof Error ? err.message : err);
   console.error('[http]', c.req.method, c.req.routePath, err);
   return c.json({ error: 'server' }, 500);

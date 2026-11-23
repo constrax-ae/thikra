@@ -12,13 +12,13 @@ import type { Server } from 'node:http';
 import { createHash } from 'node:crypto';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { one, all, type Row } from './db.ts';
-import { join, publish, setVisible } from './live.ts';
+import { attach, isJoined, join, publish, setVisible } from './live.ts';
 import { suspension } from './lib/admin.ts';
 import { trackSocket } from './lib/sockets.ts';
 import { count } from './metrics.ts';
 
 export interface GatewayDeps {
-  sendText(circleId: number, userId: number, body: string, clientMsgId: string | null, replyTo?: number | null): { id: number; seq: number; duplicate: boolean };
+  sendText(circleId: number, userId: number, body: string, clientMsgId: string | null, replyTo?: number | null, mentions?: unknown, preview?: unknown): { id: number; seq: number; duplicate: boolean };
   membership(circleId: number, userId: number): Row | undefined;
   limited(key: string, max: number, windowMs: number): Promise<boolean>;
   /** Has this exact send already been stored? (a retry after a lost ack) */
@@ -27,6 +27,8 @@ export interface GatewayDeps {
   messagesChanged(circleId: number, userId: number, afterRev: number): Row[];
   syncPage: number;
   markRead(circleId: number, userId: number, seq: number): void;
+  /** Voice calls (lib/calls.ts): the signalling frames `call_*`. Optional so a gateway without calls still works. */
+  calls?: { attach(userId: number, sink: (e: unknown) => void): () => void; frame(userId: number, sink: (e: unknown) => void, f: unknown): Promise<void> };
 }
 
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -58,12 +60,16 @@ export function attachGateway(server: Server, deps: GatewayDeps) {
     const leave = new Map<number, () => void>();
     const send = (o: unknown) => { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(o)); };
     const subscribe = (circleId: number) => {
-      if (leave.has(circleId) || !deps.membership(circleId, userId)) return;
+      if ((leave.has(circleId) && isJoined(circleId, send)) || !deps.membership(circleId, userId)) return;
       leave.set(circleId, join(circleId, send, userId));
     };
     count('ws_open');
     const untrack = trackSocket(userId, () => ws.close(4001, 'signed_out'));   // suspend, ban and "sign out everywhere" end live connections too
     ws.once('close', untrack);
+    // Events addressed to this person. "member_added" also puts this connection into the new chat's room, so a chat made or
+    // joined after the page loaded is live from its first message (the client still hears the frame and refreshes its list).
+    ws.once('close', attach(userId, ev => { const e = ev as { t?: string; circle?: number }; if (e?.t === 'member_added' && Number.isInteger(e.circle)) subscribe(e.circle!); send(ev); }));
+    if (deps.calls) ws.once('close', deps.calls.attach(userId, send));   // a call that depends on this socket ends when it closes   // reachable as a person too, not only through the chats joined so far (presence)
     for (const r of all('SELECT circle_id FROM circle_members WHERE user_id = ?', userId)) subscribe(r.circle_id);
 
     let isVisibleNow = false;
@@ -82,6 +88,7 @@ export function attachGateway(server: Server, deps: GatewayDeps) {
       let f: any;
       try { f = JSON.parse(String(raw)); } catch { return send({ t: 'err', error: 'bad_frame' }); }
       const circle = Number(f?.circle);
+      if (typeof f?.t === 'string' && f.t.startsWith('call_') && deps.calls) return deps.calls.frame(userId, send, f);
       switch (f?.t) {
         case 'ping': return send({ t: 'pong' });
         case 'visible': { const now = f.on === true; setVisible(userId, isVisibleNow, now); isVisibleNow = now; return; }
@@ -98,10 +105,10 @@ export function attachGateway(server: Server, deps: GatewayDeps) {
           if (!retry && await deps.limited(`ws-send:${userId}`, 120, 60_000)) { count('ws_rate_limited'); return fail('rate_limited'); }
           subscribe(circle);
           try {
-            const r = deps.sendText(circle, userId, body, cmid, Number.isInteger(f.reply_to) ? f.reply_to : null);
+            const r = deps.sendText(circle, userId, body, cmid, Number.isInteger(f.reply_to) ? f.reply_to : null, f.mentions, f.preview);
             return send({ t: 'ack', client_msg_id: cmid, id: r.id, seq: r.seq, duplicate: r.duplicate });
           } catch (e: any) {
-            if (e?.code === 'blocked' || e?.code === 'maintenance' || e?.code === 'circle_frozen') return fail(e.code);
+            if (e?.code === 'blocked' || e?.code === 'maintenance' || e?.code === 'circle_frozen' || e?.code === 'admins_only' || e?.code === 'encrypted_chat') return fail(e.code);
             console.error('[ws send]', e); return fail('server');
           }
         }
@@ -112,7 +119,10 @@ export function attachGateway(server: Server, deps: GatewayDeps) {
         case 'typing': {
           // Not stored anywhere: relayed to the others in the circle, at most twice a second per person.
           if (!deps.membership(circle, userId) || await deps.limited(`typing:${userId}`, 2, 1000)) return;
-          return void publish(circle, { t: 'typing', circle, user: userId, on: f.on !== false }, undefined, userId);
+          // `kind` says what they are doing: writing, or recording a voice note. Anything else (or an older client that sends none) is writing.
+          // The name rides along so a screen that has not loaded the members (the chat list) can still say who.
+          const name = (one('SELECT name FROM users WHERE id = ?', userId)?.name as string | undefined) ?? '';
+          return void publish(circle, { t: 'typing', circle, user: userId, name, on: f.on !== false, kind: f.kind === 'voice' ? 'voice' : 'text' }, undefined, userId);
         }
         case 'sync': {
           if (!deps.membership(circle, userId)) return send({ t: 'err', error: 'not_found' });

@@ -21,7 +21,7 @@ export async function serveMedia(c: Context, m: Row): Promise<Response> {
     'content-type': inline ? m.mime : 'application/octet-stream',
     'x-content-type-options': 'nosniff',
     'content-security-policy': "sandbox; default-src 'none'",
-    'cache-control': 'private, max-age=31536000, immutable',
+    'cache-control': m.view_once ? 'private, no-store' : 'private, max-age=31536000, immutable',
     'accept-ranges': 'bytes',
     'content-disposition': inline ? 'inline' : `attachment; filename*=UTF-8''${encodeURIComponent(m.name ?? 'file')}`,
   };

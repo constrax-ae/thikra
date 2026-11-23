@@ -67,3 +67,14 @@ test('a circle with nobody on the other node costs nothing, and one node alone w
   solo.setVisible(5, true, false); assert.equal(solo.isVisible(5), true);
   solo.setVisible(5, true, false); assert.equal(solo.isVisible(5), false);
 });
+
+test('review: an evicted socket closing later does not remove the room that others joined after the eviction', () => {
+  const live = createLive(new LocalBus());
+  const got: unknown[] = [];
+  const leaveR = live.join(5, () => {}, 1);
+  live.evict(5, 1);
+  live.join(5, e => got.push(e), 2);
+  leaveR();
+  live.publish(5, { hello: 1 });
+  assert.equal(got.length, 1, 'the later member lost the chat\'s live updates');
+});

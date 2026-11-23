@@ -5,6 +5,7 @@ import { app } from '../app.ts';
 import { circleAccess, isManager, membership, poke, tx } from '../lib/helpers.ts';
 import { isReadOnly } from '../billing.ts';
 import { sqlTime } from '../lib/moments.ts';
+import { isEncrypted } from '../lib/e2ee.ts';
 
 app.delete('/api/messages/:mid', async c => {
   const m = one('SELECT id, circle_id, user_id, kind, created_at, deleted_at, sealed_on FROM messages WHERE id = ?', Number(c.req.param('mid')));
@@ -44,6 +45,7 @@ app.get('/api/circles/:id/deletions', c => {
 app.post('/api/messages/:mid/archive', c => {
   const m = one('SELECT id, circle_id, kind, body, transcript FROM messages WHERE id = ?', Number(c.req.param('mid')));
   if (!m || !membership(m.circle_id, c.get('user').id) || m.kind === 'system') return c.json({ error: 'not_found' }, 404);
+  if (isEncrypted(m.circle_id)) return c.json({ error: 'encrypted_chat' }, 409);   // nothing is read from an encrypted chat
   const text = m.kind === 'voice' ? m.transcript : m.body;
   if (!text) return c.json({ error: 'no_text' }, 409);
   if (isReadOnly(m.circle_id)) return c.json({ error: 'archive_readonly' }, 402);

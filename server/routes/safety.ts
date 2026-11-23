@@ -3,6 +3,8 @@ import { all, one, run } from '../db.ts';
 import { app } from '../app.ts';
 import { count, snapshot } from '../metrics.ts';
 import { limited, membership } from '../lib/helpers.ts';
+import { forgetPresence } from '../lib/presence.ts';
+import { isEncrypted } from '../lib/e2ee.ts';
 
 // ---- blocking and reporting -----------------------------------------------------------------
 
@@ -16,7 +18,11 @@ app.post('/api/users/:id/block', async c => {
   if (!one('SELECT 1 FROM circle_members a JOIN circle_members b ON a.circle_id = b.circle_id WHERE a.user_id = ? AND b.user_id = ? LIMIT 1', me.id, target)) return c.json({ error: 'not_found' }, 404);
   const b = await c.req.json().catch(() => ({}));
   if (b.on === false) run('DELETE FROM blocks WHERE user_id = ? AND blocked_id = ?', me.id, target);
-  else run('INSERT OR IGNORE INTO blocks (user_id, blocked_id) VALUES (?, ?)', me.id, target);
+  else {
+    run('INSERT OR IGNORE INTO blocks (user_id, blocked_id) VALUES (?, ?)', me.id, target);
+    // Neither sees the other's "online" or "last seen" from now on: both screens drop it at once.
+    forgetPresence(me.id, [target]); forgetPresence(target, [me.id]);
+  }
   return c.json({ ok: true });
 });
 app.get('/api/me/blocks', c => c.json(all('SELECT u.id, u.name FROM blocks b JOIN users u ON u.id = b.blocked_id WHERE b.user_id = ? ORDER BY b.created_at DESC', c.get('user').id)));
@@ -31,9 +37,11 @@ app.post('/api/messages/:mid/report', async c => {
   if (!REPORT_REASONS.has(b.reason)) return c.json({ error: 'invalid_report' }, 400);
   if (await limited(`report:${user.id}`, 10, 3600_000)) return c.json({ error: 'too_many_requests' }, 429);
   const note = typeof b.note === 'string' ? b.note.trim().slice(0, 500) : null;
-  const snapshot = String((m.kind === 'voice' ? m.transcript : m.body) ?? '').slice(0, 4000);
-  const r = run('INSERT OR IGNORE INTO reports (reporter_id, reported_user_id, circle_id, message_id, reason, note, snapshot) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    user.id, m.user_id, m.circle_id, m.id, b.reason, note || null, snapshot);
+  // An encrypted chat: the server has nothing to copy. The reporting device sends the words it chose to share (it decrypted them), and the report says they are unverified.
+  const encrypted = isEncrypted(m.circle_id);
+  const snapshot = encrypted ? (typeof b.snapshot === 'string' ? b.snapshot.slice(0, 4000) : '') : String((m.kind === 'voice' ? m.transcript : m.body) ?? '').slice(0, 4000);
+  const r = run('INSERT OR IGNORE INTO reports (reporter_id, reported_user_id, circle_id, message_id, reason, note, snapshot, unverified) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    user.id, m.user_id, m.circle_id, m.id, b.reason, note || null, snapshot, encrypted ? 1 : 0);
   count('report_filed');
   return c.json({ ok: true, duplicate: Number(r.changes) === 0 });
 });

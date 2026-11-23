@@ -5,6 +5,7 @@ import { announce, insertMessage, membership, systemMessage } from './helpers.ts
 import { blockedInDirect } from './moments.ts';
 import { directChat } from './circles.ts';
 import { trackJob } from './jobs.ts';
+import { isEncrypted } from './e2ee.ts';
 
 // ---- sealed messages ----------------------------------------------------------------------------
 // A letter to the family's future: text, a voice note, a video or a photo. When it opens it is posted to the whole circle, nobody can
@@ -27,6 +28,7 @@ export const sealedRow = (r: Row) => ({
 export const SEALED_SELECT = `SELECT s.*, ci.name AS circleName, u.name AS recipient FROM sealed_messages s JOIN circles ci ON ci.id = s.circle_id AND ci.deleted_at IS NULL LEFT JOIN users u ON u.id = s.recipient_id`;
 /** Open an envelope now: post its content to the circle (or the one-to-one chat), protect it, archive it, and either finish it or schedule next year. */
 export async function releaseOne(s: Row): Promise<boolean> {
+  if (isEncrypted(s.circle_id)) { run("UPDATE sealed_messages SET status = 'stopped', note = 'encrypted_chat' WHERE id = ?", s.id); return false; }   // never posts into an encrypted chat
   let target = s.circle_id as number;
   if (s.recipient_id) {
     if (!membership(s.circle_id, s.recipient_id)) { run("UPDATE sealed_messages SET status = 'stopped', note = 'recipient_left' WHERE id = ?", s.id); return false; }
@@ -37,8 +39,8 @@ export async function releaseOne(s: Row): Promise<boolean> {
 
   const sealedOn = String(s.sealed_on).slice(0, 10);
   const sent = s.kind === 'voice'
-    ? insertMessage({ circleId: target, userId: s.author_id, kind: 'voice', body: '', audioPath: s.blob_hash, transcript: s.body || null }) // the written note shows under the recording
-    : insertMessage({ circleId: target, userId: s.author_id, kind: 'text', body: s.body });
+    ? insertMessage({ circleId: target, userId: s.author_id, kind: 'voice', body: '', audioPath: s.blob_hash, transcript: s.body || null, delivered: true }) // the written note shows under the recording
+    : insertMessage({ circleId: target, userId: s.author_id, kind: 'text', body: s.body, delivered: true });
   run('UPDATE messages SET sealed_on = ? WHERE id = ?', sealedOn, sent.id);
   if (s.blob_hash) {
     run('INSERT INTO media (circle_id, message_id, uploader_id, blob_hash, kind, mime, size, name, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',

@@ -6,6 +6,8 @@ import { audit, endSessions, maskPhone, notesOf, phoneHash, requireAdmin } from 
 import { actOnUser } from './admin.ts';
 import { plans, quotaOf, subscription } from '../billing.ts';
 import { csvResponse, toCsv } from '../lib/csv.ts';
+import { rekeyAllFor, requireRekey } from '../lib/e2ee.ts';
+import { evict } from '../live.ts';
 
 // Running families and people from the admin screen (ADMIN-PLAN slice 1). Metadata only: no message text, no archive content, numbers masked.
 const GB = 1024 ** 3;
@@ -87,6 +89,8 @@ app.post('/api/admin/families/:id/remove-member', requireAdmin('circles.act'), a
   if (!m) return c.json({ error: 'not_found' }, 404);
   if (m.role === 'owner') return c.json({ error: 'owner_cannot_leave' }, 409);   // hand the family over first
   run('DELETE FROM circle_members WHERE circle_id = ? AND user_id = ?', f.id, uid);
+  evict(f.id as number, uid);
+  requireRekey(f.id as number, 'removed', uid);
   audit(c, 'circle.remove_member', { type: 'circle', id: f.id }, { userId: uid, reason: text(b.reason, 300) || null });
   return c.json({ ok: true });
 });
@@ -142,6 +146,7 @@ app.post('/api/admin/users/:id/delete', requireAdmin('users.delete'), async c =>
   if (Number(one('SELECT COUNT(*) n FROM circles WHERE owner_id = ?', t.id)!.n) > 0) return c.json({ error: 'owns_circles' }, 409);
   const families = Number(one('SELECT COUNT(*) n FROM circle_members WHERE user_id = ?', t.id)!.n);
   const avatar = one('SELECT avatar_hash FROM users WHERE id = ?', t.id)?.avatar_hash as string | null;
+  rekeyAllFor(t.id!);
   tx(() => { run('DELETE FROM persons WHERE user_id = ?', t.id); run('DELETE FROM users WHERE id = ?', t.id); });
   if (avatar) await dropBlobIfUnused(avatar);   // the profile picture goes with the account
   audit(c, 'user.delete', { type: 'user', id: t.id! }, { families, reason: text(b.reason, 300) || null });

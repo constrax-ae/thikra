@@ -69,3 +69,15 @@ test('THIKRA_REGION is stored on new people and new circles (and is only stored)
   assert.equal(one('SELECT region FROM users WHERE phone = ?', phone)?.region, 'me');
   assert.equal(one('SELECT region FROM circles WHERE id = ?', c.json.id)?.region, 'me');
 });
+
+test('version 22 (chat basics): last seen, its privacy, keep-archived, and the receipt marks table', async () => {
+  const db = await open(':memory:');
+  await migrate(db);
+  assert.equal(MIGRATIONS.at(-1)!.version >= 20, true);
+  const users = columns(db, 'users');
+  for (const col of ['last_seen_at', 'last_seen_privacy', 'keep_archived']) assert.ok(users.includes(col), `users.${col}`);
+  db.prepare('INSERT INTO users (phone, name) VALUES (?, ?)').run('+971500990020', 'New');
+  const u = db.prepare('SELECT last_seen_at, last_seen_privacy, keep_archived FROM users WHERE phone = ?').get('+971500990020')!;
+  assert.deepEqual({ ...u }, { last_seen_at: null, last_seen_privacy: 'everyone', keep_archived: 1 });
+  assert.deepEqual(columns(db, 'receipt_marks'), ['circle_id', 'user_id', 'kind', 'seq', 'at']);
+});

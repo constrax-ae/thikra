@@ -20,6 +20,14 @@ import { broadcastCursor } from './0018_broadcast_cursor.ts';
 import { payments } from './0019_payments.ts';
 import { addUserEmail } from './0020_user_email.ts';
 import { addUserAvatar } from './0021_user_avatar.ts';
+import { chatBasics } from './0022_chat_basics.ts';
+import { groups } from './0023_groups.ts';
+import { media } from './0024_media.ts';
+import { privacy } from './0025_privacy.ts';
+import { e2ee } from './0026_e2ee.ts';
+import { e2eeBackup } from './0027_e2ee_backup.ts';
+import { e2eeLink } from './0028_e2ee_link.ts';
+import { e2eeEndorse } from './0029_e2ee_endorse.ts';
 
 /**
  * Numbered, ordered, applied once. Every schema change is a new entry here (a new file, a new number); an applied one is never edited.
@@ -49,6 +57,14 @@ export const MIGRATIONS: Migration[] = [
   { version: 19, name: 'payments', up: payments },
   { version: 20, name: 'user_email', up: addUserEmail },
   { version: 21, name: 'user_avatar', up: addUserAvatar },
+  { version: 22, name: 'chat_basics', up: chatBasics },
+  { version: 23, name: 'groups', up: groups },
+  { version: 24, name: 'media', up: media },
+  { version: 25, name: 'privacy', up: privacy },
+  { version: 26, name: 'e2ee', up: e2ee },
+  { version: 27, name: 'e2ee_backup', up: e2eeBackup },
+  { version: 28, name: 'e2ee_link', up: e2eeLink },
+  { version: 29, name: 'e2ee_endorse', up: e2eeEndorse },
 ];
 
 /** Bring a database to the latest version. Safe on a fresh file, on a database from before versioning (the baseline is idempotent), and when already current. Returns the versions applied now. */
