@@ -18,7 +18,7 @@ export interface KeyValue {
   get(key: string): Promise<unknown | undefined>;
   del(key: string): Promise<void>;
 }
-export interface BusMessage { circleId: number; event: unknown; except?: number }
+export interface BusMessage { circleId: number; event: unknown; except?: number; /** When given, this is not a chat event: it goes to these people's connections, whatever chats they are in (presence). `circleId` is then 0. */ users?: number[]; /** When given, nothing is delivered: this person's connections leave this chat's room (they were removed from it). */ evict?: number }
 export interface Bus {
   /** Tell the OTHER nodes. Never echoes back to the node that published. */
   publish(m: BusMessage): void;

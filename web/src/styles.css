@@ -227,7 +227,7 @@ html[data-theme="dark"] .card { background: color-mix(in srgb, var(--color-card)
 .agent-note { border: 1px solid color-mix(in srgb, var(--color-gold) 55%, transparent); border-radius: 9999px; background: color-mix(in srgb, var(--color-gold) 10%, var(--color-card)); }
 
 /* Chat theme (You > Appearance): wallpaper behind the messages and the colour of my bubbles. */
-.bubble-mine { background: var(--bubble-mine, #d9f2d6); color: var(--bubble-ink, #2b3832); border: 1px solid var(--bubble-edge, #bfe3bb); --bubble-tick: var(--bubble-tick-user, #075985);
+.bubble-mine { background: var(--bubble-mine, #d9f2d6); color: var(--bubble-ink, #2b3832); border: 1px solid var(--bubble-edge, #bfe3bb); --bubble-tick: var(--bubble-tick-user, #12924a);
   --color-ink: #2b3832; --color-muted: #3f4f47; --color-green: #1f4d3f; --color-green-soft: #c4e6c0; --color-gold-dark: #7a5a13; --color-card: #ffffff; }
 /* The conversation is its own surface, not the same sheet as the page chrome. A quiet
    recess gives the bubbles something to sit on — the owner's rule is visual calm, so this
@@ -267,6 +267,12 @@ html[data-wall="rose"] .chat-wall, .wall-rose { background-image: url("data:imag
 
 /* Calm type (owner: "black, dark and thick"): Tajawal 700 is heavy, so bold is the medium weight, and body ink is a soft charcoal. */
 b, strong, h1, h2, h3, .font-bold { font-weight: 500; }
+
+/* Bubbles lift a little off the wall (a hairline shadow, as in every messenger) instead of relying on a drawn border alone. */
+.bubble-mine, .bubble-other { box-shadow: 0 1px 1.5px rgb(43 56 50 / 0.08), 0 1px 0.5px rgb(43 56 50 / 0.04); }
+.bubble-other { border-color: #ece7dc; }
+/* A sticker on its own: no fill, no border, no shadow; only its time underneath. */
+.bubble-bare { background: transparent; border: 0; box-shadow: none; padding: 0; color: var(--color-ink); }
 
 /* ---------------------------------------------------------------------------
    Design foundation: elevation, focus and interaction states.
@@ -573,3 +579,15 @@ html[data-theme="dark"] .logo-dark { display: block; }
   html:not([data-theme="light"]) .logo-light { display: none; }
   html:not([data-theme="light"]) .logo-dark { display: block; }
 }
+
+/* A wallpaper chosen for ONE chat (kept per person) wins over the general one from You > Appearance. */
+html .chat-wall[data-chatwall="none"] { background-image: none; }
+html .chat-wall[data-chatwall="dots"] { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Ccircle cx='3' cy='3' r='1.6' fill='%239a9a9a' fill-opacity='.45'/%3E%3C/svg%3E"); }
+html .chat-wall[data-chatwall="dusk"] { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140' fill='none' stroke='%23b9a8ff' stroke-opacity='.5' stroke-width='1.4' stroke-linecap='round'%3E%3Cpath d='M20 20v8M16 24h8M100 50v6M97 53h6M60 105v10M55 110h10M120 118v6M117 121h6'/%3E%3Ccircle cx='70' cy='30' r='1.5' fill='%23b9a8ff'/%3E%3Ccircle cx='30' cy='80' r='1.2' fill='%23b9a8ff'/%3E%3Ccircle cx='110' cy='95' r='1.5' fill='%23b9a8ff'/%3E%3C/svg%3E"), linear-gradient(180deg, rgba(110, 80, 190, 0.34), rgba(30, 50, 120, 0.26)); }
+html .chat-wall[data-chatwall="dunes"] { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='60' fill='none' stroke='%23d9a441' stroke-opacity='.55' stroke-width='1.6'%3E%3Cpath d='M0 40c20-18 40-18 60 0s40 18 60 0 30-14 40-8'/%3E%3Cpath d='M0 56c20-18 40-18 60 0s40 18 60 0 30-14 40-8' stroke-opacity='.3'/%3E%3C/svg%3E"), linear-gradient(160deg, rgba(217, 164, 65, 0.34), rgba(150, 90, 40, 0.2)); }
+html .chat-wall[data-chatwall="forest"] { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='56' fill='none' stroke='%234fae7e' stroke-opacity='.55' stroke-width='1.5' stroke-linejoin='round'%3E%3Cpath d='M14 30l7-12 7 12zM14 38l7-12 7 12zM21 38v7'/%3E%3Cpath d='M40 18l5-8 5 8zM40 24l5-8 5 8zM45 24v5' stroke-opacity='.35'/%3E%3C/svg%3E"), linear-gradient(160deg, rgba(50, 150, 100, 0.34), rgba(20, 80, 60, 0.2)); }
+html .chat-wall[data-chatwall="rose"] { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='72' height='72' fill='none' stroke='%23e77fa0' stroke-opacity='.55' stroke-width='1.5'%3E%3Ccircle cx='20' cy='20' r='4'/%3E%3Ccircle cx='20' cy='11' r='4'/%3E%3Ccircle cx='29' cy='20' r='4'/%3E%3Ccircle cx='20' cy='29' r='4'/%3E%3Ccircle cx='11' cy='20' r='4'/%3E%3Ccircle cx='54' cy='52' r='3' stroke-opacity='.35'/%3E%3Ccircle cx='54' cy='46' r='3' stroke-opacity='.35'/%3E%3Ccircle cx='60' cy='52' r='3' stroke-opacity='.35'/%3E%3Ccircle cx='54' cy='58' r='3' stroke-opacity='.35'/%3E%3Ccircle cx='48' cy='52' r='3' stroke-opacity='.35'/%3E%3C/svg%3E"), linear-gradient(160deg, rgba(220, 100, 140, 0.32), rgba(130, 50, 90, 0.2)); }
+
+/* Labels the app draws in the thread (notices, poll and card chrome, the "joined" lines) are not message text: they do not get
+   caught in a selection. What people wrote stays selectable. */
+.agent-note, .chat-wall button, .chat-wall [role="img"] { -webkit-user-select: none; user-select: none; }

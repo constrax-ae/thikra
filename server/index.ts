@@ -9,6 +9,7 @@ import { checkQuotaAlerts } from './lib/capacity.ts';
 import { isFrozen, limited, markRead, membership } from './lib/helpers.ts';
 import { maintenanceNow, runBroadcasts } from './lib/announce.ts';
 import { trackJob } from './lib/jobs.ts';
+import { attachCalls, callFrame } from './lib/calls.ts';
 import { briefTick } from './lib/briefs.ts';
 import { refreshAll } from './lib/rollups.ts';
 import { one } from './db.ts';
@@ -35,7 +36,15 @@ import './lib/export.ts';
 import './lib/book.ts';
 import './lib/stars.ts';
 import './lib/receipts.ts';
-import './lib/deletes.ts';
+import './lib/presence.ts';
+import './lib/groups.ts';
+import './lib/polls.ts';
+import './lib/linkpreview.ts';
+import './lib/cards.ts';
+import './lib/uploads.ts';
+import './lib/gifs.ts';
+import { purgeExpired, purgeViewOnce } from './lib/deletes.ts';
+import { purgeStaleTransfers } from './lib/e2ee.ts';
 import './lib/archive.ts';
 import './lib/admin.ts';
 import './routes/auth.ts';
@@ -56,6 +65,15 @@ import './routes/handoff.ts';
 import './routes/avatar.ts';
 import './routes/stars.ts';
 import './routes/receipts.ts';
+import './routes/presence.ts';
+import './routes/groups.ts';
+import './routes/polls.ts';
+import './routes/uploads.ts';
+import './routes/sharing.ts';
+import './routes/privacy.ts';
+import './routes/keys.ts';
+import './routes/e2ee.ts';
+import './routes/calls.ts';
 import './routes/deletes.ts';
 import './routes/archive.ts';
 import './routes/admin.ts';
@@ -109,6 +127,8 @@ export function startServer(port: number, onListening?: (port: number) => void) 
   const quota = trackJob('quota.alerts', 3600_000, async () => { const n = await checkQuotaAlerts(); if (n) console.log(`[quota] warned ${n} family(ies)`); });
   setTimeout(quota, 5 * 60_000).unref();
   setInterval(quota, 3600_000).unref();
+  // Disappearing messages and view-once files go when their time comes (checked every 30 seconds; the web also hides an expired message at once).
+  setInterval(trackJob('expiry', 30_000, async () => { await purgeExpired(); await purgeViewOnce(); purgeStaleTransfers(); }), 30_000).unref();
   // Scheduled push broadcasts go out when they are due (checked every minute).
   setInterval(trackJob('broadcasts', 60_000, async () => { const n = await runBroadcasts(); if (n) console.log(`[broadcast] sent ${n}`); }), 60_000).unref();
   // The agent writes the morning and evening summaries and pushes to the owner only for NEW serious items (checked every 30 minutes).
@@ -122,14 +142,15 @@ export function startServer(port: number, onListening?: (port: number) => void) 
   startOffsite();   // a copy of the data off this server's disk (only when configured, or on a published deployment)
   attachGateway(server, {
     // The live gateway obeys the same rules as the HTTP routes: a frozen family and maintenance stop new messages, but a retry of one already stored is still accepted.
-    sendText: (circleId, userId, body, cmid, replyTo) => {
+    sendText: (circleId, userId, body, cmid, replyTo, mentions, preview) => {
       if (!(cmid && one('SELECT 1 FROM messages WHERE circle_id = ? AND user_id = ? AND client_msg_id = ?', circleId, userId, cmid))) {
         if (maintenanceNow()) throw Object.assign(new Error('maintenance'), { code: 'maintenance' });
         if (isFrozen(circleId)) throw Object.assign(new Error('circle_frozen'), { code: 'circle_frozen' });
       }
-      return sendText(circleId, userId, body, cmid, replyTo);
+      return sendText(circleId, userId, body, cmid, replyTo, 0, mentions, preview);
     },
     membership, limited, messagesSince, messagesChanged, syncPage: SYNC_PAGE, markRead,
+    calls: { attach: attachCalls, frame: callFrame },
     known: (circleId, userId, cmid) => !!one('SELECT 1 FROM messages WHERE circle_id = ? AND user_id = ? AND client_msg_id = ?', circleId, userId, cmid),
   });
   return server;

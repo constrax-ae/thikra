@@ -1,15 +1,34 @@
-import { prepare } from './media';
 import { AlbumsSection } from './Album';
 import { Picker } from './Picker';
 import { chime, prefOn } from './prefs';
-import { Fragment, useMemo, useCallback, useEffect, useRef, useState, Suspense, lazy } from 'react';
-import { api, ApiError, toDate, type Attachment, type GalleryItem, type ArchiveEntry, type Billing, type CircleDetail, type Me, type Message } from './api';
-import { fill, useI18n, intlLocale, speechLocale, systemText } from './i18n';
+import { Fragment, useMemo, useCallback, useEffect, useLayoutEffect, useRef, useState, Suspense, lazy } from 'react';
+import { api, ApiError, toDate, type Attachment, type GalleryItem, type ArchiveEntry, type Billing, type CircleDetail, type Me, type Message, type MessageInfo } from './api';
+import { fill, useI18n, intlLocale, speechLocale, systemText, LANG_INFO, type Lang } from './i18n';
 import { Dialog } from './Dialog';
 import { live } from './live';
-import { Icon } from './icons';
+import { Icon, TickMark } from './icons';
 import { QUICK_REACTIONS, ALL_REACTIONS } from '../../core/reactions';
 import { Spinner, GridSkeleton, Skeleton, Toggle } from './States';
+import { usePresence } from './presence';
+import { typingLabel, useTyping } from './typing';
+import { tickOf } from './ticks';
+import type { OutboxItem } from './outbox';
+import { startSending } from './sending';
+import { mergeMessages } from './history';
+import { mentionQuery, mentionedIds, pickMention, splitMentions } from './mentions';
+import { PollBubble, PollComposer } from './Poll';
+import { Avatar, GroupFace, GroupRules, PersonAvatar, personColour } from './Groups';
+import { lastSeenText } from './lastseen';
+import { VoicePlayer, VoiceRecorder, type Recorded } from './VoiceUi';
+import { PendingUpload, SendSheet } from './UploadUi';
+import { ContactCard, ContactSheet, LinkCard, LocationCard, LocationSheet, SharePanel, StickerView, cardWord, useLinkPreview } from './Cards';
+import { firstLink, splitLinks } from './links';
+import type { UploadFile } from './uploads';
+import { useE2ee, openDirect, onChatChange, E2eeError, NetError } from './e2ee';
+import { isKnownEncrypted } from './e2ee/known';
+import { ChatSecuritySheet, ChatTypeNote, MediaFile, MediaImg, MediaVideo, NoticeLine, useMediaUrl, useNotices } from './E2eeUi';
+import { ChatOptions, PinGate, Transcribe, ViewOnceBubble, timerWord, useLock, wallProps } from './Privacy';
+import { CallButton } from './CallUi';
 
 // The WhatsApp importer carries a chat parser and a draft builder that most families will never open, so it arrives
 // only when someone actually taps Import.
@@ -21,11 +40,11 @@ export type Panel = null | 'search' | 'starred' | 'media';
 /** Delivery state, drawn the way a chat app draws it: one check sent, two delivered,
  *  two in the accent colour once everyone has read it. */
 function Ticks({ kind, t }: { kind: 'pending' | 'sent' | 'delivered' | 'read'; t: { tickPending: string; tickSent: string; tickDelivered: string; tickRead: string } }) {
+  // The marks everyone already reads: a clock while it leaves this device, one tick sent, two delivered, two in the accent colour read.
   const label = { pending: t.tickPending, sent: t.tickSent, delivered: t.tickDelivered, read: t.tickRead }[kind];
-  if (kind === 'pending') return <Icon name="clock" className="w-3.5 h-3.5" aria-label={label} />;
   return (
-    <span role="img" aria-label={label} className={kind === 'read' ? 'text-[var(--bubble-tick)]' : undefined}>
-      <Icon name={kind === 'sent' ? 'check' : 'check-double'} className="w-4 h-4" />
+    <span role="img" aria-label={label} className={`inline-flex ${kind === 'read' ? 'text-[var(--bubble-tick)]' : ''}`}>
+      <Icon name={kind === 'pending' ? 'clock' : kind === 'sent' ? 'check' : 'check-double'} className={kind === 'pending' ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
     </span>
   );
 }
@@ -67,7 +86,7 @@ function DayDivider({ iso, lang, t }: { iso: string; lang: string; t: { today: s
     : d.toLocaleDateString(intlLocale(lang), { day: 'numeric', month: 'long', year: diff > 300 ? 'numeric' : undefined });
   return (
     <div className="flex justify-center my-3">
-      <span className="text-caption text-muted bg-card/90 border border-line rounded-full px-3 py-1 backdrop-blur-sm">{label}</span>
+      <span className="text-caption text-muted bg-card/90 border border-line rounded-full px-3 py-1 backdrop-blur-sm select-none">{label}</span>
     </div>
   );
 }
@@ -92,7 +111,7 @@ const pageCache = new Map<number, Message[]>();
 const firstPage = new Map<number, { at: number; page: Promise<Message[]> }>();
 function prefetchMessages(id: number) {
   const held = firstPage.get(id);
-  if (!held || Date.now() - held.at > 10_000) firstPage.set(id, { at: Date.now(), page: api<Message[]>(`/circles/${id}/messages?after=0`) });
+  if (!held || Date.now() - held.at > 10_000) firstPage.set(id, { at: Date.now(), page: api<Message[]>(`/circles/${id}/messages?after=0&limit=${PAGE}`) });
   return firstPage.get(id)!.page;
 }
 
@@ -141,9 +160,13 @@ export function CircleView({ id, me, initialTab, onBack, onLeft, onTab, docked }
   }, [panel]);
   const [blocked, setBlocked] = useState(false);
   const [sealedTotal, setSealedTotal] = useState(0);
+  const [options, setOptions] = useState(false);
+  const [security, setSecurity] = useState(false);
 
   const loadCircle = useCallback(() => api<CircleDetail>(`/circles/${id}`).then(c => { circleCache.set(id, c); setCircle(c); }).catch(onBack), [id, onBack]);
   useEffect(() => { prefetchMessages(id).catch(() => {}); loadCircle(); }, [id, loadCircle]);
+  // The group itself changed (name, photo, a rule, its members, someone asking to join): show it at once.
+  useEffect(() => live.on(f => { if ((f.t === 'circle' || f.t === 'join_requests') && f.circle === id) loadCircle(); }), [id, loadCircle]);
   useEffect(() => {
     if (circle?.kind !== 'circle') return;
     api<{ total: number }>(`/circles/${id}/sealed-envelopes`).then(r => setSealedTotal(r.total)).catch(() => {});
@@ -158,7 +181,18 @@ export function CircleView({ id, me, initialTab, onBack, onLeft, onTab, docked }
     const on = !blocked; setBlocked(on);
     try { await api(`/users/${other.id}/block`, { body: { on } }); } catch { setBlocked(!on); }
   }
+  const lock = useLock();
   if (!circle) return <ChatSkeleton docked={docked} />;
+  // A locked chat opens only with the PIN of this device; until then nothing of it is loaded or shown.
+  if (circle.locked && !lock.unlocked) return (
+    <div className={docked ? 'chat-docked flex flex-col h-full' : 'flex flex-col h-[100dvh] py-2'}>
+      <div className="chat-head flex items-center gap-2 mb-3">
+        <button className="w-10 h-10 shrink-0 rounded-xl text-muted flex items-center justify-center hover:bg-green-soft hover:text-green transition-colors duration-[var(--dur-instant)]"
+          onClick={onBack} aria-label={t.back} title={t.back}><Icon name="arrow-back" className="w-5 h-5 rtl:-scale-x-100" /></button>
+      </div>
+      <PinGate onClose={onBack} onDone={() => {}} otherDevice />
+    </div>
+  );
 
   // A circle has everything; a plain group has no archive; a one-to-one chat is just the chat.
   const tabs: Tab[] = circle.kind === 'direct' ? ['chat'] : circle.kind === 'group' ? ['chat', 'settings'] : ['chat', 'archive', 'settings'];
@@ -167,13 +201,22 @@ export function CircleView({ id, me, initialTab, onBack, onLeft, onTab, docked }
       <div className="chat-head flex items-center gap-2 mb-3">
         <button className="w-10 h-10 shrink-0 rounded-xl text-muted flex items-center justify-center hover:bg-green-soft hover:text-green transition-colors duration-[var(--dur-instant)]"
           onClick={onBack} aria-label={t.back} title={t.back}><Icon name="arrow-back" className="w-5 h-5 rtl:-scale-x-100" /></button>
-        <span className={`w-10 h-10 shrink-0 flex items-center justify-center font-bold ${circle.kind === 'direct' ? 'rounded-full' : 'rounded-xl'}
-          ${circle.kind === 'circle' ? 'bg-brand text-white ring-2 ring-gold/50 ring-offset-2 ring-offset-card' : 'bg-green-soft text-green'}`} aria-hidden>
-          {circle.kind === 'group' ? <Icon name="group" className="w-5 h-5" /> : circle.name.slice(0, 1).toUpperCase()}
-        </span>
+        <Avatar name={circle.name} kind={circle.kind} photo={circle.photo} person={other ? { id: other.id, avatarAt: other.avatarAt } : null} className="w-11 h-11 text-base" />
         <span className="min-w-0 flex-1">
-          <h2 className="text-lg font-bold !text-ink truncate leading-tight"><bdi>{circle.name}</bdi></h2>
-          {circle.kind !== 'direct' && <span className="block text-caption text-muted truncate">{circle.members.length === 1 ? t.oneMember : `${circle.members.length} ${t.members}`}</span>}
+          <h2 className="text-[1.05rem] font-bold !text-ink truncate leading-tight"><bdi>{circle.name}</bdi></h2>
+          {/* One quiet line: who is here (or whether they are online), and the chat's kind as a small tag that opens the details.
+              The full sentence about who can read it lives in that sheet, not across the header. */}
+          <span className="mt-0.5 flex items-center gap-2 min-w-0 text-caption">
+            {other && !blocked ? <PresenceLine userId={other.id} />
+              : circle.kind !== 'direct' && <span className="text-muted truncate">{circle.members.length === 1 ? t.oneMember : `${circle.members.length} ${t.members}`}</span>}
+            {(circle.encrypted || circle.kind === 'circle') && (
+              <button type="button" onClick={() => setSecurity(true)} title={circle.encrypted ? (circle.kind === 'direct' ? t.e2ee.headerDirect : t.e2ee.headerGroup) : t.e2ee.headerCircle}
+                className={`shrink-0 inline-flex items-center gap-1 h-5 px-2 rounded-full font-bold transition-colors duration-[var(--dur-instant)]
+                  ${circle.encrypted ? 'bg-green-soft text-green hover:bg-green/15' : 'bg-gold/15 text-gold-dark hover:bg-gold/25'}`}>
+                <Icon name={circle.encrypted ? 'lock' : 'heart'} className="w-3 h-3" />{circle.encrypted ? t.e2ee.private : t.infoKindCircle}
+              </button>
+            )}
+          </span>
         </span>
         {tab === 'chat' && (
           <div className="flex items-center gap-1 shrink-0">
@@ -187,10 +230,16 @@ export function CircleView({ id, me, initialTab, onBack, onLeft, onTab, docked }
             ))}
           </div>
         )}
+        {other && !blocked && <CallButton circle={circle.id} name={other.name} peer={{ id: other.id, avatarAt: other.avatarAt }} />}
         {other && <button className="btn btn-ghost !py-1 text-sm" onClick={toggleBlock}>{blocked ? t.unblock : t.block}</button>}
+        {!!circle.disappearSeconds && <button type="button" className="hidden sm:inline-flex shrink-0 items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-green-soft text-green" title={t.priv.timerBadge.replace('{when}', timerWord(circle.disappearSeconds, t))} onClick={() => setOptions(true)}><Icon name="clock" className="w-3.5 h-3.5" />{timerWord(circle.disappearSeconds, t)}</button>}
         {circle.kind === 'circle' && sealedTotal > 0 && <span className="hidden sm:inline-flex shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-gold/20 text-gold-dark" title={t.sealedCount.replace('{n}', String(sealedTotal))}><span className="inline-flex items-center gap-1"><Icon name="envelope" className="w-3.5 h-3.5" />{sealedTotal}</span></span>}
         {circle.kind === 'circle' && !!circle.agentActive && <span className="hidden sm:inline-flex shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-gold/20 text-gold-dark" title={t.agentModeHelp}><span className="inline-flex items-center gap-1"><Icon name="sparkle" className="w-3.5 h-3.5" />{t.agentOn}</span></span>}
+        <button className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-muted hover:bg-green-soft/60 hover:text-green transition-colors duration-[var(--dur-instant)]"
+          aria-label={t.priv.chatOptions} title={t.priv.chatOptions} onClick={() => setOptions(true)}><Icon name="more" className="w-[18px] h-[18px]" /></button>
       </div>
+      {security && <ChatSecuritySheet circle={circle} me={me} onClose={() => setSecurity(false)} />}
+      {options && <ChatOptions circle={circle} reload={loadCircle} onClose={() => setOptions(false)} />}
       {blocked && <p role="status" className="text-xs text-gold-dark bg-gold/15 rounded-lg p-2 mb-2">{t.blockedNote}</p>}
       {tabs.length > 1 && <div className="chat-tabs flex gap-1 mb-3 border-b border-line">
         {tabs.map(k => (
@@ -233,113 +282,16 @@ function TodayBanner({ circleId, onOpen }: { circleId: number; onOpen: () => voi
   );
 }
 
-const clock = (ms: number) => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+// Each member has their own colour for their NAME only (messages stay white), like WhatsApp. All reach 4.5:1 on white.
+const nameColour = personColour;
 
-/** A voice message player like WhatsApp's: play/pause, a seek bar, elapsed/length, and 1x/1.5x/2x speed. */
-export const MEMBER_COLOURS = ['#b0235a', '#00796b', '#5b3fc4', '#c2410c', '#1565c0', '#7b4a2a', '#2e7d32', '#8e24aa', '#9a6700', '#c0392b'];
-interface Person { id: number; name: string; userId: number | null; relation: string | null; birthDate: string | null; deathDate: string | null }
-const nameColour = (userId: number) => MEMBER_COLOURS[Math.abs(userId) % MEMBER_COLOURS.length];
 const fmtSize = (n: number) => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
 
-function VoicePlayer({ id, ms, mine, author, userId, meta }: { id: number; ms: number | null; mine: boolean; author?: string | null; userId?: number | null; meta?: React.ReactNode }) {
-  const { t } = useI18n();
-  const el = useRef<HTMLAudioElement>(null);
-  const wave = useRef<HTMLDivElement>(null);
-  const [playing, setPlaying] = useState(false);
-  const [pos, setPos] = useState(0);
-  const [len, setLen] = useState(ms ?? 0);
-  const [speed, setSpeed] = useState(1);
-  const bars = useMemo(() => Array.from({ length: 34 }, (_, i) => 30 + Math.round(((Math.sin(id * 12.9898 + i * 78.233) * 43758.5453) % 1 + 1) % 1 * 60)), [id]);
-  const progress = len > 0 ? Math.min(1, pos / len) : 0;
+// ---- people: the family record ----------------------------------------------------------------
 
-  // `timeupdate` only fires about four times a second, which is why the bar moved in steps.
-  // While it is playing we read the clock each frame instead, and stop as soon as it pauses.
-  useEffect(() => {
-    if (!playing) return;
-    let raf = 0;
-    const loop = () => { const a = el.current; if (a) setPos(a.currentTime * 1000); raf = requestAnimationFrame(loop); };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
-  }, [playing]);
+interface Person { id: number; name: string; userId: number | null; relation: string | null; birthDate: string | null; deathDate: string | null }
 
-  const toggle = () => { const a = el.current; if (!a) return; if (a.paused) a.play().catch(() => {}); else a.pause(); };
-  const cycle = () => { const next = speed === 1 ? 1.5 : speed === 1.5 ? 2 : 1; setSpeed(next); if (el.current) el.current.playbackRate = next; };
-  const seekTo = (clientX: number) => {
-    const box = wave.current?.getBoundingClientRect(); if (!box) return;
-    const v = Math.max(0, Math.min(1, (clientX - box.left) / box.width)) * Math.max(len, 1);
-    setPos(v); if (el.current) el.current.currentTime = v / 1000;
-  };
-  // Dragging the knob scrubs; the listeners live on the window so the pointer can leave the bar.
-  const drag = (e: React.PointerEvent) => {
-    e.preventDefault(); seekTo(e.clientX);
-    const move = (ev: PointerEvent) => seekTo(ev.clientX);
-    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
-    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
-  };
-
-  return (
-    <div className="flex items-center gap-2.5 min-w-[14rem] py-0.5">
-      <audio ref={el} preload={prefOn('saver') ? 'none' : 'metadata'} src={`/api/messages/${id}/audio`}
-        onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => { setPlaying(false); setPos(0); }}
-        onTimeUpdate={e => { if (!playing) setPos(e.currentTarget.currentTime * 1000); }}
-        onLoadedMetadata={e => { const d = e.currentTarget.duration; if (!ms && Number.isFinite(d)) setLen(d * 1000); }} />
-
-      {/* Who recorded it — and, once it is playing, the speed control takes the same slot
-          instead of floating in a grey disc of its own. */}
-      {playing || speed !== 1 ? (
-        <button type="button" onClick={cycle} aria-label={t.playbackSpeed} title={t.playbackSpeed}
-          className={`w-9 h-9 rounded-full shrink-0 text-xs font-bold flex items-center justify-center
-            transition-colors duration-[var(--dur-instant)] ${mine ? 'bg-current/15' : 'bg-green-soft text-green'}`}>
-          {speed}x
-        </button>
-      ) : (
-        <span className="relative shrink-0">
-          <span className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-white text-sm"
-            style={{ background: userId != null ? nameColour(userId) : 'var(--color-brand)' }} aria-hidden>
-            {(author ?? '').trim().slice(0, 1) || '•'}
-          </span>
-          <span className="absolute -bottom-0.5 -end-0.5 w-4 h-4 rounded-full bg-card text-green flex items-center justify-center" aria-hidden>
-            <Icon name="mic" className="w-2.5 h-2.5" />
-          </span>
-        </span>
-      )}
-
-      <button type="button" onClick={toggle} aria-label={playing ? t.pauseVoice : t.playVoice}
-        className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-transform duration-[var(--dur-fast)] active:scale-90 hover:bg-current/10">
-        <Icon name={playing ? 'pause' : 'play'} className="w-5 h-5" />
-      </button>
-
-      <div className="flex-1 min-w-0">
-        <div ref={wave} onPointerDown={drag}
-          className="relative h-7 flex items-center gap-[2px] cursor-pointer touch-none" dir="ltr"
-          role="slider" aria-label={t.playVoice} aria-valuemin={0} aria-valuemax={Math.round(len / 1000)} aria-valuenow={Math.round(pos / 1000)}
-          tabIndex={0}
-          onKeyDown={e => {
-            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-            e.preventDefault();
-            const next = Math.max(0, Math.min(len, pos + (e.key === 'ArrowRight' ? 5000 : -5000)));
-            setPos(next); if (el.current) el.current.currentTime = next / 1000;
-          }}>
-          {bars.map((h, i) => (
-            <span key={i} className="flex-1 min-w-[2px] max-w-[3px] rounded-full shrink-0"
-              style={{ height: `${h}%`, background: 'currentColor', opacity: i / bars.length <= progress ? 0.95 : 0.28 }} />
-          ))}
-          {/* The knob rides the same value as the bars, moved with a transform so it animates
-              per frame rather than relaying out the row. */}
-          <span aria-hidden className="absolute top-1/2 w-3 h-3 rounded-full bg-current shadow-e1 pointer-events-none"
-            style={{ insetInlineStart: `${progress * 100}%`, transform: 'translate(-50%, -50%)' }} />
-        </div>
-        {/* Duration on the left, the message's own time and ticks on the right: one line
-            under the wave, the way a voice note reads in any chat app. */}
-        <div className="flex items-center justify-between gap-2 -mt-1">
-          <span className="text-[11px] tabular-nums opacity-70" dir="ltr">{clock(playing || pos > 0 ? pos : len)}</span>
-          {meta}
-        </div>
-      </div>
-    </div>
-  );
-}
-
+/** The family record: people outlive accounts (the living and the departed). Managers edit; everyone reads. */
 function PeoplePanel({ circle, manager }: { circle: CircleDetail; manager: boolean }) {
   const { t } = useI18n();
   const [people, setPeople] = useState<Person[]>([]);
@@ -389,21 +341,95 @@ function PeoplePanel({ circle, manager }: { circle: CircleDetail; manager: boole
   );
 }
 
+/** "online" or "last seen today at 4:30 PM" under a person's name. Nothing at all when they hide it (or we may not see it). */
+function PresenceLine({ userId }: { userId: number }) {
+  const { t, lang } = useI18n();
+  const p = usePresence([userId]).get(userId);
+  const [, tick] = useState(0);
+  useEffect(() => { const i = setInterval(() => tick(n => n + 1), 60_000); return () => clearInterval(i); }, []);   // "today" becomes "yesterday" at midnight
+  if (!p) return null;
+  if (p.online) return <span className="text-green truncate inline-flex items-center gap-1"><span aria-hidden className="w-1.5 h-1.5 rounded-full bg-green" />{t.online}</span>;
+  return p.lastSeen ? <span className="text-muted truncate">{lastSeenText(p.lastSeen, new Date(), lang, t)}</span> : null;
+}
+
+/** A receipt time: just the clock for today, the date and the clock otherwise. */
+function infoTime(at: string, lang: string) {
+  const d = toDate(at), now = new Date();
+  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  return new Intl.DateTimeFormat(intlLocale(lang), sameDay ? { hour: 'numeric', minute: '2-digit' } : { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(d);
+}
+
 // ---- chat ------------------------------------------------------------------
 
+/** A preview picture made on the device, as a data URL small enough to travel inside the encrypted message (a bigger one is left out: the receiver shows a plain frame). */
+async function thumbUrl(b: Blob | null): Promise<string | undefined> {
+  if (!b || b.size > 24_000) return undefined;
+  const bytes = new Uint8Array(await b.arrayBuffer());
+  let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return `data:${b.type || 'image/jpeg'};base64,${btoa(bin)}`;
+}
+
+/** How many messages a chat loads at a time (the same number the server pages by). */
+const PAGE = 50;
+
+/** The notices the device wrote (keys changed...) slotted into the thread by time; each stands in as a system line with a negative id. */
+function withNotices(list: Message[], notices: Array<{ at: number }>): Message[] {
+  if (!notices.length) return list;
+  const out = [...list];
+  notices.forEach((n, i) => {
+    const line = { id: -1e9 - i, kind: 'system', body: '', createdAt: new Date(n.at).toISOString().replace('T', ' ').slice(0, 19), userId: null, author: null, transcript: null, hasAudio: 0, archiveStatus: 'none', score: null, category: null, reason: null, deleted: 0, deletedBy: null } as Message;
+    const at = out.findIndex(m => m.id > -1e9 && !m.pending && toDate(m.createdAt).getTime() > n.at);
+    if (at < 0) out.push(line); else out.splice(at, 0, line);
+  });
+  return out;
+}
 function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDetail; me: Me; panel: Panel; setPanel: React.Dispatch<React.SetStateAction<Panel>>; onOpenArchive: () => void }) {
   const { t, lang } = useI18n();
   const agentReason = useAgentReason();
-  const [msgs, setMsgs] = useState<Message[]>(() => pageCache.get(circle.id) ?? []);
+  const enc = !!circle.encrypted || isKnownEncrypted(circle.id);   // a server cannot talk this device out of a chat it knows is encrypted
+  const { e2ee } = useE2ee();
+  const encReady = !enc || !!e2ee;
+  const [encState, setEncState] = useState<'ok' | 'stuck' | 'waiting' | 'not_member'>('ok');
+  const [encWhy, setEncWhy] = useState<string | null>(null);
+  const [encBusy, setEncBusy] = useState(false);
+  /** Rows from the server -> messages to draw. In an encrypted chat they are decrypted here (and control messages applied); in any other chat they pass through untouched. */
+  const dec = useCallback((rows: Message[]): Promise<Message[]> => (enc && e2ee ? e2ee.decryptRows(circle.id, rows as any) : Promise.resolve(rows)), [enc, e2ee, circle.id]);
+  /** What an encryption mistake says to the person. */
+  const encFail = useCallback((err: unknown) => {
+    const code = err instanceof E2eeError || err instanceof NetError ? err.code : 'generic';
+    if (code === 'keys_mismatch') return t.e2ee.keysMismatch;
+    if (code === 'untrusted_commit' || code === 'bad_commit') return t.e2ee.stuck;
+    if (code === 'not_member') return t.e2ee.notMember;
+    if (code === 'peer_gone') return t.e2ee.goneNote;
+    if (code === 'device_unconfirmed') return t.e2ee.unconfirmedSend;
+    if (code === 'device_gone') return t.e2ee.notReady;
+    if (code === 'not_ready' || code === 'no_key_packages' || code === 'send_failed') return t.e2ee.notReady;
+    if (code === 'invalid_attachment') return t.errors.invalid_attachment ?? t.errors.generic;
+    return t.errors[code] ?? t.errors.generic;
+  }, [t]);
+  useEffect(() => {
+    if (!enc || !e2ee) return;
+    let live = true;
+    const look = () => e2ee.status(circle.id).then(s => { if (live) setEncState(s); }).catch(() => {}); e2ee.stuckReason(circle.id).then(w => { if (live) setEncWhy(w); }).catch(() => {});
+    look();
+    const off = onChatChange(c => { if (c === circle.id || c === null) look(); });
+    return () => { live = false; off(); };
+  }, [enc, e2ee, circle.id]);
+  const notices = useNotices(circle.id, enc);
+  const [safety, setSafety] = useState(false);
+  // The last page seen of a readable chat is kept for this session so reopening it paints at once.
+  // An encrypted chat keeps nothing outside its own engine: its messages are never cached here.
+  const [msgs, setMsgs] = useState<Message[]>(() => (enc ? [] : pageCache.get(circle.id) ?? []));
   // False until the first page has arrived: an empty list before that means "loading",
   // not "this chat has no messages", and must not say so.
-  const [loaded, setLoaded] = useState(() => pageCache.has(circle.id));
-  useEffect(() => { pageCache.set(circle.id, msgs.filter(m => !m.pending)); }, [circle.id, msgs]);
+  const [loaded, setLoaded] = useState(() => !enc && pageCache.has(circle.id));
+  useEffect(() => { if (!enc) pageCache.set(circle.id, msgs.filter(m => !m.pending)); }, [enc, circle.id, msgs]);
   // Drafts (M-13): what you were typing survives leaving the chat and closing the app. Per circle, on this device.
   const draftKey = `thikra_draft_${circle.id}`;
   const [text, setText] = useState(() => { try { return localStorage.getItem(draftKey) ?? ''; } catch { return ''; } });
   const [error, setError] = useState('');
   const [recording, setRecording] = useState(false);
+  const [onceVoice, setOnceVoice] = useState(false);                   // the next voice note is view once
   const [open, setOpen] = useState<number | null>(null);
   const [del, setDel] = useState<Message | null>(null);
   const [reacting, setReacting] = useState<Message | null>(null);
@@ -413,9 +439,9 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
   useEffect(() => {
-    try { if (text && !editing) localStorage.setItem(draftKey, text); else localStorage.removeItem(draftKey); } catch { /* storage unavailable: no draft, everything else works */ }
+    try { if (text && !editing && !enc) localStorage.setItem(draftKey, text); else localStorage.removeItem(draftKey); } catch { /* storage unavailable: no draft, everything else works */ }
   }, [text, editing, draftKey]);
-  const [typers, setTypers] = useState<Record<number, number>>({});   // user id -> when to stop showing "typing…"
+  const typersOf = useTyping(me.id);                                  // who is typing or recording, shared with the chat list
   const marksRef = useRef(circle.members);
   useEffect(() => { marksRef.current = marks; }, [marks]);
   const [starredIds, setStarredIds] = useState<Set<number>>(new Set());
@@ -427,70 +453,78 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
   const [pins, setPins] = useState<Message[]>([]);
   const [pinIdx, setPinIdx] = useState(0);
   const [pinning, setPinning] = useState<Message | null>(null);
-  const loadPins = useCallback(() => api<Message[]>(`/circles/${circle.id}/pins`).then(p => { setPins(p); setPinIdx(0); }).catch(() => {}), [circle.id]);
+  const [polling, setPolling] = useState(false);                      // the "new poll" sheet
+  const box2 = useRef<HTMLInputElement>(null);                        // the message box (for the caret, when a name is picked)
+  const [caret, setCaret] = useState(0);
+  const names = useMemo(() => new Map(circle.members.map(x => [x.id, x.name])), [circle.members]);
+  const memberById = useMemo(() => new Map(marks.map(x => [x.id, x])), [marks]);
+  const fail = useCallback((code: string) => setError(t.errors[code] ?? t.errors.generic), [t]);
+  const openPerson = useCallback((uid: number) => { if (uid !== me.id) openDirect({ userId: uid }).then(r => { location.hash = `/circle/${r.id}`; }).catch(() => {}); }, [me.id]);
+  const [info, setInfo] = useState<MessageInfo | null>(null);         // "Info" on one of my messages: who read it, who received it
+  const infoFor = useRef(0);                                          // the message whose info was asked for last: a slow answer for an earlier one is dropped
+  const openInfo = useCallback((m: Message) => {
+    infoFor.current = m.id;
+    api<MessageInfo>(`/messages/${m.id}/info`).then(r => { if (infoFor.current === m.id) setInfo(r); }).catch(() => {});
+  }, []);
+  const loadPins = useCallback(() => api<Message[]>(`/circles/${circle.id}/pins`).then(dec).then(p => { setPins(p); setPinIdx(0); }).catch(() => {}), [circle.id, dec]);
   useEffect(() => { loadPins(); }, [loadPins]);
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
   const [light, setLight] = useState<Attachment | null>(null);
-  const [uploading, setUploading] = useState(0);
-  const [pending, setPending] = useState<File[]>([]);           // chosen, not sent yet
-  const [previews, setPreviews] = useState<string[]>([]);
+  const [picked, setPicked] = useState<File[] | null>(null);          // files chosen, shown in the sheet before sending
+  const [attachMenu, setAttachMenu] = useState(false);
+  const [sharing, setSharing] = useState<null | 'panel' | 'contact' | 'location'>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
+  // The attach menu and the stickers panel close when you click anywhere outside the message box (as any popover does).
   useEffect(() => {
-    const urls = pending.map(f => (f.type.startsWith('image/') ? URL.createObjectURL(f) : ''));
-    setPreviews(urls);
-    return () => urls.forEach(u => u && URL.revokeObjectURL(u));
-  }, [pending]);
+    if (!attachMenu && sharing !== 'panel') return;
+    const away = (e: MouseEvent) => { if (!composerRef.current?.contains(e.target as Node)) { setAttachMenu(false); setSharing(sh => (sh === 'panel' ? null : sh)); } };
+    document.addEventListener('mousedown', away);
+    return () => document.removeEventListener('mousedown', away);
+  }, [attachMenu, sharing]);
   const fileInput = useRef<HTMLInputElement>(null);
-  const [recMs, setRecMs] = useState(0);
-  const recStart = useRef(0);
-  useEffect(() => {
-    if (!recording) return;
-    const i = setInterval(() => setRecMs(Date.now() - recStart.current), 250);
-    return () => clearInterval(i);
-  }, [recording]);
   const [fwdTargets, setFwdTargets] = useState<Array<{ id: number; name: string }>>([]);
   const [fwdPick, setFwdPick] = useState<number[]>([]);
   const lastTypingSent = useRef(0);
   const reportedRead = useRef(0);
   const bottom = useRef<HTMLDivElement>(null);
-  // Auto-scrolling on every new message yanks you away from what you were reading.
-  // We only follow the conversation while you are already at the bottom; otherwise a
-  // button appears and you decide when to jump.
-  const scroller = useRef<HTMLDivElement>(null);
-  const content = useRef<HTMLDivElement>(null);
-  // `stick` is the live value the scroll handlers read; `atBottom` is the same thing for
-  // rendering. A ref is needed because the ResizeObserver below fires outside React.
-  const stick = useRef(true);
-  const [atBottom, setAtBottom] = useState(true);
-  const onScroll = () => {
-    const el = scroller.current; if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-    stick.current = nearBottom;
-    setAtBottom(nearBottom);
-  };
+  // Disappearing messages leave the screen at their time, even offline: this clock moves every 10 seconds while any message has a time.
+  const [clock, setClock] = useState(Date.now);
+  const hasTimed = msgs.some(m => m.expiresAt && !m.expired);
+  useEffect(() => { if (!hasTimed) return; const h = setInterval(() => setClock(Date.now()), 10_000); return () => clearInterval(h); }, [hasTimed]);
+  const wall = useRef<HTMLDivElement>(null);                    // the scrolling list of messages
+  const anchor = useRef<{ top: number; height: number } | null>(null);   // where the list was just before an older page is added (to keep the reading position)
+  const [older, setOlderState] = useState<'idle' | 'loading' | 'end'>('idle');
+  const olderRef = useRef<'idle' | 'loading' | 'end'>('idle');  // read inside handlers without waiting for a render
+  const setOlder = useCallback((v: 'idle' | 'loading' | 'end') => { olderRef.current = v; setOlderState(v); }, []);
+  const content = useRef<HTMLDivElement>(null);                 // the thread inside the wall (watched for growth)
+  const [atBottom, setAtBottom] = useState(true);               // shows the "jump to latest" button when false
   // Scroll the container itself rather than a sentinel element: scrollIntoView stops at the
   // sentinel's box, which left the newest message tucked under the composer.
-  const toBottom = (smooth = true) => {
-    const el = scroller.current; if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
-  };
+  const toBottom = (smooth = true) => { const el = wall.current; if (el) el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' }); };
   const lastSeq = useRef(0);
   const lastRev = useRef(0);
-  const unsent = useRef(new Map<string, { body: string; replyTo: number | null }>()); // client_msg_id -> what to resend, until acknowledged
+  // Text messages the server has not confirmed yet wait in the outbox (saved on this device) and are sent by the app's one sender,
+  // from whatever screen the person is on. This screen only DRAWS what waits for this chat: the bubbles are read from the outbox on
+  // every change, never kept as a copy here, so a bubble cannot outlive its message.
+  const { box, sender, uploader, media } = useMemo(() => startSending(me.id), [me.id]);
+  const [boxTurn, turnBox] = useState(0);
+  const waiting = useMemo<Message[]>(() => box.list(circle.id).map((i: OutboxItem) => ({
+    id: i.at - 8e15, cid: i.cid, pending: true, failed: i.failed, userId: me.id, author: me.name, kind: 'text', body: i.body, transcript: null,
+    hasAudio: 0, archiveStatus: 'none', score: null, category: null, reason: null, createdAt: new Date(i.at).toISOString(), deleted: 0, deletedBy: null,
+    replyTo: i.quote ? { ...i.quote, deleted: false } : null,
+  })), [box, circle.id, me.id, me.name, boxTurn]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const uploads = uploader.list(circle.id);            // photos, files and voice notes on their way (read on every redraw, like `waiting`)
+  const oldestLoaded = useRef(0);                     // the seq this screen's window of history starts at (0 = the whole chat is loaded)
+  const nearBottom = useRef(true);                    // is the person looking at the newest messages (then new ones keep the view down)
+  // After you send something the view follows it down for a while, even while the upload bubble is swapped for the real
+  // message and its photo loads (both briefly move the scroll position). Any scroll of your own (wheel, touch, keys) ends it.
+  const followUntil = useRef(0);
+  const follow = () => { nearBottom.current = true; followUntil.current = Date.now() + 20_000; };
   const manager = circle.role === 'owner' || circle.role === 'admin';
-  const rec = useRef<{ mr: MediaRecorder; chunks: Blob[]; stream: MediaStream; speech?: any; transcript: string } | null>(null);
 
-  // Merge messages into the screen by seq: a message we already show is replaced by its newer revision, new ones slot in
-  // order, and ones still being sent (no seq yet) stay at the bottom.
-  const merge = useCallback((incoming: Message[]) => {
-    setMsgs(prev => {
-      const byId = new Map(prev.map(m => [m.id, m]));
-      for (const m of incoming) {
-        const held = byId.get(m.id);
-        if (!held || (m.rev ?? 0) >= (held.rev ?? 0)) byId.set(m.id, { ...held, ...m });
-      }
-      return [...byId.values()].sort((x, y) => (x.seq ?? Infinity) - (y.seq ?? Infinity) || x.id - y.id);
-    });
-  }, []);
+  // Merge messages into the screen by seq: a message we already show is replaced by its newer revision and new ones slot in order.
+  // A change to a message older than what is loaded is left out (web/src/history.ts says why).
+  const merge = useCallback((incoming: Message[]) => setMsgs(prev => mergeMessages(prev, incoming, oldestLoaded.current)), []);
 
   /**
    * Opening (`full`): the latest page. Catching up: everything new OR CHANGED since the last sync reply (rev), oldest first,
@@ -498,58 +532,69 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
    */
   const refresh = useCallback(async (full = false) => {
     if (full || lastRev.current === 0) {
-      const page = await api<Message[]>(`/circles/${circle.id}/messages?after=0`);
-      setMsgs(prev => full ? page : prev);
-      if (!full) merge(page);
-      lastSeq.current = Math.max(0, ...page.map(m => m.seq ?? 0));
-      lastRev.current = Math.max(0, ...page.map(m => m.rev ?? 0));
+      // The first page was already asked for alongside the chat itself (prefetchMessages): use that answer once, if it is fresh.
+      const held = full && !enc ? firstPage.get(circle.id) : undefined;
+      if (held) firstPage.delete(circle.id);
+      const rows = held && Date.now() - held.at < 10_000
+        ? await held.page.catch(() => api<Message[]>(`/circles/${circle.id}/messages?after=0&limit=${PAGE}`))
+        : await api<Message[]>(`/circles/${circle.id}/messages?after=0&limit=${PAGE}`);
+      const page = await dec(rows);
+      const whole = rows.length < PAGE;   // fewer than a page came back: this IS the whole chat
+      const first = whole ? 0 : Math.min(...rows.map(m => m.seq ?? Infinity));
+      if (full || oldestLoaded.current === 0 || first < oldestLoaded.current) oldestLoaded.current = first;
+      if (full) { setOlder(whole ? 'end' : 'idle'); nearBottom.current = true; setMsgs(page); }
+      else merge(page);
+      lastSeq.current = Math.max(0, ...rows.map(m => m.seq ?? 0));
+      lastRev.current = Math.max(0, ...rows.map(m => m.rev ?? 0));
       return;
     }
     for (let guard = 0; guard < 50; guard++) {
       const got = await api<Message[]>(`/circles/${circle.id}/messages?after_rev=${lastRev.current}`);
       if (got.length) {
-        merge(got);
+        merge(await dec(got));
         lastRev.current = Math.max(lastRev.current, ...got.map(m => m.rev ?? 0));
         lastSeq.current = Math.max(lastSeq.current, ...got.map(m => m.seq ?? 0));
       }
       if (got.length < 200) break;
     }
-  }, [circle.id, merge]);
+  }, [circle.id, merge, dec]);
 
+  // What the sender did with this chat's messages. One sent over HTTP is not pushed back to this device, so fetch it.
   useEffect(() => {
-    // The first page was already requested alongside the chat itself (prefetchMessages);
-    // use that answer instead of asking again. Later full reloads always go to the server.
-    const held = firstPage.get(circle.id);
-    firstPage.delete(circle.id);
-    const first = held && Date.now() - held.at < 10_000 ? held.page : null;   // an old, unused prefetch is not trusted
-    (first
-      ? first.then(page => {
-          setMsgs(page);
-          lastSeq.current = Math.max(0, ...page.map(m => m.seq ?? 0));
-          lastRev.current = Math.max(0, ...page.map(m => m.rev ?? 0));
-        })
-      : refresh(true)
-    ).catch(() => refresh(true)).catch(() => {}).finally(() => setLoaded(true));
+    const onStorage = () => turnBox(n => n + 1);   // another tab of this person changed the outbox
+    window.addEventListener('storage', onStorage);
+    const off = sender.subscribe(e => {
+      turnBox(n => n + 1);
+      if (e.circle !== circle.id) return;
+      if (e.type === 'sent' && e.via === 'http') refresh().catch(() => {});
+      if (e.type === 'failed') { const code = box.list(circle.id).find(i => i.cid === e.cid)?.failed ?? 'generic'; setError(t.errors[code] ?? t.errors.generic); }
+    });
+    // The media outbox (photos, files, voice notes): redraw on every step; when one arrives, fetch the message it became.
+    const offUp = uploader.subscribe(e => {
+      turnBox(n => n + 1);
+      if (e.circle === circle.id && e.type === 'sent') refresh().catch(() => {});
+    });
+    return () => { off(); offUp(); window.removeEventListener('storage', onStorage); };
+  }, [sender, uploader, box, circle.id, refresh, t]);
+  useEffect(() => {
+    if (!encReady) return;
+    refresh(true).catch(() => {}).finally(() => setLoaded(true));
     // Live: new messages arrive as pushed frames. Polling stays as the safety net: fast while the socket is down, rare while it is up.
     const off = live.on(f => {
-      if (f.t === 'open') {
-        refresh().catch(() => {}); // (re)connected: catch up on what was missed
-        // ...and resend what was never acknowledged. Safe: the server de-duplicates by client_msg_id.
-        for (const [cid, u] of unsent.current) live.send({ t: 'send', circle: circle.id, client_msg_id: cid, body: u.body, reply_to: u.replyTo });
-      }
+      if (f.t === 'open') { live.join([circle.id]); refresh().catch(() => {}); } // (re)connected: catch up on what was missed
       else if (f.t === 'msg' && f.circle === circle.id) {
         const m = f.m as Message;
         if (m.userId && m.userId !== me.id && document.visibilityState === 'visible') chime();   // the in-app sound, if the person wants it
-        if (m.userId) setTypers(prev => ({ ...prev, [m.userId!]: 0 })); // they sent it: no longer typing
         // A hole in the sequence means a push was lost: sync now instead of waiting for the safety poll.
         const hole = m.seq !== undefined && lastSeq.current > 0 && m.seq > lastSeq.current + 1;
         lastSeq.current = Math.max(lastSeq.current, m.seq ?? 0);
         if (hole) refresh().catch(() => {});
-        merge([m]);
+        dec([m]).then(merge).catch(() => {});
       } else if (f.t === 'pins' && f.circle === circle.id) {
         loadPins();
       } else if (f.t === 'update' && f.circle === circle.id) {
-        merge([f.m as Message]);
+        dec([f.m as Message]).then(merge).catch(() => {});
+        if ((f.m as Message)?.deleted) loadPins();
       } else if ((f.t === 'receipt' || f.t === 'typing') && f.circle === circle.id && !marksRef.current.some(x => x.id === f.user)) {
         // Someone joined after this screen loaded: fetch the member list again (then their marks and name are known).
         api<CircleDetail>(`/circles/${circle.id}`).then(d => setMarks(d.members)).catch(() => {});
@@ -560,31 +605,31 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
           // Read marks are reciprocal: we only keep them if we share ours too.
           readSeq: f.read_seq !== undefined && me.read_receipts === 1 ? Math.max(x.readSeq ?? 0, f.read_seq) : x.readSeq,
         }));
-      } else if (f.t === 'typing' && f.circle === circle.id) {
-        setTypers(prev => ({ ...prev, [f.user]: f.on === false ? 0 : Date.now() + 4000 }));
-      } else if (f.t === 'changed' && f.circle === circle.id) refresh().catch(() => {});
-      else if (f.t === 'ack') { unsent.current.delete(f.client_msg_id); setMsgs(prev => prev.filter(x => x.cid !== f.client_msg_id)); }
-      else if (f.t === 'err' && f.client_msg_id) {
-        unsent.current.delete(f.client_msg_id);
-        setMsgs(prev => prev.filter(x => x.cid !== f.client_msg_id));
-        setError(t.errors[f.error] ?? t.errors.generic);
-      }
+      } else if (f.t === 'changed' && f.circle === circle.id) { refresh().catch(() => {}); loadPins(); }   // a deleted message also leaves the pinned bar
     });
+    live.join([circle.id]);   // a chat made or joined after the page loaded is not in the socket's room yet
     let n = 0;
     const timer = setInterval(() => { if (!live.connected || ++n % 10 === 0) refresh().catch(() => {}); }, 3000);
     return () => { off(); clearInterval(timer); };
-  }, [refresh, merge, loadPins, circle.id, t, me.read_receipts]);
+  }, [refresh, merge, dec, encReady, loadPins, circle.id, me.id, me.read_receipts]);
 
-  useEffect(() => { api<Message[]>(`/circles/${circle.id}/starred`).then(r => setStarredIds(new Set(r.map(m => m.id)))).catch(() => {}); }, [circle.id]);
+  useEffect(() => { api<Message[]>(`/circles/${circle.id}/starred`).then(r => setStarredIds(new Set(r.map(m => m.id)))).catch(() => {}); }, [circle.id]);   // ids only: nothing to decrypt
 
   // Search as you type (debounced); the "starred" panel lists your stars instead.
   useEffect(() => {
-    if (panel === 'media') { api<GalleryItem[]>(`/circles/${circle.id}/media`).then(setGallery).catch(() => setGallery([])); return; }
-    if (panel === 'starred') { api<Message[]>(`/circles/${circle.id}/starred`).then(setResults).catch(() => setResults([])); return; }
+    if (panel === 'media') {
+      if (enc) {   // the server lists no files of an encrypted chat: the gallery is made here from the messages this device can read
+        setGallery(msgs.flatMap(m => (m.attachments ?? []).filter(a => !m.viewOnce && m.kind !== 'voice').map(a => ({ ...a, messageId: m.id, seq: m.seq ?? 0, createdAt: m.createdAt, author: m.author }))).reverse());
+        return;
+      }
+      api<GalleryItem[]>(`/circles/${circle.id}/media`).then(setGallery).catch(() => setGallery([])); return;
+    }
+    if (panel === 'starred') { api<Message[]>(`/circles/${circle.id}/starred`).then(dec).then(setResults).catch(() => setResults([])); return; }
     if (panel !== 'search' || query.trim().length < 2) { setResults([]); return; }
-    const timer = setTimeout(() => api<Message[]>(`/circles/${circle.id}/search?q=${encodeURIComponent(query.trim())}`).then(setResults).catch(() => setResults([])), 250);
+    // An encrypted chat is searched here, over what this device can read; a readable chat by the server as before.
+    const timer = setTimeout(() => (enc && e2ee ? e2ee.search(circle.id, query.trim()) : api<Message[]>(`/circles/${circle.id}/search?q=${encodeURIComponent(query.trim())}`)).then(setResults).catch(() => setResults([])), 250);
     return () => clearTimeout(timer);
-  }, [panel, query, circle.id]);
+  }, [panel, query, circle.id, enc, e2ee, dec]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   async function toggleStar(m: Message) {
     const on = !starredIds.has(m.id);
@@ -595,17 +640,28 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
 
   async function openForward(m: Message) {
     setDel(null); setFwd(m); setFwdPick([]);
-    api<Array<{ id: number; name: string }>>('/circles').then(setFwdTargets).catch(() => setFwdTargets([]));
+    api<Array<{ id: number; name: string; locked?: boolean; encrypted?: boolean }>>('/circles').then(l => setFwdTargets(l.filter(c => !c.locked && (enc ? !!c.encrypted : !c.encrypted)))).catch(() => setFwdTargets([]));
   }
   async function doForward() {
     if (!fwd || !fwdPick.length) return;
     const m = fwd; setFwd(null);
+    if (enc && e2ee) {   // forwarding from an encrypted chat is done here: decrypt (already done), encrypt again for each chosen encrypted chat. Text and cards only.
+      try { for (const to of fwdPick) await e2ee.sendText(to, m.body, { ...(m.card && m.card.type !== 'link' ? { card: m.card } : {}) }); setError(''); if (fwdPick.includes(circle.id)) refresh().catch(() => {}); }
+      catch (err) { setError(encFail(err)); }
+      return;
+    }
     try { await api(`/messages/${m.id}/forward`, { body: { circles: fwdPick } }); setError(''); if (fwdPick.includes(circle.id)) refresh().catch(() => {}); }
     catch (err) { setError(t.errors[err instanceof ApiError ? err.code : 'generic'] ?? t.errors.generic); }
   }
 
-  // "Typing…" fades by itself if the person stops (or the frame is lost).
-  useEffect(() => { const i = setInterval(() => setTypers(p => Object.values(p).some(v => v > Date.now()) || Object.keys(p).length ? { ...p } : p), 1000); return () => clearInterval(i); }, []);
+  // While recording a voice note the others see "recording audio…": a frame every 2.5 s, and "stopped" the moment it ends or is cancelled.
+  useEffect(() => {
+    if (!recording) return;
+    const tell = () => live.send({ t: 'typing', circle: circle.id, on: true, kind: 'voice' });
+    tell();
+    const i = setInterval(tell, 2500);
+    return () => { clearInterval(i); live.send({ t: 'typing', circle: circle.id, on: false, kind: 'voice' }); };
+  }, [recording, circle.id]);
 
   // Tell the server how far we have read, whenever the chat is on screen and something newer arrived.
   useEffect(() => {
@@ -619,104 +675,195 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
     document.addEventListener('visibilitychange', on);
     return () => document.removeEventListener('visibilitychange', on);
   }, []);
-  useEffect(() => { if (stick.current) toBottom(false); }, [msgs.length]);
+  // New messages keep the view at the bottom. An older page added at the top must NOT: the person stays exactly where they were reading.
+  useLayoutEffect(() => {
+    const el = wall.current;
+    // Set the position outright (where it was + how much taller the list became): some browsers already shift it by themselves and some do not.
+    if (anchor.current && el) { el.scrollTop = anchor.current.top + (el.scrollHeight - anchor.current.height); anchor.current = null; return; }
+    // Someone reading older messages is left where they are; only a person already at the bottom follows the conversation down.
+    if (nearBottom.current) toBottom(false);
+  }, [msgs.length, waiting.length, uploads.length]);
+  /** Scrolling up: fetch the 50 messages before the oldest one this screen has loaded. */
+  const loadOlder = useCallback(async () => {
+    if (olderRef.current !== 'idle') return;
+    const before = oldestLoaded.current;
+    if (before <= 1) { setOlder('end'); return; }
+    setOlder('loading');
+    try {
+      const rows = await api<Message[]>(`/circles/${circle.id}/messages?before_seq=${before}&limit=${PAGE}`);
+      const page = await dec(rows);
+      if (oldestLoaded.current !== before) return;   // the list was reloaded meanwhile: this page belongs to the old one
+      const whole = rows.length < PAGE;
+      oldestLoaded.current = whole ? 0 : Math.min(...rows.map(m => m.seq ?? Infinity));
+      if (page.length) { const el = wall.current; anchor.current = el ? { top: el.scrollTop, height: el.scrollHeight } : null; merge(page); }
+      setOlder(whole ? 'end' : 'idle');
+    } catch { setOlder('idle'); }   // offline: tried again on the next scroll
+  }, [circle.id, merge, setOlder, dec]);
+  const onWallScroll = (el: HTMLDivElement) => {
+    nearBottom.current = Date.now() < followUntil.current || el.scrollHeight - el.scrollTop - el.clientHeight < 160;
+    setAtBottom(nearBottom.current);
+    if (el.scrollTop < 120) loadOlder();
+  };
   // A photo that finishes decoding, or a bubble that rewraps, grows the thread after the
   // scroll has already run. Watching the content keeps the latest message in view instead
   // of leaving it hidden behind the composer.
   useEffect(() => {
     const el = content.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => { if (stick.current) toBottom(false); });
+    const ro = new ResizeObserver(() => { if (nearBottom.current && !anchor.current) toBottom(false); });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
+  const encDraft = useRef<{ body: string; reply: number | null; cid: string } | null>(null);
   async function send(e: React.FormEvent) {
     e.preventDefault();
     // Your own message always brings you back down, even if you had scrolled up.
-    stick.current = true; setAtBottom(true);
-    if (pending.length) { const list = pending, cap = text; await upload(list, cap); return; }
+    follow(); setAtBottom(true);
     const body = text.trim(); if (!body) return;
     setError('');
     if (editing) {   // saving an edit: the text goes back to the same message
       const target = editing;
       setText(''); setEditing(null);
-      try { await api(`/messages/${target.id}`, { method: 'PATCH', body: { body } }); }
+      try { if (enc && e2ee) { await e2ee.edit(circle.id, target.id, body); await refresh(); } else await api(`/messages/${target.id}`, { method: 'PATCH', body: { body } }); }
       catch (err) { setError(t.errors[err instanceof ApiError ? err.code : 'generic'] ?? t.errors.generic); }
       return;
     }
     const quote = replyTo;
     setText(''); setReplyTo(null);
-    // Shown at once, marked pending until the server confirms. The client id makes a retry safe (the server de-duplicates).
-    const cid = crypto.randomUUID();
-    setMsgs(prev => [...prev, { id: -Date.now(), cid, pending: true, userId: me.id, author: me.name, kind: 'text', body, transcript: null,
-      hasAudio: 0, archiveStatus: 'none', score: null, category: null, reason: null, createdAt: new Date().toISOString(), deleted: 0, deletedBy: null,
-      replyTo: quote ? { id: quote.id, author: quote.author, kind: quote.kind, deleted: false, text: (quote.kind === 'voice' ? quote.transcript : quote.body)?.slice(0, 120) ?? '' } : null }]);
-    unsent.current.set(cid, { body, replyTo: quote?.id ?? null });
-    if (live.send({ t: 'send', circle: circle.id, client_msg_id: cid, body, reply_to: quote?.id ?? null })) return;
-    // Socket down: send over HTTP now; if that works the entry is cleared, if the network is out it stays pending and the socket resends it on reconnect.
-    try {
-      await api(`/circles/${circle.id}/messages`, { body: { body, client_msg_id: cid, reply_to: quote?.id ?? null } });
-      unsent.current.delete(cid);
-      setMsgs(prev => prev.filter(x => x.cid !== cid));
-      await refresh();
-    } catch (err) {
-      unsent.current.delete(cid); // the user gets the text back to resend by hand, so it must not also be resent here
-      setMsgs(prev => prev.filter(x => x.cid !== cid));
-      setText(body); setReplyTo(quote); setError(t.errors[err instanceof ApiError ? err.code : 'generic'] ?? t.errors.generic);
+    if (enc && e2ee) {   // an encrypted chat: encrypted here, sent now (no readable copy waits in the outbox)
+      setEncBusy(true);
+      // The same words sent again after a failure keep the same id, so a message the server already holds is never made twice (the device keeps the very same ciphertext for it).
+      const draft = encDraft.current && encDraft.current.body === body && encDraft.current.reply === (quote?.id ?? null) ? encDraft.current : { body, reply: quote?.id ?? null, cid: crypto.randomUUID() };
+      encDraft.current = draft;
+      let sent = false;
+      try {
+        const f = linkPreview.found && body.includes(linkPreview.found.asked) ? linkPreview.found : null;
+        await e2ee.sendText(circle.id, body, {
+          cid: draft.cid,
+          replyTo: quote?.id ?? null, mentions: circle.kind === 'direct' ? [] : mentionedIds(body, circle.members.filter(x => x.id !== me.id)),
+          ...(f ? { card: { type: 'link' as const, url: f.url, title: f.title, description: f.description, site: f.site, image: null } } : {}),   // made on this device; no picture (it would be fetched from a third party)
+        });
+        sent = true; encDraft.current = null;
+        follow();
+      } catch (err) { setText(body); setError(encFail(err)); }
+      finally { setEncBusy(false); }
+      // Sent is sent: if showing it fails, the live frame or the next poll shows it. The words must not come back into the box to be sent a second time.
+      if (sent) await refresh().catch(() => {});
+      return;
     }
+    // Into the outbox (saved on this device) and on screen at once; the app's sender takes it from there, now or when the connection returns.
+    box.add({
+      cid: crypto.randomUUID(), circle: circle.id, body, replyTo: quote?.id ?? null, at: Date.now(),
+      mentions: circle.kind === 'direct' ? [] : mentionedIds(body, circle.members.filter(x => x.id !== me.id)),
+      preview: linkPreview.found && body.includes(linkPreview.found.asked) ? linkPreview.found.asked : undefined,
+      quote: quote ? { id: quote.id, author: quote.author, kind: quote.kind, text: (quote.kind === 'voice' ? quote.transcript : quote.body)?.slice(0, 120) ?? '' } : undefined,
+    });
+    follow();   // you just wrote: follow your own message
+    turnBox(n => n + 1);
+    sender.kick();
   }
 
-  // Picking files no longer sends them. They wait in a tray above the composer so the
-  // message box can be used as a caption first, which is what people expect when they
-  // attach a photo — the server has always accepted one, it was just unreachable.
-  function attach(files: FileList | null) {
-    if (!files?.length) return;
-    setPending(p => [...p, ...files].slice(0, 10));
+  // Photos, videos and files: chosen, shown in the sheet (caption, quality, remove), then handed to the media outbox, which uploads
+  // them in pieces with progress and makes the message only when everything has arrived.
+  function pick(files: FileList | File[] | null) {
+    const list = files ? [...files] : [];
     if (fileInput.current) fileInput.current.value = '';
+    if (list.length) { setError(''); setAttachMenu(false); setPicked(list); }
   }
-
-  async function upload(list: File[], caption: string) {
-    stick.current = true; setAtBottom(true);
-    setError(''); setUploading(n => n + 1);
+  async function sendFilesEncrypted(files: UploadFile[], caption: string, viewOnce: boolean, quote: Message | null) {
+    setEncBusy(true);
     try {
-      const prepared = await Promise.all(list.map(prepare));
-      const fd = new FormData();
-      prepared.forEach(p => { fd.append('file', p.file); fd.append('thumb', p.thumb ?? new Blob([]), 't.jpg'); if (p.w) fd.append('w', String(p.w)); if (p.h) fd.append('h', String(p.h)); });
-      const quote = replyTo;
-      if (caption.trim()) fd.append('caption', caption.trim());
-      if (quote) fd.append('reply_to', String(quote.id));
-      fd.append('client_msg_id', crypto.randomUUID());
-      await api(`/circles/${circle.id}/attachments`, { form: fd });
-      setText(''); setReplyTo(null); setPending([]);
-      await refresh();
-    } catch (err) { setError(t.errors[err instanceof ApiError ? err.code : 'generic'] ?? t.errors.generic); }
-    finally { setUploading(n => n - 1); if (fileInput.current) fileInput.current.value = ''; }
+      const plain = await Promise.all(files.map(async f => ({ bytes: new Uint8Array(await f.blob.arrayBuffer()), name: f.name, mime: f.type || 'application/octet-stream', w: f.w, h: f.h, thumb: await thumbUrl(f.thumb) })));
+      await e2ee!.sendMedia(circle.id, plain, viewOnce ? '' : caption, { replyTo: quote?.id ?? null, viewOnce });
+      follow(); await refresh();
+    } catch (err) { setError(encFail(err)); } finally { setEncBusy(false); }
+  }
+  function sendFiles(files: UploadFile[], caption: string, viewOnce = false) {
+    const quote = replyTo;
+    setPicked(null); setText(''); setReplyTo(null);
+    follow();
+    if (enc && e2ee) { sendFilesEncrypted(files, caption, viewOnce, quote); return; }
+    uploader.add({ cid: crypto.randomUUID(), circle: circle.id, at: Date.now(), kind: 'files', caption, replyTo: quote?.id ?? null, files, ...(viewOnce ? { viewOnce: true } : {}) });
+  }
+  // A finished recording goes to the same outbox: it is on the device until the server has it, whatever the network does.
+  function sendVoice(r: Recorded) {
+    const quote = replyTo; setReplyTo(null);
+    follow();
+    if (enc && e2ee) {
+      setEncBusy(true);
+      r.blob.arrayBuffer().then(b => e2ee.sendVoice(circle.id, { bytes: new Uint8Array(b), mime: r.blob.type || 'audio/webm' }, r.ms, r.waveform, { replyTo: quote?.id ?? null, viewOnce: onceVoice }))
+        .then(() => refresh()).catch(err => setError(encFail(err))).finally(() => { setEncBusy(false); setOnceVoice(false); });
+      return;
+    }
+    uploader.add({
+      cid: crypto.randomUUID(), circle: circle.id, at: Date.now(), kind: 'voice', caption: '', replyTo: quote?.id ?? null,
+      files: [{ name: 'voice', type: r.blob.type || 'audio/webm', size: r.blob.size, blob: r.blob, thumb: null, w: null, h: null }],
+      voice: { durationMs: r.ms, waveform: r.waveform, transcript: r.transcript }, ...(onceVoice ? { viewOnce: true } : {}),
+    });
+    setOnceVoice(false);
+  }
+  // A contact, a location, a sticker or a GIF: one request, with an id so that a retry is never a second message.
+  async function sendCard(card: Record<string, unknown>) {
+    const quote = replyTo;
+    setSharing(null); setError(''); setReplyTo(null);
+    if (enc && e2ee) {
+      if (card.type === 'gif') { setError(t.e2ee.noGif); return; }
+      setEncBusy(true);
+      try { await e2ee.sendText(circle.id, '', { replyTo: quote?.id ?? null, card: card as any }); follow(); await refresh(); }
+      catch (err) { setError(encFail(err)); } finally { setEncBusy(false); }
+      return;
+    }
+    try { await api(`/circles/${circle.id}/cards`, { body: { ...card, client_msg_id: crypto.randomUUID(), reply_to: quote?.id ?? null } }); follow(); await refresh(); }
+    catch (err) { fail(err instanceof ApiError ? err.code : 'generic'); }
   }
 
   // "Typing…" to the others: at most one frame every 2.5 s while keys are pressed.
-  function typed(value: string) {
-    setText(value);
-    if (value && Date.now() - lastTypingSent.current > 2500) { lastTypingSent.current = Date.now(); live.send({ t: 'typing', circle: circle.id, on: true }); }
+  function typed(value: string, at = value.length) {
+    setText(value); setCaret(at);
+    if (value && Date.now() - lastTypingSent.current > 2500) { lastTypingSent.current = Date.now(); live.send({ t: 'typing', circle: circle.id, on: true, kind: 'text' }); }
   }
 
   async function react(m: Message, emoji: string) {
     setDel(null);
-    try { await api(`/messages/${m.id}/react`, { body: { emoji } }); }
+    try {
+      if (enc && e2ee) {   // a control message: the emoji is inside the ciphertext. The same emoji again takes it back.
+        const mineNow = m.reactions?.find(r => r.u === me.id)?.e;
+        await e2ee.react(circle.id, m.id, mineNow === emoji ? null : emoji); await refresh();
+      } else await api(`/messages/${m.id}/react`, { body: { emoji } });
+    }
     catch (err) { setError(t.errors[err instanceof ApiError ? err.code : 'generic'] ?? t.errors.generic); }
   }
 
-  const canEdit = (m: Message) => m.userId === me.id && m.kind === 'text' && !m.deleted && Date.now() - toDate(m.createdAt).getTime() < 15 * 60_000;
+  // "@": while a name is being typed, the members that match it (never in a one-to-one chat, never while editing).
+  const asking = circle.kind !== 'direct' && !editing ? mentionQuery(text, caret) : null;
+  const picker = asking ? circle.members.filter(x => x.id !== me.id && x.name.toLowerCase().includes(asking.query.toLowerCase())).slice(0, 8) : [];
+  function choose(name: string) {
+    if (!asking) return;
+    const next = pickMention(text, caret, asking.start, name);
+    typed(next.text, next.caret);
+    requestAnimationFrame(() => { box2.current?.focus(); box2.current?.setSelectionRange(next.caret, next.caret); });
+  }
+
+  const canEdit = (m: Message) => m.userId === me.id && m.kind === 'text' && !m.deleted && !m.poll && (!m.card || m.card.type === 'link') && Date.now() - toDate(m.createdAt).getTime() < 15 * 60_000;
 
   // Ticks, from the members' marks: sent < delivered to everyone else < read by everyone else (only counts reads that are shared).
   const others = marks.filter(x => x.id !== me.id);
-  const tick = (m: Message): 'pending' | 'sent' | 'delivered' | 'read' => {
-    if (m.pending || !m.seq) return 'pending';
-    if (others.length && others.every(o => o.readSeq !== null && o.readSeq >= m.seq!)) return 'read';
-    if (others.length && others.every(o => o.deliveredSeq >= m.seq!)) return 'delivered';
-    return 'sent';
+  const tick = (m: Message) => tickOf(m, others);
+  const typing = typingLabel(typersOf(circle.id), t, circle.kind !== 'direct');
+  // A link being written gets a preview card (asked from the server after a pause in typing), unless previews are off or an edit is open.
+  const previewsOn = prefOn('previews');
+  const linkPreview = useLinkPreview(editing || enc ? null : firstLink(text), previewsOn);
+  /** One line that stands for a message where its full bubble is not drawn (a quoted reply, the pinned bar). */
+  const lineOf = (m: Pick<Message, 'kind' | 'body' | 'transcript'> & { card?: { type: string } | string | null; attachments?: Attachment[] }) => {
+    const type = typeof m.card === 'string' ? m.card : m.card?.type;
+    if (type && type !== 'link') return cardWord(type, t);
+    if (m.kind === 'voice') return m.transcript || <span className="inline-flex items-center gap-1"><Icon name="mic" className="w-3.5 h-3.5" />{t.voiceWord}</span>;
+    return m.body || (m.attachments?.length ? <span className="inline-flex items-center gap-1"><Icon name="attach" className="w-3.5 h-3.5" />{m.attachments[0].name ?? ''}</span> : '');
   };
-  const typing = Object.entries(typers).filter(([id, until]) => until > Date.now() && Number(id) !== me.id).map(([id]) => marks.find(x => x.id === Number(id))?.name ?? '');
+  /** Text with its links as links (opened in a new tab, telling the site nothing about where the click came from). */
+  const linked = (text: string, key = 0) => splitLinks(text).map((part, i) => part.href
+    ? <a key={`${key}-${i}`} href={part.href} target="_blank" rel="noopener noreferrer nofollow" className="underline underline-offset-2 break-all">{part.text}</a> : part.text);
   // Jumping to a message scrolls it to the middle and flashes a ring round it, so after
   // the gallery or a search result closes you can see where you landed.
   const jumpTo = (id: number) => {
@@ -727,48 +874,13 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
     setTimeout(() => el.classList.remove('flash'), 1600);
   };
 
-  async function startRec() {
-    setError('');
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr = new MediaRecorder(stream);
-      const state = { mr, chunks: [] as Blob[], stream, transcript: '', speech: undefined as any };
-      mr.ondataavailable = ev => ev.data.size && state.chunks.push(ev.data);
-      // Best-effort in-browser transcription so voice notes can be archived (no server-side STT yet).
-      const SR = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
-      if (SR) {
-        const sp = new SR(); sp.lang = speechLocale(lang); sp.continuous = true; sp.interimResults = false;
-        sp.onresult = (ev: any) => { for (let i = ev.resultIndex; i < ev.results.length; i++) state.transcript += ev.results[i][0].transcript + ' '; };
-        sp.onerror = () => {}; try { sp.start(); } catch { /* already started */ }
-        state.speech = sp;
-      }
-      mr.start(); rec.current = state; recStart.current = Date.now(); setRecMs(0); setRecording(true);
-    } catch { setError(t.micDenied); }
-  }
-
-  function stopRec() {
-    const r = rec.current; if (!r) return;
-    r.mr.onstop = async () => {
-      r.stream.getTracks().forEach(tr => tr.stop());
-      const blob = new Blob(r.chunks, { type: r.mr.mimeType || 'audio/webm' });
-      const form = new FormData();
-      form.append('audio', new File([blob], 'voice', { type: blob.type }));
-      form.append('transcript', r.transcript.trim());
-      form.append('duration', String(Math.max(1, Date.now() - recStart.current)));
-      try { await api(`/circles/${circle.id}/voice`, { form }); await refresh(true); }
-      catch (err) { setError(t.errors[err instanceof ApiError ? err.code : 'generic'] ?? t.errors.generic); }
-    };
-    try { r.speech?.stop(); } catch { /* ignore */ }
-    r.mr.stop(); rec.current = null; setRecording(false);
-  }
-
   // As in WhatsApp: the sender can delete for everyone for a limited time, a manager at any time.
   // Two days for a sender, a week for the circle's owner and admins (same rule as the server).
   const canDeleteForEveryone = (m: Message) => { if (m.sealedOn) return m.userId === me.id; const age = Date.now() - toDate(m.createdAt).getTime(); return manager ? age < 7 * 24 * 3600_000 : m.userId === me.id && age < 48 * 3600_000; };
 
   async function deleteForEveryone(m: Message) {
     setDel(null);
-    try { await api(`/messages/${m.id}`, { method: 'DELETE' }); await refresh(true); }
+    try { if (enc && e2ee) await e2ee.remove(circle.id, m.id); else await api(`/messages/${m.id}`, { method: 'DELETE' }); await refresh(true); loadPins(); }
     catch (err) { setError(t.errors[err instanceof ApiError ? err.code : 'generic'] ?? t.errors.generic); }
   }
 
@@ -793,6 +905,9 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
     return map[m.archiveStatus];
   };
 
+  // What is drawn: the messages, then those still in the outbox, without the ones whose time ran out, with the device's notices slotted in.
+  const thread = withNotices([...msgs, ...waiting].filter(m => !m.expired && !(m.expiresAt && toDate(m.expiresAt).getTime() <= clock)), notices);
+
   return (
     <div className="chat-root flex flex-col h-full">
       {/* The search / starred / media tools now live in the header, beside the name. */}
@@ -801,7 +916,7 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
           onClick={() => { jumpTo(p.id); setPinIdx(i => (i + 1) % pins.length); }}>
           <Icon name="pin" className="w-4 h-4 shrink-0" />
           <span className="min-w-0 flex-1"><b className="text-xs text-gold-dark">{t.pinnedLabel}{pins.length > 1 ? ` ${Math.min(pinIdx, pins.length - 1) + 1}/${pins.length}` : ''}</b>
-            <span className="block truncate">{p.kind === 'voice' ? <span className="inline-flex items-center gap-1"><Icon name="mic" className="w-3.5 h-3.5" />{t.voiceWord}</span> : p.attachments?.length && !p.body ? <span className="inline-flex items-center gap-1"><Icon name="attach" className="w-3.5 h-3.5" />{p.attachments[0].name ?? ''}</span> : p.body}</span></span>
+            <span className="block truncate">{lineOf(p)}</span></span>
         </button>
       ); })()}
       {/* Media is a gallery, not a strip wedged above the conversation. Picking a photo
@@ -849,16 +964,20 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
           )}
         </div>
       )}
-      <div ref={scroller} onScroll={onScroll} className="chat-wall flex-1 overflow-y-auto pb-3">
+      <div ref={wall} {...wallProps(circle.wallpaper)} className="chat-wall flex-1 overflow-y-auto pb-3" onScroll={e => onWallScroll(e.currentTarget)}
+        onWheel={() => { followUntil.current = 0; }} onTouchMove={() => { followUntil.current = 0; }} onKeyDown={() => { followUntil.current = 0; }}>
         {/* Messages start at the top of the thread. (Bottom-anchoring was tried and
             reverted: on a tall desktop window it left a large void above a short chat.) */}
         <div ref={content} className="flex flex-col min-h-full">
+        {older === 'loading' && (
+          <p role="status" className="text-center text-xs text-muted py-2 flex items-center justify-center gap-2"><Spinner className="w-3.5 h-3.5" />{t.loadingOlder}</p>
+        )}
         {/* An empty conversation was a large patterned void. Say what the space is for. */}
-        {!loaded && msgs.length === 0 && <MessagesSkeleton />}
-        {loaded && msgs.length === 0 && (
+        {!loaded && thread.length === 0 && <MessagesSkeleton />}
+        {loaded && thread.length === 0 && uploads.length === 0 && (
           <div className="flex-1 flex flex-col items-center justify-center text-center gap-2 px-6 animate-fade-in">
             <span className="w-14 h-14 rounded-full bg-green-soft text-green flex items-center justify-center">
-              <Icon name="chats" className="w-7 h-7" />
+              <Icon name={enc ? 'lock' : 'chats'} className="w-7 h-7" />
             </span>
             <b className="text-green">{t.chatEmptyTitle}</b>
             <p className="text-sm text-muted max-w-xs">{t.chatEmptyBody}</p>
@@ -869,19 +988,38 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
             )}
           </div>
         )}
-        {msgs.map((m, i) => {
-          if (m.kind === 'system') return <p key={m.id} className="agent-note text-center text-xs text-muted py-1.5 px-3 mx-auto w-fit max-w-full my-2 flex items-center gap-1.5"><Icon name="sparkle" className="w-3.5 h-3.5 shrink-0 text-gold-dark" />{systemText(m.body, t)}</p>;
+        {thread.map((m, i) => {
+          // A notice this device wrote (a key change...). Pending outbox bubbles also have very low ids, so they are told apart by `pending`.
+          if (m.id <= -1e9 && !m.pending) return <NoticeLine key={m.id} n={notices[-1e9 - m.id]} names={names} me={me.id} circle={circle.id} onCompare={() => setSafety(true)} />;
+          if (m.undecryptable) return (
+            <div key={m.id} id={`m${m.id}`} className={`flex mt-2 ${m.userId === me.id ? 'justify-end' : 'justify-start'}`}>
+              <p className="rounded-2xl px-3 py-2 border border-dashed border-line text-muted text-sm max-w-[85%] flex items-center gap-1.5" title={m.waiting ? t.e2ee.waitingMsgWhy : t.e2ee.cantReadWhy}>
+                <Icon name={m.waiting ? 'clock' : 'lock'} className="w-3.5 h-3.5 shrink-0" />{m.waiting ? t.e2ee.waitingMsg : t.e2ee.cantRead}
+              </p>
+            </div>
+          );
+          if (m.kind === 'system') return <p key={m.id} className="agent-note select-none text-center text-xs text-muted py-1.5 px-3 mx-auto w-fit max-w-full my-2 flex items-center gap-1.5"><Icon name="sparkle" className="w-3.5 h-3.5 shrink-0 text-gold-dark" />{systemText(m.body, t)}</p>;
           // (the day divider below needs `prev`, so it is computed after the system case)
           const mine = m.userId === me.id;
           // Consecutive messages from the same person within five minutes are one block:
           // the name is written once and the bubbles sit close, the way a conversation reads.
-          const prev = msgs[i - 1];
+          const prev = thread[i - 1];
           const grouped = !!prev && prev.kind !== 'system' && prev.userId === m.userId && !prev.deleted && !m.deleted
             && toDate(m.createdAt).getTime() - toDate(prev.createdAt).getTime() < 5 * 60_000;
-          const next = msgs[i + 1];
+          const next = thread[i + 1];
           const lastOfGroup = !(next && next.kind !== 'system' && next.userId === m.userId && !next.deleted && !m.deleted
             && toDate(next.createdAt).getTime() - toDate(m.createdAt).getTime() < 5 * 60_000);
-          const gap = grouped ? 'mt-0.5' : 'mt-2';
+          const gap = grouped ? 'mt-0.5' : 'mt-3';
+          // In a group or family circle, other people's messages carry their face: once, at the top of each block of
+          // their messages (as in every group messenger); later bubbles of the block keep the same indent so they line up.
+          const faces = circle.kind !== 'direct' && !mine;
+          const who = faces ? memberById.get(m.userId ?? 0) : undefined;
+          const face = faces && (grouped
+            ? <span aria-hidden className="w-8 shrink-0" />
+            : <button type="button" onClick={() => m.userId && openPerson(m.userId)} title={m.author ?? ''} aria-label={m.author ?? ''}
+                className="self-start shrink-0 rounded-full transition-transform duration-[var(--dur-fast)] hover:scale-105">
+                <PersonAvatar id={m.userId ?? 0} name={m.author ?? '?'} avatarAt={who?.avatarAt} className="w-8 h-8 text-sm" />
+              </button>);
           // A new calendar day gets a divider, so scrolling back has landmarks.
           const newDay = !prev || toDate(prev.createdAt).toDateString() !== toDate(m.createdAt).toDateString();
           const withDay = (node: React.ReactNode) => newDay
@@ -892,8 +1030,9 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
           const tail = lastOfGroup ? (mine ? 'rounded-ee-md' : 'rounded-es-md') : '';
           if (m.deleted) {
             return withDay(
-              <div key={m.id} id={`m${m.id}`} className={`flex ${gap} ${mine ? 'justify-end' : 'justify-start'}`}>
-                <p className="rounded-2xl px-3 py-2 border border-dashed border-line text-muted italic text-sm flex items-center gap-1.5">
+              <div key={m.id} id={`m${m.id}`} className={`flex gap-2 ${gap} ${mine ? 'justify-end' : 'justify-start'}`}>
+                {face}
+                <p className="rounded-2xl px-3 py-2 border border-dashed border-line text-muted italic text-sm flex items-center gap-1.5 select-none">
                   <Icon name="ban" className="w-3.5 h-3.5 shrink-0" />
                   {m.deletedBy === m.userId ? t.deletedMsg : t.deletedByManager}
                 </p>
@@ -901,7 +1040,8 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
             );
           }
           const b = badge(m);
-          const shown = m.kind === 'voice' ? (transcribed.has(m.id) ? m.transcript : '') : m.body;
+          // A voice note's machine transcript is a tool, not part of the message: shown only when asked for.
+          const shown = m.viewOnce ? '' : m.kind === 'voice' ? (transcribed.has(m.id) ? m.transcript : '') : m.body;
           // The controls live beside the bubble, never on top of it: floating them inside
           // covered the author's name and the start of the text.
           const actions = !m.pending && (
@@ -917,25 +1057,31 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
               </button>
             </span>
           );
+          const media = !m.viewOnce && !!m.attachments?.some(x => x.kind === 'image' || x.kind === 'video');
+          // A sticker stands on its own, without a bubble round it (a bubble made it look like a pasted image).
+          const bare = m.card?.type === 'sticker' && !m.replyTo && !m.forwardCount && !shown && !m.sealedOn;
           return withDay(
-            <div key={m.id} id={`m${m.id}`} className={`group/row flex ${gap} animate-slide-up ${mine ? 'justify-end' : 'justify-start'}`}>
+            <div key={m.id} id={`m${m.id}`} className={`group/row flex gap-2 ${gap} animate-slide-up ${mine ? 'justify-end' : 'justify-start'}`}>
+              {face}
               {mine && actions}
               {/* A photo or video message has a fixed width, as in WhatsApp Web: across a wide desktop pane, 85% made a
                   single photo the size of the screen. Text keeps the flexible 85%. */}
-              <div className={`group/msg relative ${m.attachments?.some(x => x.kind === 'image' || x.kind === 'video') ? 'w-[min(85%,22rem)]' : 'max-w-[85%]'} rounded-2xl ${tail} px-3 py-2 ${mine ? 'bubble-mine' : 'bubble-other'} ${m.pending ? 'opacity-60' : ''}
+              <div className={`group/msg relative ${media ? 'w-[min(80%,22rem)]' : 'max-w-[min(80%,36rem)]'} rounded-2xl ${tail} ${bare ? 'bubble-bare w-fit' : `px-3 py-2 ${mine ? 'bubble-mine' : 'bubble-other'}`} ${m.pending ? 'opacity-60' : ''}
                 transition-opacity duration-[var(--dur-base)] ease-[var(--ease-standard)]`}>
-                {!mine && !grouped && <div className="text-xs font-bold mb-0.5" style={{ color: nameColour(m.userId ?? 0) }}>{m.author}</div>}
+                {!mine && !grouped && !bare && circle.kind !== 'direct' && <div className="text-[0.8rem] font-bold mb-0.5 leading-tight select-none" style={{ color: nameColour(m.userId ?? 0) }}>{m.author}</div>}
                 {m.sealedOn && <div className={`text-[11px] mb-0.5 flex items-center gap-1 ${mine ? 'opacity-80' : 'text-gold-dark'}`}><Icon name="lock" className="w-3 h-3" />{t.sealedOnLabel} {m.sealedOn}</div>}
                 {!!m.forwardCount && <div className={`text-[11px] italic mb-0.5 flex items-center gap-1 ${mine ? 'opacity-80' : 'text-muted'}`}><Icon name="forward" className="w-3 h-3" />{m.forwardCount >= 5 ? t.forwardedMany : t.forwarded}</div>}
-
                 {m.replyTo && (
                   <button type="button" onClick={() => jumpTo(m.replyTo!.id)}
                     className={`block w-full text-start mb-1 rounded-lg border-s-4 px-2 py-1 text-xs ${mine ? 'bg-current/15 border-current/60' : 'bg-green-soft border-green'}`}>
                     <b className="block">{m.replyTo.author ?? ''}</b>
-                    <span className="line-clamp-2">{m.replyTo.deleted ? <span className="inline-flex items-center gap-1 italic"><Icon name="ban" className="w-3 h-3" />{t.quotedDeleted}</span> : m.replyTo.text}</span>
+                    <span className="line-clamp-2">{m.replyTo.deleted
+                      ? <span className="inline-flex items-center gap-1 italic"><Icon name="ban" className="w-3 h-3" />{t.quotedDeleted}</span>
+                      : m.replyTo.text || cardWord(m.replyTo.card, t) || (m.replyTo.kind === 'voice' ? <span className="inline-flex items-center gap-1"><Icon name="mic" className="w-3 h-3" />{t.voiceWord}</span> : '')}</span>
                   </button>
                 )}
-                {!!m.attachments?.length && (() => {
+                {m.viewOnce && <ViewOnceBubble m={m} mine={mine} meId={me.id} />}
+                {!m.viewOnce && !!m.attachments?.length && (() => {
                   // A photo should reach the edge of its bubble; padding around it reads as a
                   // document attachment rather than an image someone sent.
                   const flush = (mine || grouped) && !m.replyTo && !m.sealedOn && !m.forwardCount
@@ -943,54 +1089,59 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
                   return (
                   <div className={`${flush ? '-mx-3 -mt-2 mb-1.5 overflow-hidden rounded-t-2xl' : 'mb-1'} grid gap-1 ${m.attachments!.filter(x => x.kind !== 'file').length > 1 ? 'grid-cols-2' : ''}`}>
                     {m.attachments.map(x => x.kind === 'image' ? (
-                      <button key={x.id} type="button" onClick={() => setLight(x)} className="block overflow-hidden rounded-lg bg-black/10"
+                      <button key={x.id} type="button" onClick={() => setLight(x)} className="relative block overflow-hidden rounded-lg bg-black/10"
                         style={x.w && x.h ? { aspectRatio: `${x.w} / ${x.h}`, maxHeight: '22rem' } : undefined}>
-                        <img alt={x.name ?? ''} loading="lazy" decoding="async" className="w-full h-full object-cover" {...sharpSrc(x, '(min-width: 1024px) 22rem, 80vw')} />
+                        {enc ? <MediaImg att={x} thumb alt={x.name ?? ''} className="w-full h-full object-cover" />
+                          : <img alt={x.name ?? ''} loading="lazy" decoding="async" className="w-full h-full object-cover" {...sharpSrc(x, '(min-width: 1024px) 22rem, 80vw')} />}
+                        {m.card?.type === 'gif' && <span className="absolute bottom-1 start-1 rounded bg-black/60 text-white text-[10px] font-bold px-1" dir="ltr">GIF</span>}
                       </button>
                     ) : x.kind === 'video' ? (
-                      <video key={x.id} controls preload={prefOn('saver') ? 'none' : 'metadata'} playsInline className="w-full rounded-lg max-h-96 bg-black" poster={x.thumb ? `/api/media/${x.thumb}` : undefined} src={`/api/media/${x.id}`} />
+                      <MediaVideo key={x.id} att={x} saver={prefOn('saver')} className="w-full rounded-lg max-h-96 bg-black" />
                     ) : (
-                      <a key={x.id} href={`/api/media/${x.id}`} download={x.name ?? 'file'} className={`flex items-center gap-2 rounded-lg px-2 py-2 text-sm ${mine ? 'bg-current/15' : 'bg-green-soft'}`}>
+                      <MediaFile key={x.id} att={x} className={`flex items-center gap-2 rounded-lg px-2 py-2 text-sm ${mine ? 'bg-current/15' : 'bg-green-soft'}`}>
                         <Icon name="file" className="w-4 h-4 shrink-0" /><span className="min-w-0 flex-1 truncate">{x.name}</span><span className="text-xs opacity-80">{fmtSize(x.size)}</span>
-                      </a>
+                      </MediaFile>
                     ))}
                   </div>
                   ); })()}
-                {m.kind === 'voice' && m.hasAudio ? (
-                  <VoicePlayer id={m.id} ms={m.audioMs ?? null} mine={mine} author={m.author} userId={m.userId}
-                    meta={
-                      <span className={`inline-flex items-center gap-1 text-[11px] ${mine ? 'opacity-70' : 'text-muted'}`}>
-                        {starredIds.has(m.id) && <Icon name="star" className="w-3 h-3 shrink-0" aria-label={t.starred} />}
-                        <span className="tabular-nums">{toDate(m.createdAt).toLocaleTimeString(intlLocale(lang), { hour: '2-digit', minute: '2-digit' })}</span>
-                        {mine && <Ticks kind={tick(m)} t={t} />}
-                      </span>
-                    } />
-                ) : null}
+                {!m.viewOnce && m.kind === 'voice' && m.hasAudio ? <VoicePlayer m={m} mine={mine} meId={me.id} others={others.length} /> : null}
+                {!m.viewOnce && m.kind === 'voice' && m.hasAudio && !m.encrypted ? <Transcribe m={m} /> : null}
+                {m.card?.type === 'link' && previewsOn && <LinkCard url={m.card.url} title={m.card.title} description={m.card.description} site={m.card.site} image={m.card.image && !m.encrypted ? `/api/media/${m.card.image}` : null} mine={mine} />}
+                {m.card?.type === 'sticker' && <StickerView pack={m.card.pack} id={m.card.id} />}
+                {m.card?.type === 'contact' && <ContactCard card={m.card} mine={mine} />}
+                {m.card?.type === 'location' && <LocationCard card={m.card} mine={mine} />}
                 {(() => {
                   const starred = starredIds.has(m.id);
-                  // Voice notes carry the meta inside the player, on the duration line.
-                  if (m.kind === 'voice') return shown
-                    ? <p dir="auto" className="whitespace-pre-wrap break-words text-sm opacity-75 mt-1.5 pt-1.5 border-t border-current/15">{shown}</p>
-                    : null;
+                  // The words: @mentions as buttons that open a private chat, links as links.
+                  const words = (s: string) => m.mentions?.length
+                    ? splitMentions(s, m.mentions).map((part, k) => part.id === undefined ? linked(part.text, k)
+                      : <button key={k} type="button" className="font-bold underline underline-offset-2" onClick={() => openPerson(part.id!)}>{part.text}</button>)
+                    : linked(s);
                   const meta = (
-                    <span className={`inline-flex items-center gap-1 text-[11px] align-bottom ${mine ? 'opacity-70' : 'text-muted'}`}>
+                    <span className={`inline-flex items-center gap-1 text-[11px] align-bottom select-none ${mine ? 'opacity-70' : 'text-muted'}`}>
                       {/* A star belongs beside the time, not floated into the text, where it
                           pushed the words around and forced the meta onto its own line. */}
                       {starred && <Icon name="star" className="w-3 h-3 shrink-0" aria-label={t.starred} />}
                       <span className="tabular-nums">{toDate(m.createdAt).toLocaleTimeString(intlLocale(lang), { hour: '2-digit', minute: '2-digit' })}</span>
                       {m.editedAt && <span>{t.edited}</span>}
-                      {mine && <Ticks kind={tick(m)} t={t} />}
+                      {mine && !m.failed && <Ticks kind={tick(m)} t={t} />}
+                    </span>
+                  );
+                  const failed = m.failed && (
+                    <span className="inline-flex flex-wrap items-center gap-1.5 text-[11px]">
+                      <span role="status" className="text-danger font-bold inline-flex items-center gap-1"><Icon name="alert" className="w-3.5 h-3.5" />{t.sendFailed}</span>
+                      <button onClick={() => { if (m.cid) { setError(''); sender.retry(m.cid); } }} className="text-danger underline">{t.retrySend}</button>
+                      <button onClick={() => m.cid && sender.discard(m.cid)} className="underline opacity-80">{t.discardUnsent}</button>
                     </span>
                   );
                   // A plain text message carries its time and ticks on the last line, the way a
                   // chat app does it: an invisible spacer reserves the room, and the meta is
-                  // placed in it. Anything richer (media, voice, an edit, an agent badge) keeps
-                  // the meta on its own row, where it does not have to fight for space.
-                  // (voice has already returned above, so it cannot reach here)
-                  const inline = !!shown && !m.attachments?.length && !m.editedAt && !b;
+                  // placed in it. Anything richer (media, voice, a card, a poll, an edit, an agent
+                  // badge) keeps the meta on its own row, where it does not have to fight for space.
+                  const inline = !!shown && m.kind !== 'voice' && !m.attachments?.length && !m.editedAt && !b && !m.poll && !m.card && !m.failed && !m.viewOnce;
                   if (inline) return (
                     <p dir="auto" className="relative whitespace-pre-wrap break-words">
-                      {shown}
+                      {words(shown)}
                       {/* The gap the meta sits in. It has to cover everything the meta can
                           contain — a star adds width, and too small a reservation means the
                           time lands on top of the text. */}
@@ -998,18 +1149,25 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
                       <span className="absolute bottom-0 end-0 leading-none pb-[0.1rem]">{meta}</span>
                     </p>
                   );
+                  // A sticker: its time and ticks on a small line just under it, at its edge (never on top of the picture).
+                  if (bare) return <div className="mt-1 flex justify-end leading-none">{meta}</div>;
                   return (
                     <>
-                      {shown && <p dir="auto" className="whitespace-pre-wrap break-words">{shown}</p>}
+                      {shown && (
+                        <p dir="auto" className={`whitespace-pre-wrap break-words ${m.kind === 'voice' ? 'text-sm opacity-75 mt-1.5 pt-1.5 border-t border-current/15' : ''} ${m.poll ? 'font-bold flex items-start gap-1.5' : ''}`}>
+                          {m.poll && <Icon name="chart" className="w-4 h-4 mt-0.5 shrink-0" />}
+                          <span>{words(shown)}</span>
+                        </p>
+                      )}
+                      {m.poll && !m.deleted && <PollBubble m={m} meId={me.id} names={names} onError={fail} {...(enc && e2ee ? { onVote: (opts: number[]) => e2ee.vote(circle.id, m.id, opts).then(() => refresh()) } : {})} />}
                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        {failed}
                         {meta}
                         {b && <button onClick={() => setOpen(open === m.id ? null : m.id)} className={`text-[11px] px-1.5 rounded-full ${b[1]}`}>{b[0]}</button>}
                       </div>
                     </>
                   );
                 })()}
-                {/* The message menu sits in the bubble's corner on hover, rather than taking
-                    permanent space in the meta row. */}
 
                 {m.archiveStatus === 'archived' && circle.kind === 'circle' && (
                   <div className="agent-card mt-2 p-2 flex items-center gap-2">
@@ -1036,6 +1194,7 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
             </div>,
           );
         })}
+        {uploads.map(job => <PendingUpload key={job.cid} job={job} uploader={uploader} error={code => t.errors[code] ?? t.errors.generic} />)}
         </div>
         <div ref={bottom} />
         {/* Scrolled up: a way back to the newest message, rather than silently missing it.
@@ -1050,6 +1209,10 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
         )}
       </div>
       {error && <p role="alert" className="text-sm text-danger py-1">{error}</p>}
+      {enc && encState !== 'ok' && <p role="status" className="text-xs rounded-lg bg-gold/15 text-ink p-2 mb-1">{encState === 'waiting' ? t.e2ee.waiting : encState === 'not_member' ? t.e2ee.notMember : encWhy === 'restored_behind' ? t.e2ee.behind : t.e2ee.stuck}{encState === 'stuck' && encWhy === 'restored_behind' && e2ee && <button type="button" className="btn !py-1 text-xs ms-2" onClick={() => { if (confirm(t.e2ee.startFreshConfirm)) e2ee.startFresh().catch(() => { alert(t.e2ee.startFreshFailed); }); }}>{t.e2ee.startFresh}</button>}</p>}
+      {enc && circle.kind === 'direct' && notices.some(n => n.kind === 'gone') && <p role="status" className="text-xs rounded-lg bg-gold/15 text-ink p-2 mb-1">{t.e2ee.goneNote}</p>}
+      {safety && <ChatSecuritySheet circle={circle} me={me} onClose={() => setSafety(false)} />}
+      {encBusy && <p role="status" className="text-xs text-muted py-0.5">{t.e2ee.sending}</p>}
       {pinning && (
         <Dialog onClose={() => setPinning(null)} label={t.pinMessage}>
           <h2 className="text-lg font-bold">{t.pinMessage}</h2>
@@ -1070,7 +1233,7 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
               <div className="mt-3 flex flex-col gap-2">
                 {Object.entries(t.reportReasons).map(([k, label]) => (
                   <button key={k} className="btn btn-ghost" onClick={async () => {
-                    try { await api(`/messages/${reporting.id}/report`, { body: { reason: k } }); setReported(true); }
+                    try { await api(`/messages/${reporting.id}/report`, { body: { reason: k, ...(enc ? { snapshot: (reporting.body || '').slice(0, 1000) } : {}) } }); setReported(true); }
                     catch (err) { setReporting(null); setError(t.errors[err instanceof ApiError ? err.code : 'generic'] ?? t.errors.generic); }
                   }}>{label}</button>
                 ))}
@@ -1082,9 +1245,9 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
       )}
       {light && (
         <Dialog onClose={() => setLight(null)} label={light.name ?? t.media}>
-          <img alt={light.name ?? ''} className="max-w-full max-h-[70vh] mx-auto rounded-lg" src={`/api/media/${light.id}`} />
+          <MediaImg att={light} alt={light.name ?? ''} className="max-w-full max-h-[70vh] mx-auto rounded-lg" />
           <div className="mt-3 flex gap-2">
-            <a className="btn flex-1 text-center" href={`/api/media/${light.id}`} download={light.name ?? 'photo.jpg'}>{t.download}</a>
+            <MediaFile att={{ ...light, name: light.name ?? 'photo.jpg' }} className="btn flex-1 text-center">{t.download}</MediaFile>
             <button className="btn btn-ghost flex-1" onClick={() => setLight(null)}>{t.closePanel}</button>
           </div>
         </Dialog>
@@ -1109,110 +1272,169 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
           </div>
         </Dialog>
       )}
-      {typing.length > 0 && (
+      {typing && (
         <p aria-live="polite" className="text-xs text-muted py-0.5 flex items-center gap-1.5 animate-fade-in">
-          <TypingDots />
-          {typing.length === 1 ? `${typing[0]}${t.typingOne}` : t.typingMany}
+          <TypingDots />{typing}
         </p>
       )}
       {(replyTo || editing) && (
         <div className="flex items-center gap-2 rounded-lg bg-green-soft border-s-4 border-green px-3 py-1.5 text-xs mt-1">
           <span className="min-w-0 flex-1">
             <b className="block">{editing ? t.editingMsg : `${t.replyingTo} ${replyTo!.author ?? ''}`}</b>
-            <span className="block truncate">{(editing ?? replyTo)!.kind === 'voice' ? (editing ?? replyTo)!.transcript : (editing ?? replyTo)!.body}</span>
+            <span className="block truncate">{lineOf((editing ?? replyTo)!)}</span>
           </span>
           <button type="button" aria-label={t.cancel} className="px-2 text-base" onClick={() => { setReplyTo(null); setEditing(null); if (editing) setText(''); }}><Icon name="x" className="w-4 h-4" /></button>
         </div>
       )}
-      {uploading > 0 && (
-        <p role="status" className="text-xs text-muted py-1 flex items-center gap-2 animate-fade-in">
-          <Spinner className="w-3.5 h-3.5" />
-          {t.uploading}{uploading > 1 ? ` (${uploading})` : ''}
+      {circle.sendPolicy === 'admins' && !manager ? (
+        <p role="status" className="mt-2 text-center text-sm text-muted rounded-2xl bg-card border border-line py-3 px-4 flex items-center justify-center gap-2">
+          <Icon name="lock" className="w-4 h-4 shrink-0" />{t.onlyAdminsSend}
         </p>
-      )}
-      {/* One pill holding attach, the text and the microphone, with the send button
-          separate and round: the shape people already know from every chat app. */}
-      {/* Files waiting to be sent, with the composer acting as the caption box. */}
-      {pending.length > 0 && (
-        <div className="card p-2 mt-1 flex items-center gap-2 overflow-x-auto animate-slide-up">
-          {pending.map((f, i) => (
-            <div key={`${f.name}-${i}`} className="relative shrink-0">
-              {previews[i]
-                ? <img src={previews[i]} alt="" className="w-16 h-16 object-cover rounded-lg border border-line" />
-                : <div className="w-16 h-16 rounded-lg border border-line flex flex-col items-center justify-center gap-1 p-1 text-center">
-                    <Icon name="file" className="w-5 h-5 text-muted" />
-                    <span className="text-[10px] text-muted truncate w-full">{f.name}</span>
-                  </div>}
-              <button type="button" aria-label={t.cancel} title={t.cancel}
-                onClick={() => setPending(p => p.filter((_, n) => n !== i))}
-                className="absolute -top-1.5 -end-1.5 w-5 h-5 rounded-full bg-card border border-line text-muted
-                  flex items-center justify-center text-xs leading-none hover:text-danger"><Icon name="x" className="w-3 h-3" /></button>
-            </div>
-          ))}
-          <button type="button" className="btn btn-ghost !px-3 shrink-0" onClick={() => fileInput.current?.click()} aria-label={t.attach} title={t.attach}>
-            <Icon name="attach" className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-      <form onSubmit={send} className="flex items-end gap-2 pt-2">
-        <input ref={fileInput} type="file" multiple hidden accept="image/*,video/*,.pdf,.txt,.csv,.zip,.docx,.xlsx,.pptx" onChange={e => attach(e.target.files)} />
-        <div className="field-group !rounded-full flex-1 items-center">
-          <button type="button" className="field-prefix !border-0 !px-3 text-muted hover:text-green" aria-label={t.attach} title={t.attach} onClick={() => fileInput.current?.click()}>
-            <Icon name="attach" className="w-5 h-5" />
-          </button>
-          <input className="!px-1" value={text} maxLength={4000}
-            placeholder={pending.length ? t.addCaption : t.typeMessage}
-            onChange={e => typed(e.target.value)} />
-          {recording
-            ? <span role="status" aria-label={t.recordingNow} className="flex items-center gap-1.5 pe-3 text-sm text-danger tabular-nums" dir="ltr">
-                <span aria-hidden className="w-2 h-2 rounded-full bg-danger animate-pulse-soft" />{clock(recMs)}
-              </span>
-            : null}
-          <button type="button" className={`px-3 self-center transition-colors duration-[var(--dur-instant)] ${recording ? 'text-danger' : 'text-muted hover:text-green'}`}
-            onClick={recording ? stopRec : startRec} aria-label={recording ? t.stop : t.record} title={recording ? t.stop : t.record}>
-            <Icon name={recording ? 'stop' : 'mic'} className="w-5 h-5" />
-          </button>
-        </div>
-        <button className="btn !rounded-full !w-11 !px-0 shrink-0 flex items-center justify-center" disabled={!text.trim() && !pending.length} aria-label={editing ? t.save : t.send} title={editing ? t.save : t.send}>
-          <Icon name="send" className="w-5 h-5" />
-        </button>
-      </form>
-      {reacting && <ReactionPicker t={t} onClose={() => setReacting(null)} onPick={e => { const m = reacting; setReacting(null); react(m, e); }} />}
-      {del && (
-        <Dialog onClose={() => setDel(null)} label={t.messageMenu}>
-          <h2 className="text-lg font-bold">{t.messageMenu}</h2>
-
-          <div className="mt-3 flex flex-col gap-2">
-            {del.kind === 'voice' && !!del.transcript && (
-              <button className="btn btn-ghost" onClick={() => { const id = del.id; setTranscribed(p => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; }); setDel(null); }}>
-                {transcribed.has(del.id) ? t.hideTranscript : t.showTranscript}
+      ) : (
+        <>
+          {linkPreview.found && <LinkCard url={linkPreview.found.url} title={linkPreview.found.title} description={linkPreview.found.description} site={linkPreview.found.site}
+            image={linkPreview.found.image ? `/api/link-preview/image/${linkPreview.found.image}` : null} onRemove={linkPreview.dismiss} />}
+          {/* What opens above the message box floats over the conversation instead of pushing it up:
+              the @mention list, the attach menu, and the stickers panel. */}
+          <div ref={composerRef} className="relative">
+          <div className="absolute bottom-full inset-x-0 mb-2 z-30 flex flex-col gap-2 pointer-events-none">
+          {/* @mentions: the people of this group whose name matches what follows the @. */}
+          {picker.length > 0 && (
+            <ul role="listbox" aria-label="@" className="pointer-events-auto self-start w-[min(20rem,100%)] card elevated-3 p-1 max-h-56 overflow-y-auto animate-scale-in origin-bottom">
+              {picker.map(x => (
+                <li key={x.id}>
+                  <button type="button" role="option" aria-selected={false} className="row-interactive w-full text-start px-2.5 py-2 rounded-xl flex items-center gap-2.5" onMouseDown={e => e.preventDefault()} onClick={() => choose(x.name)}>
+                    <span className="w-8 h-8 rounded-full text-white text-sm font-bold flex items-center justify-center shrink-0" style={{ background: nameColour(x.id) }} aria-hidden>{[...x.name][0]}</span>
+                    <span className="truncate font-medium">{x.name}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {attachMenu && (
+            <ul role="menu" aria-label={t.attach} className="pointer-events-auto self-start card p-1.5 w-fit min-w-56 elevated-3 animate-scale-in origin-bottom-left rtl:origin-bottom-right">
+              {([
+                ['image', t.photosAndFiles, () => fileInput.current?.click()],
+                ['you', t.shareContact, () => setSharing('contact')],
+                ['location', t.shareLocation, () => setSharing('location')],
+                ...(circle.kind !== 'direct' ? [['chart', t.newPoll, () => setPolling(true)] as const] : []),
+              ] as const).map(([ic, label, go]) => (
+                <li key={label}>
+                  <button type="button" role="menuitem" className="row-interactive w-full text-start px-2.5 py-2 rounded-xl flex items-center gap-3"
+                    onClick={() => { setAttachMenu(false); go(); }}>
+                    <span className="w-9 h-9 rounded-xl bg-green-soft text-green flex items-center justify-center shrink-0"><Icon name={ic} className="w-[18px] h-[18px]" /></span>
+                    <span className="font-medium">{label}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {sharing === 'panel' && <div className="pointer-events-auto self-end"><SharePanel onClose={() => setSharing(null)} onSticker={(pack, id) => sendCard({ type: 'sticker', pack, id })} onGif={id => (enc ? setError(t.e2ee.noGif) : sendCard({ type: 'gif', id }))} /></div>}
+          </div>
+          {/* One pill holding attach, the text, stickers and view-once, with the send or record
+              button separate and round: the shape people already know from every chat app. */}
+          <form onSubmit={send} className="relative flex items-end gap-2 pt-2">
+            <input ref={fileInput} type="file" multiple hidden accept="image/*,video/*,.pdf,.txt,.csv,.zip,.docx,.xlsx,.pptx" onChange={e => pick(e.target.files)} />
+            <div className="field-group !rounded-full flex-1 min-w-0 items-center">
+              <button type="button" className={`field-prefix !border-0 !px-3 transition-colors duration-[var(--dur-instant)] ${attachMenu ? 'text-green' : 'text-muted hover:text-green'}`}
+                aria-label={t.attach} title={t.attach} aria-expanded={attachMenu} onClick={() => { setSharing(null); setAttachMenu(v => !v); }}>
+                <Icon name="attach" className="w-5 h-5" />
               </button>
-            )}
-            <button className="btn btn-ghost" onClick={() => { setReplyTo(del); setEditing(null); setDel(null); }}>{t.reply}</button>
-            {del.kind === 'text' && !del.deleted && <button className="btn btn-ghost" onClick={() => openForward(del)}>{t.forward}</button>}
-            {del.userId !== me.id && del.kind !== 'system' && !del.deleted && <button className="btn btn-ghost" onClick={() => { setReporting(del); setReported(false); setDel(null); }}>{t.report}</button>}
-            {!del.deleted && (pins.some(p => p.id === del.id)
-              ? <button className="btn btn-ghost" onClick={async () => { const m = del; setDel(null); await api(`/messages/${m.id}/pin`, { method: 'DELETE' }).catch(() => {}); loadPins(); }}>{t.unpinMessage}</button>
-              : <button className="btn btn-ghost" onClick={() => { setPinning(del); setDel(null); }}>{t.pinMessage}</button>)}
-            {!!circle.agentActive && !del.deleted && !!del.body && del.archiveStatus !== 'archived' && del.archiveStatus !== 'rejected' && (
-              <button className="btn btn-ghost" onClick={() => { const m = del; setDel(null); archiveManually(m); }}>{t.archiveThis}</button>
-            )}
-            {!del.deleted && del.reason && (del.archiveStatus === 'skipped' || del.archiveStatus === 'rejected') && (
-              <p className="text-xs rounded-lg bg-black/5 text-ink p-2">{del.archiveStatus === 'rejected' ? t.rejectedBadge : t.skippedBadge} · {t.score}: {del.score}{del.category ? ` · ${t.cat[del.category]}` : ''}<br />{agentReason(del.reason)}</p>
-            )}
-            {!del.deleted && <button className="btn btn-ghost" onClick={() => toggleStar(del)}>{starredIds.has(del.id) ? t.unstar : t.star}</button>}
-            {canEdit(del) && !del.sealedOn && <button className="btn btn-ghost" onClick={() => { setEditing(del); setReplyTo(null); setText(del.body); setDel(null); }}>{t.edit}</button>}
+              <input ref={box2} className="!px-1 min-w-0" value={text} maxLength={4000} placeholder={t.typeMessage}
+                onChange={e => typed(e.target.value, e.target.selectionStart ?? e.target.value.length)}
+                onPaste={e => { const files = [...e.clipboardData.files]; if (files.length) { e.preventDefault(); pick(files); } }}
+                onSelect={e => setCaret(e.currentTarget.selectionStart ?? 0)} />
+              {!editing && (
+                <button type="button" className={`px-2 self-center transition-colors duration-[var(--dur-instant)] ${sharing === 'panel' ? 'text-green' : 'text-muted hover:text-green'}`}
+                  aria-label={t.stickersAndGifs} title={t.stickersAndGifs} aria-expanded={sharing === 'panel'}
+                  onClick={() => { setAttachMenu(false); setSharing(v => (v === 'panel' ? null : 'panel')); }}>
+                  <Icon name="sticker" className="w-5 h-5" />
+                </button>
+              )}
+              {!text.trim() && !editing && !recording && (
+                <button type="button" aria-pressed={onceVoice} aria-label={t.priv.viewOnceFor} title={`${t.priv.viewOnceFor}: ${t.priv.viewOnceVoice}`}
+                  className={`pe-3 ps-1 self-center transition-colors duration-[var(--dur-instant)] ${onceVoice ? 'text-green' : 'text-muted hover:text-green'}`}
+                  onClick={() => setOnceVoice(v => !v)}>
+                  <Icon name="once" className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+            {!text.trim() && !editing
+              ? <VoiceRecorder circleId={circle.id} drafts={media.drafts} rtl={LANG_INFO[lang as Lang]?.rtl ?? false} lang={lang} onSend={sendVoice} onActive={setRecording} onError={setError} />
+              : <button className="btn btn-primary !rounded-full !w-11 !h-11 !px-0 shrink-0 flex items-center justify-center" disabled={!text.trim()} aria-label={editing ? t.save : t.send} title={editing ? t.save : t.send}>
+                  <Icon name={editing ? 'check' : 'send'} className="w-5 h-5 rtl:-scale-x-100" />
+                </button>}
+          </form>
           </div>
-          <h3 className="mt-4 font-bold">{t.deleteMessage}</h3>
-          {del.sealedOn && <p className="text-xs text-gold-dark mt-2">{t.sealedProtectedNote}</p>}
-          {canDeleteForEveryone(del) && <p className="text-xs text-muted mt-2">{t.deleteNote}</p>}
-          <div className="mt-4 flex flex-col gap-2">
-            {canDeleteForEveryone(del) && <button className="btn !bg-red-700" onClick={() => deleteForEveryone(del)}>{t.deleteForEveryone}</button>}
-            <button className="btn btn-ghost" onClick={() => deleteForMe(del)}>{t.deleteForMe}</button>
-            <button className="btn btn-ghost" onClick={() => setDel(null)}>{t.cancel}</button>
-          </div>
+        </>
+      )}
+      {reacting && <ReactionPicker t={t} onClose={() => setReacting(null)} onPick={e => { const m = reacting; setReacting(null); react(m, e); }} />}
+      {picked && <SendSheet picked={picked} caption0={text.trim()} onClose={() => setPicked(null)} onSend={sendFiles} />}
+      {sharing === 'contact' && <ContactSheet onClose={() => setSharing(null)} onSend={(name, phones) => sendCard({ type: 'contact', name, phones })} />}
+      {sharing === 'location' && <LocationSheet onClose={() => setSharing(null)} onSend={(fix, label) => sendCard({ type: 'location', lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy, label })} />}
+      {polling && <PollComposer circleId={circle.id} onClose={() => setPolling(false)} onError={fail} {...(enc && e2ee ? { onCreate: (q: string, o: string[], multiple: boolean) => e2ee.sendPoll(circle.id, q, o, multiple).then(() => refresh()) } : {})} />}
+      {info && (
+        <Dialog onClose={() => setInfo(null)} label={t.msgInfo}>
+          <h2 className="text-lg font-bold mb-3">{t.msgInfo}</h2>
+          {([[t.infoReadBy, info.readBy, 'check-double', true], [t.infoDeliveredTo, info.deliveredTo, 'check-double', false], [t.infoPending, info.pending, 'clock', false]] as const).map(([title, people, ic, read]) => people.length > 0 && (
+            <section key={title} className="mb-3">
+              <h3 className={`text-sm font-bold mb-1 flex items-center gap-1.5 ${read ? 'text-green' : 'text-muted'}`}><Icon name={ic} className="w-4 h-4" />{title}</h3>
+              <ul className="space-y-0.5">
+                {people.map(p => (
+                  <li key={p.id} className="py-1.5 px-1 flex items-center gap-3">
+                    <span className="w-8 h-8 rounded-full text-white text-sm font-bold flex items-center justify-center shrink-0" style={{ background: nameColour(p.id) }} aria-hidden>{[...p.name][0]}</span>
+                    <span className="flex-1 truncate">{p.name}</span>
+                    {'at' in p && p.at && <time className="text-xs text-muted shrink-0 tabular-nums" dir="auto">{infoTime(p.at, lang)}</time>}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+          <button className="btn btn-ghost w-full" onClick={() => setInfo(null)}>{t.close}</button>
         </Dialog>
       )}
+      {del && (() => {
+        // One row per action, each with its icon: scannable at a glance, the same shape as every other menu in the app.
+        const row = (icon: Parameters<typeof Icon>[0]['name'], label: string, go: () => void, tone = '') => (
+          <button key={label} className={`row-interactive w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-start ${tone}`} onClick={go}>
+            <Icon name={icon} className="w-5 h-5 shrink-0" /><span className="flex-1 font-medium">{label}</span>
+          </button>
+        );
+        const isPinned = pins.some(p => p.id === del.id);
+        return (
+        <Dialog onClose={() => setDel(null)} label={t.messageMenu}>
+          <h2 className="text-lg font-bold">{t.messageMenu}</h2>
+          {/* What is being acted on, so a long-press on the wrong bubble is noticed before anything happens. */}
+          {!del.deleted && <p className="mt-2 text-sm text-muted line-clamp-2 rounded-xl bg-paper border border-line px-3 py-2">{lineOf(del)}</p>}
+          <div className="mt-3 flex flex-col">
+            {row('chats', t.reply, () => { setReplyTo(del); setEditing(null); setDel(null); requestAnimationFrame(() => box2.current?.focus()); })}
+            {canEdit(del) && !del.sealedOn && row('pen', t.edit, () => { setEditing(del); setReplyTo(null); setText(del.body); setDel(null); requestAnimationFrame(() => box2.current?.focus()); })}
+            {del.kind === 'voice' && !!del.transcript && row('file', transcribed.has(del.id) ? t.hideTranscript : t.showTranscript, () => { const id = del.id; setTranscribed(p => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; }); setDel(null); })}
+            {del.kind === 'text' && !del.deleted && !del.poll && !del.attachments?.length && (!del.card || del.card.type === 'link' || enc) && row('forward', t.forward, () => openForward(del))}
+            {!del.deleted && row(starredIds.has(del.id) ? 'star-fill' : 'star', starredIds.has(del.id) ? t.unstar : t.star, () => toggleStar(del))}
+            {!del.deleted && (isPinned
+              ? row('pin', t.unpinMessage, async () => { const m = del; setDel(null); await api(`/messages/${m.id}/pin`, { method: 'DELETE' }).catch(() => {}); loadPins(); })
+              : row('pin', t.pinMessage, () => { setPinning(del); setDel(null); }))}
+            {!del.deleted && del.userId === me.id && del.kind !== 'system' && !del.pending && row('check-double', t.msgInfo, () => { const m = del; setDel(null); openInfo(m); })}
+            {!!circle.agentActive && !del.deleted && !!del.body && del.archiveStatus !== 'archived' && del.archiveStatus !== 'rejected' && row('memory', t.archiveThis, () => { const m = del; setDel(null); archiveManually(m); })}
+            {del.userId !== me.id && del.kind !== 'system' && !del.deleted && row('alert', t.report, () => { setReporting(del); setReported(false); setDel(null); })}
+          </div>
+          {!del.deleted && del.reason && (del.archiveStatus === 'skipped' || del.archiveStatus === 'rejected') && (
+            <p className="mt-2 text-xs rounded-xl bg-gold/15 text-ink p-2.5">{del.archiveStatus === 'rejected' ? t.rejectedBadge : t.skippedBadge} · {t.score}: {del.score}{del.category ? ` · ${t.cat[del.category]}` : ''}<br />{agentReason(del.reason)}</p>
+          )}
+          <div className="mt-3 pt-3 border-t border-line">
+            <h3 className="text-sm font-bold text-muted px-1">{t.deleteMessage}</h3>
+            {del.sealedOn && <p className="text-xs text-gold-dark mt-1 px-1">{t.sealedProtectedNote}</p>}
+            {canDeleteForEveryone(del) && <p className="text-xs text-muted mt-1 px-1">{t.deleteNote}</p>}
+            <div className="mt-1 flex flex-col">
+              {canDeleteForEveryone(del) && row('trash', t.deleteForEveryone, () => deleteForEveryone(del), '!text-danger')}
+              {row('trash', t.deleteForMe, () => deleteForMe(del))}
+            </div>
+          </div>
+          <button className="btn btn-ghost w-full mt-3" onClick={() => setDel(null)}>{t.cancel}</button>
+        </Dialog>
+        );
+      })()}
     </div>
   );
 }
@@ -1585,6 +1807,7 @@ function Settings({ circle, me, reload, onLeft, openArchive }: { circle: CircleD
   const [delError, setDelError] = useState('');
   const [bill, setBill] = useState<Billing | null>(null);
   useEffect(() => { api<Billing>(`/circles/${circle.id}/billing`).then(setBill).catch(() => {}); }, [circle.id]);
+  const presence = usePresence(circle.kind === 'direct' ? [] : circle.members.filter(m => m.id !== me.id).map(m => m.id));
 
   const flash = (msg: string) => { setNote(msg); setTimeout(() => setNote(''), 1500); };
   async function patch(body: object) { await api(`/circles/${circle.id}`, { method: 'PATCH', body }); await reload(); flash(t.saved); }
@@ -1647,12 +1870,22 @@ function Settings({ circle, me, reload, onLeft, openArchive }: { circle: CircleD
   return (
     <div className="tab-scroll h-full overflow-y-auto flex flex-col gap-4 pb-4">
       <section className="text-center pt-2 flex flex-col items-center">
-        <div aria-hidden className={`w-20 h-20 flex items-center justify-center text-3xl font-bold ${circle.kind === 'direct' ? 'rounded-full' : 'rounded-3xl'}
-          ${circle.kind === 'circle' ? 'bg-brand text-white ring-2 ring-gold/50 ring-offset-4 ring-offset-card' : 'bg-green-soft text-green'}`}>
-          {circle.kind === 'group' ? <Icon name="group" className="w-9 h-9" /> : [...circle.name][0]?.toUpperCase()}
-        </div>
-        <h3 className="mt-4 text-2xl font-bold !text-ink tracking-tight break-words">{circle.name}</h3>
-        <p className="mt-1 text-sm text-muted">{circle.kind === 'circle' ? t.infoKindCircle : circle.kind === 'group' ? t.infoKindGroup : ''}{circle.kind !== 'direct' && ' · '}{circle.members.length === 1 ? t.oneMember : t.infoMembersCount.replace('{n}', String(circle.members.length))}</p>
+        {(() => {
+          const title = (
+            <>
+              <h3 className="mt-4 text-2xl font-bold !text-ink tracking-tight break-words">{circle.name}</h3>
+              <p className="mt-1 text-sm text-muted">{circle.kind === 'circle' ? t.infoKindCircle : circle.kind === 'group' ? t.infoKindGroup : ''}{circle.kind !== 'direct' && ' · '}{circle.members.length === 1 ? t.oneMember : t.infoMembersCount.replace('{n}', String(circle.members.length))}</p>
+            </>
+          );
+          return circle.kind === 'direct'
+            ? <><Avatar name={circle.name} kind={circle.kind} photo={circle.photo} person={(() => { const o = circle.members.find(x => x.id !== me.id); return o ? { id: o.id, avatarAt: o.avatarAt } : null; })()} className="w-20 h-20 text-3xl" />{title}</>
+            : <GroupFace circle={circle} canEdit={manager || circle.editPolicy === 'all'} reload={reload} onError={code => flash(t.errors[code] ?? t.errors.generic)} title={title} />;
+        })()}
+        {manager && !!circle.joinRequests && (
+          <button className="mt-3 inline-flex items-center gap-2 h-9 px-4 rounded-full bg-gold/15 text-gold-dark text-sm font-bold hover:bg-gold/25 transition-colors duration-[var(--dur-instant)]" onClick={() => setSub('settings')}>
+            <Icon name="group" className="w-4 h-4" />{t.pendingRequests} ({circle.joinRequests})
+          </button>
+        )}
         <div className={`mt-5 w-full max-w-md grid gap-2 ${circle.kind !== 'direct' ? 'grid-cols-3' : 'grid-cols-2'}`}>
           {([
             [circle.muted ? 'mute' : 'bell', circle.muted ? t.infoMuted : t.infoMute, !!circle.muted, () => circle.muted ? setPref({ muted: false }) : setMuteOpen(true)],
@@ -1716,10 +1949,21 @@ function Settings({ circle, me, reload, onLeft, openArchive }: { circle: CircleD
         </section>
       )}
       <div className={show('settings')}>
-      {circle.kind === 'group' && owner && (
-        <section className="card p-4 space-y-2">
-          <button className="btn w-full" onClick={async () => { await api(`/circles/${circle.id}/convert`, { method: 'POST', body: {} }); await reload(); flash(t.saved); }}>{t.convertToCircle}</button>
+      {manager && circle.kind !== 'direct' && <GroupRules circle={circle} patch={patch} reload={reload} />}
+      {/* An encrypted group can never become a family circle (the server cannot read it, and a chat's type is fixed at creation), so it is not offered. */}
+      {circle.kind === 'group' && owner && !circle.encrypted && (
+        <section className="rounded-2xl bg-card border border-line elevated-1 p-4 space-y-2">
+          <button className="btn w-full flex items-center justify-center gap-2" onClick={async () => {
+            try { await api(`/circles/${circle.id}/convert`, { method: 'POST', body: {} }); await reload(); flash(t.saved); }
+            catch (err) { flash(t.errors[err instanceof ApiError ? err.code : 'generic'] ?? t.errors.generic); }
+          }}><Icon name="heart" className="w-4 h-4" />{t.convertToCircle}</button>
           <p className="text-sm text-muted">{t.convertNote}</p>
+        </section>
+      )}
+      {circle.kind === 'group' && owner && circle.encrypted && (
+        <section className="rounded-2xl bg-card border border-line elevated-1 p-4 flex items-start gap-3">
+          <Icon name="lock" className="w-5 h-5 text-green shrink-0 mt-0.5" />
+          <p className="text-sm text-muted">{t.e2ee.noConvert}</p>
         </section>
       )}
       <section className="rounded-2xl bg-card border border-line elevated-1 px-4 py-2">
@@ -1808,6 +2052,7 @@ function Settings({ circle, me, reload, onLeft, openArchive }: { circle: CircleD
               <li key={m.id} className="py-2 flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="flex-1 min-w-[6rem]">
                   {m.name}
+                  {!self && presence.get(m.id)?.online && <span role="img" aria-label={t.online} title={t.online} className="ms-2 inline-block w-2 h-2 rounded-full bg-green align-middle" />}
                   {m.role === 'owner' && <span className="ms-2 text-xs text-gold-dark">{t.owner}</span>}
                   {m.role === 'admin' && <span className="ms-2 text-xs text-green">{t.roleAdmin}</span>}
                 </span>

@@ -5,3 +5,4 @@ data
 design-package/
 design-package.zip
 backups/
+.playwright-mcp/

@@ -9,11 +9,11 @@ const store = () => localBlobStore(mkdtempSync(join(tmpdir(), 'thikra-store-')))
 
 test('a blob round-trips, and identical bytes get the same key', async () => {
   const s = store();
-  const a = await s.put(Buffer.from('ذكرى'));
-  const b = await s.put(Buffer.from('ذكرى'));
+  const a = await s.put(Buffer.from('تمتم'));
+  const b = await s.put(Buffer.from('تمتم'));
   assert.equal(a.hash, b.hash);
-  assert.equal(a.size, Buffer.from('ذكرى').length);
-  assert.equal((await s.get(a.hash))?.toString(), 'ذكرى');
+  assert.equal(a.size, Buffer.from('تمتم').length);
+  assert.equal((await s.get(a.hash))?.toString(), 'تمتم');
 });
 
 test('different bytes get different keys', async () => {

@@ -11,7 +11,8 @@
     "./whatsapp": "./whatsapp.ts",
     "./importer": "./importer.ts",
     "./phone": "./phone.ts",
-    "./timeline": "./timeline.ts"
+    "./timeline": "./timeline.ts",
+    "./e2ee": "./e2ee.ts"
   },
   "dependencies": {
     "libphonenumber-js": "^1.13.15"

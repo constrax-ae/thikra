@@ -4,6 +4,7 @@ import { app } from '../app.ts';
 import { circleAccess, decorate } from '../lib/helpers.ts';
 import { normalize } from '../../core/agent.ts';
 import { observe } from '../metrics.ts';
+import { isEncrypted } from '../lib/e2ee.ts';
 
 // ---- search ---------------------------------------------------------------------------------
 
@@ -12,6 +13,7 @@ import { observe } from '../metrics.ts';
 app.get('/api/circles/:id/search', c => {
   const a = circleAccess(c);
   if (!a) return c.json({ error: 'not_found' }, 404);
+  if (isEncrypted(a.circleId)) return c.json({ error: 'encrypted_chat' }, 409);   // the server cannot read it: the device searches its own history
   const q = normalize(String(c.req.query('q') ?? '')).slice(0, 100);
   if (q.length < 2) return c.json([]);
   const like = `%${q.replace(/[\\%_]/g, ch => `\\${ch}`)}%`;

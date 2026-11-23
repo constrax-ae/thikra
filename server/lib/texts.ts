@@ -50,3 +50,30 @@ const W: Record<AnyLang, Words> = {
 /** The server's words for one person; an unknown or missing language gets Arabic only when nothing is known at all (as before), otherwise English. */
 export const words = (lang: unknown): Words => W[(typeof lang === 'string' && lang in W ? lang : lang === undefined || lang === null ? 'ar' : 'en') as AnyLang];
 export const quotaText = (lang: unknown, name: string, level: number) => (level >= 100 ? words(lang).full(name) : words(lang).near(name, level));
+
+/** What a notification calls a message that is a card (GIF, sticker, contact, location). A language without an entry gets English. */
+export type CardWord = 'gif' | 'sticker' | 'contact' | 'location';
+const CARD_WORDS: Partial<Record<AnyLang, Record<CardWord, string>>> = {
+  ar: { gif: 'GIF', sticker: 'ملصق', contact: '👤 جهة اتصال', location: '📍 موقع' },
+  en: { gif: 'GIF', sticker: 'Sticker', contact: '👤 Contact', location: '📍 Location' },
+  ur: { gif: 'GIF', sticker: 'اسٹیکر', contact: '👤 رابطہ', location: '📍 مقام' },
+  hi: { gif: 'GIF', sticker: 'स्टिकर', contact: '👤 संपर्क', location: '📍 स्थान' },
+  tl: { gif: 'GIF', sticker: 'Sticker', contact: '👤 Contact', location: '📍 Lokasyon' },
+  fr: { gif: 'GIF', sticker: 'Autocollant', contact: '👤 Contact', location: '📍 Position' },
+  ml: { gif: 'GIF', sticker: 'സ്റ്റിക്കർ', contact: '👤 കോൺടാക്റ്റ്', location: '📍 ലൊക്കേഷൻ' },
+  bn: { gif: 'GIF', sticker: 'স্টিকার', contact: '👤 যোগাযোগ', location: '📍 অবস্থান' },
+  fa: { gif: 'GIF', sticker: 'استیکر', contact: '👤 مخاطب', location: '📍 موقعیت' },
+  tr: { gif: 'GIF', sticker: 'Çıkartma', contact: '👤 Kişi', location: '📍 Konum' },
+  es: { gif: 'GIF', sticker: 'Sticker', contact: '👤 Contacto', location: '📍 Ubicación' },
+  ru: { gif: 'GIF', sticker: 'Стикер', contact: '👤 Контакт', location: '📍 Местоположение' },
+  zh: { gif: 'GIF', sticker: '贴纸', contact: '👤 联系人', location: '📍 位置' },
+  de: { gif: 'GIF', sticker: 'Sticker', contact: '👤 Kontakt', location: '📍 Standort' },
+  it: { gif: 'GIF', sticker: 'Sticker', contact: '👤 Contatto', location: '📍 Posizione' },
+  pt: { gif: 'GIF', sticker: 'Figurinha', contact: '👤 Contato', location: '📍 Localização' },
+  nl: { gif: 'GIF', sticker: 'Sticker', contact: '👤 Contact', location: '📍 Locatie' },
+  pl: { gif: 'GIF', sticker: 'Naklejka', contact: '👤 Kontakt', location: '📍 Lokalizacja' },
+  uk: { gif: 'GIF', sticker: 'Стікер', contact: '👤 Контакт', location: '📍 Місцезнаходження' },
+  el: { gif: 'GIF', sticker: 'Αυτοκόλλητο', contact: '👤 Επαφή', location: '📍 Τοποθεσία' },
+  sv: { gif: 'GIF', sticker: 'Klistermärke', contact: '👤 Kontakt', location: '📍 Plats' },
+};
+export const cardWord = (lang: unknown, type: CardWord): string => (CARD_WORDS[(typeof lang === 'string' ? lang : 'ar') as AnyLang] ?? CARD_WORDS.en!)[type];

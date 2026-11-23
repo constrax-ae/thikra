@@ -14,7 +14,8 @@ export type IconName =
   | 'video' | 'mic' | 'file' | 'group' | 'mute' | 'ban' | 'forward' | 'down' | 'attach' | 'stop' | 'send' | 'chevron' | 'check-double' | 'clock' | 'play' | 'pause' | 'smile'
   | 'plus' | 'plus-circle' | 'arrow-out' | 'more' | 'envelope' | 'sparkle' | 'link'
   | 'book' | 'upload' | 'calendar' | 'trash' | 'arrow-back' | 'album'
-  | 'x' | 'copy' | 'pen' | 'cake' | 'star-fill' | 'shield' | 'snow';
+  | 'x' | 'copy' | 'pen' | 'cake' | 'star-fill' | 'shield' | 'snow' | 'call'
+  | 'chart' | 'location' | 'once' | 'eye' | 'qr' | 'megaphone' | 'mic-off' | 'sticker';
 
 const paths: Record<IconName, ReactElement> = {
   chats: <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 4v-4H6.5A2.5 2.5 0 0 1 4 13.5z" />,
@@ -33,6 +34,7 @@ const paths: Record<IconName, ReactElement> = {
   search: <><circle cx="11" cy="11" r="6.5" /><path d="m20 20-4.2-4.2" /></>,
   image: <><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><circle cx="9" cy="10" r="1.5" /><path d="m20.5 16-5-5-8.5 8.5" /></>,
   pin: <><path d="M9 3.5h6l-1 6 3 3H7l3-3z" /><path d="M12 12.5V21" /></>,
+  call: <path d="M6.6 3.5h2.8l1.4 4-1.8 1.4a11 11 0 0 0 5.1 5.1l1.4-1.8 4 1.4v2.8a2 2 0 0 1-2.2 2A15.500 15.500 0 0 1 4.600 5.700 2 2 0 0 1 6.600 3.500z" />,
   archive: <><rect x="3.5" y="4" width="17" height="4.5" rx="1" /><path d="M5 8.5V19a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19V8.5" /><path d="M10 12.5h4" /></>,
   alert: <><circle cx="12" cy="12" r="9" /><path d="M12 7.5v5.5" /><path d="M12 16.5h.01" /></>,
   refresh: <><path d="M20 12a8 8 0 1 1-2.3-5.6" /><path d="M20 4v4.5h-4.5" /></>,
@@ -75,6 +77,14 @@ const paths: Record<IconName, ReactElement> = {
   shield: <><path d="M12 3 5 6v5.5c0 4.3 3 7.8 7 9.5 4-1.7 7-5.2 7-9.5V6z" /><path d="m9 12 2.2 2.2L15.5 10" /></>,
   snow: <path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9M9.5 4.5 12 6l2.5-1.5M9.5 19.5 12 18l2.5 1.5" />,
   send: <><path d="M4.5 12 20 4.5l-4 15.5-4.2-5.8z" /><path d="m11.8 14.2 8.2-9.7" /></>,
+  chart: <><path d="M5 20V10" /><path d="M12 20V4" /><path d="M19 20v-7" /></>,
+  location: <><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z" /><circle cx="12" cy="10" r="2.4" /></>,
+  once: <><circle cx="12" cy="12" r="9" strokeDasharray="3 2.4" /><path d="M10.5 9.5 12.5 8v8" /></>,
+  eye: <><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" /><circle cx="12" cy="12" r="3" /></>,
+  qr: <><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><path d="M14 14h2.5v2.5H14zM17.5 17.5H20V20h-2.5zM14 20h1M20 14v1" /></>,
+  megaphone: <><path d="M4 10v4a1 1 0 0 0 1 1h2l6 4V5L7 9H5a1 1 0 0 0-1 1z" /><path d="M16.5 9a4 4 0 0 1 0 6" /><path d="M7.5 15.5 9 20" /></>,
+  'mic-off': <><path d="M9 5a3 3 0 0 1 6 0v5" /><path d="M15 13.5A3 3 0 0 1 9 12V9" /><path d="M5.5 11a6.5 6.5 0 0 0 10.8 4.9M18.5 11a6.4 6.4 0 0 1-.6 2.7" /><path d="M12 17.5V21" /><path d="m4 4 16 16" /></>,
+  sticker: <><path d="M20.5 12.5A8.5 8.5 0 1 1 11.5 3.5" /><path d="M20.5 12.5h-5a4 4 0 0 1-4-4v-5z" /><path d="M8.5 14.5a4.5 4.5 0 0 0 5.5 1.3" /></>,
 };
 
 export function Icon({ name, className = 'w-5 h-5' }: { name: IconName; className?: string }) {
@@ -99,5 +109,32 @@ export function Wordmark({ name, className = 'h-12 w-auto' }: { name: string; cl
       <img src={ar ? logoAr : logoEn} alt={name} className={`logo-light ${className}`} />
       <img src={ar ? logoArDark : logoEnDark} alt={name} className={`logo-dark ${className}`} />
     </span>
+  );
+}
+
+/**
+ * The mark beside a sent message's time. No words, as in WhatsApp, but Tamtim's own sign:
+ *   pending   - a small clock: still leaving this device
+ *   sent      - one tick: the server has it, the other person's phone has not received it yet
+ *   delivered - a face with glasses, in the bubble's quiet ink: received, not opened
+ *   read      - the same face in green with the lenses filled: opened (only when read receipts are shared on both sides)
+ * The filled lenses carry the difference for people who do not tell the two colours apart.
+ */
+export function TickMark({ state, className = 'w-[15px] h-[15px]' }: { state: 'pending' | 'sent' | 'delivered' | 'read'; className?: string }) {
+  const face = state === 'delivered' || state === 'read';
+  return (
+    <svg viewBox="0 0 24 24" className={`inline-block align-[-2px] ${className}`} fill="none" stroke="currentColor" strokeWidth={face ? 1.9 : 2.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      {state === 'pending' && <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></>}
+      {state === 'sent' && <path d="m5 12.5 4.5 4.5L19 7.5" />}
+      {face && (
+        <>
+          <circle cx="12" cy="12" r="10" />
+          <circle cx="8.2" cy="10.6" r="2.9" fill={state === 'read' ? 'currentColor' : 'none'} />
+          <circle cx="15.8" cy="10.6" r="2.9" fill={state === 'read' ? 'currentColor' : 'none'} />
+          <path d="M11.1 10.2h1.8" />
+          <path d="M8.7 16.2c1 .9 2.1 1.3 3.3 1.3s2.3-.4 3.3-1.3" />
+        </>
+      )}
+    </svg>
   );
 }

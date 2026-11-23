@@ -10,7 +10,9 @@ import { useInstall } from './install';
 import { LangPicker, MachineNote } from './LangPicker';
 import { useChatTheme, WALLPAPERS, BUBBLES } from './chattheme';
 import { Icon, type IconName } from './icons';
-import { Toggle, BusyButton } from './States';
+import { Toggle, BusyButton, Spinner } from './States';
+import { PersonAvatar } from './Groups';
+import { prepare } from './media';
 
 type Row = 'install' | 'starred' | 'account' | 'privacy' | 'chats' | 'appearance' | 'notifications' | 'storage' | 'rights' | 'help' | null;
 
@@ -240,6 +242,7 @@ function MiniChat({ wall, bubble, selected }: { wall: string; bubble: string; se
   );
 }
 
+import { EncryptionPanel } from './E2eeUi';
 export function You({ me, onLogout, onDeleteAccount, onAdmin, onSealed, onChanged }: {
   me: Me; onLogout: () => void; onDeleteAccount: () => void; onAdmin: () => void; onSealed: () => void; onChanged: () => void;
 }) {
@@ -252,6 +255,7 @@ export function You({ me, onLogout, onDeleteAccount, onAdmin, onSealed, onChange
   const [sound, setSound] = usePref('sound');
   const [motion, setMotion] = usePref('motion');
   const [saver, setSaver] = usePref('saver');
+  const [previews, setPreviews] = usePref('previews');
   const themes: Array<[Theme, string]> = [['system', t.themeSystem], ['light', t.themeLight], ['dark', t.themeDark]];
   const [receipts, setReceipts] = useState(me.read_receipts === 1);
   const [copied, setCopied] = useState(false);
@@ -290,6 +294,16 @@ export function You({ me, onLogout, onDeleteAccount, onAdmin, onSealed, onChange
   const loadDeleted = () => api<Array<{ id: number; name: string; daysLeft: number }>>('/me/deleted-circles').then(setDeleted).catch(() => {});
   useEffect(() => { loadDeleted(); }, []);
 
+  const [lastSeen, setLastSeen] = useState<'everyone' | 'family' | 'nobody'>(me.last_seen_privacy ?? 'everyone');
+  async function saveLastSeen(next: 'everyone' | 'family' | 'nobody') {
+    const before = lastSeen; setLastSeen(next);
+    try { await api('/me', { method: 'PATCH', body: { last_seen_privacy: next } }); onChanged(); } catch { setLastSeen(before); }
+  }
+  const [keepArchived, setKeepArchived] = useState(me.keep_archived !== 0);
+  async function saveKeepArchived(on: boolean) {
+    setKeepArchived(on);
+    try { await api('/me', { method: 'PATCH', body: { keep_archived: on } }); onChanged(); } catch { setKeepArchived(!on); }
+  }
   async function setReceiptsOn(on: boolean) {
     setReceipts(on);
     try { await api('/me', { method: 'PATCH', body: { read_receipts: on } }); onChanged(); } catch { setReceipts(!on); }
@@ -318,10 +332,7 @@ export function You({ me, onLogout, onDeleteAccount, onAdmin, onSealed, onChange
 
   return (
     <div className="space-y-4">
-      <section className="flex items-center gap-4 p-2">
-        <span className="w-16 h-16 rounded-full bg-brand text-white flex items-center justify-center text-2xl font-bold">{me.name.slice(0, 1)}</span>
-        <div className="min-w-0"><div className="text-xl font-bold truncate">{me.name}</div><div className="text-muted text-sm" dir="ltr">{me.phone}</div></div>
-      </section>
+      <ProfileHead me={me} onChanged={onChanged} />
       <MachineNote />
 
       <ul className="card divide-y divide-line overflow-hidden">
@@ -341,9 +352,25 @@ export function You({ me, onLogout, onDeleteAccount, onAdmin, onSealed, onChange
           </>
         ))}
         {row('privacy', 'lock', t.rowPrivacy, (
-          <Toggle checked={receipts} onChange={setReceiptsOn} label={t.readReceipts} note={t.readReceiptsNote} />
+          <>
+            <Toggle checked={receipts} onChange={setReceiptsOn} label={t.readReceipts} note={t.readReceiptsNote} />
+            <div role="group" aria-label={t.lastSeenTitle} className="space-y-1.5 pt-1">
+              <b className="block">{t.lastSeenTitle}</b>
+              <div className="flex gap-2 flex-wrap">
+                {([['everyone', t.lastSeenEveryone], ['family', t.lastSeenFamily], ['nobody', t.lastSeenNobody]] as const).map(([k, label]) => (
+                  <button key={k} aria-pressed={lastSeen === k} className={`btn btn-ghost !py-1 ${lastSeen === k ? '!border-green !text-green font-bold' : ''}`} onClick={() => saveLastSeen(k)}>{label}</button>
+                ))}
+              </div>
+              <p className="text-muted">{t.lastSeenNote}</p>
+            </div>
+          </>
         ))}
-        {row('chats', 'chats', t.rowChats, <p className="text-muted">{t.chatsNote}</p>)}
+        {row('chats', 'chats', t.rowChats, (
+          <>
+            <Toggle checked={keepArchived} onChange={saveKeepArchived} label={t.keepArchived} note={t.keepArchivedNote} />
+            <p className="text-muted">{t.chatsNote}</p>
+          </>
+        ))}
         {row('appearance', 'palette', t.rowAppearance, (
           <>
             {/* t.language holds the OTHER language's name ("العربية" when you are in English).
@@ -379,6 +406,7 @@ export function You({ me, onLogout, onDeleteAccount, onAdmin, onSealed, onChange
             </div>
             <Toggle checked={motion} onChange={setMotion} label={t.animations} note={t.animationsNote} />
             <Toggle checked={saver} onChange={setSaver} label={t.dataSaver} note={t.dataSaverNote} />
+            <Toggle checked={previews} onChange={setPreviews} label={t.linkPreviews} note={t.linkPreviewsNote} />
             <div role="group" aria-label={t.uploadQuality} className="space-y-1">
               <span>{t.uploadQuality}</span>
               <div className="flex gap-2 items-center flex-wrap">
@@ -433,7 +461,46 @@ export function You({ me, onLogout, onDeleteAccount, onAdmin, onSealed, onChange
         {me.is_admin ? <li><button className="w-full p-3 flex items-center gap-3 text-start hover:bg-green-soft/50" onClick={onAdmin}><span className="w-8 flex justify-center text-green"><Icon name="tools" /></span><span className="flex-1">{t.rowAdmin}</span></button></li> : null}
       </ul>
 
+      <EncryptionPanel me={me} />
+
       <button className="btn btn-ghost w-full" onClick={onLogout}>{t.logout}</button>
     </div>
+  );
+}
+
+
+/** Your face and name at the top of You: tap the camera to set a profile picture (the same one the phone app sets),
+ *  which the people you share a chat with see beside your messages. */
+function ProfileHead({ me, onChanged }: { me: Me; onChanged: () => void }) {
+  const { t } = useI18n();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const pick = (files: FileList | null) => {
+    const f = files?.[0];
+    if (!f) return;
+    setBusy(true); setError('');
+    prepare(f, 'standard').then(p => { const form = new FormData(); form.append('file', p.file); return api('/me/avatar', { method: 'POST', form }); })
+      .then(onChanged)
+      .catch(e => setError(t.errors[e instanceof ApiError ? e.code : 'generic'] ?? t.errors.generic))
+      .finally(() => setBusy(false));
+  };
+  const remove = () => { setBusy(true); api('/me/avatar', { method: 'DELETE' }).then(onChanged).catch(() => setError(t.errors.generic)).finally(() => setBusy(false)); };
+  return (
+    <section className="flex items-center gap-4 p-4 rounded-2xl bg-card border border-line elevated-1">
+      <div className="relative shrink-0">
+        <PersonAvatar id={me.id} name={me.name || '?'} avatarAt={me.avatar_at} className="w-20 h-20 text-3xl" />
+        <label title={t.changePhoto} aria-label={t.changePhoto}
+          className="absolute -bottom-1 -end-1 w-8 h-8 rounded-full bg-brand text-white border-2 border-card flex items-center justify-center elevated-2 cursor-pointer hover:scale-105 transition-transform duration-[var(--dur-fast)]">
+          {busy ? <Spinner className="w-4 h-4" /> : <Icon name="image" className="w-4 h-4" />}
+          <input type="file" hidden accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={e => { pick(e.target.files); e.target.value = ''; }} />
+        </label>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-xl font-bold truncate text-ink">{me.name}</div>
+        <div className="text-muted text-sm" dir="ltr">{me.phone}</div>
+        {me.avatar_at && <button type="button" className="mt-1 text-xs text-danger inline-flex items-center gap-1 hover:underline" disabled={busy} onClick={remove}><Icon name="trash" className="w-3.5 h-3.5" />{t.removePhoto}</button>}
+        {error && <p role="alert" className="mt-1 text-xs text-danger">{error}</p>}
+      </div>
+    </section>
   );
 }

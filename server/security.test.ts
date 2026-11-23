@@ -44,7 +44,7 @@ test('every response carries the security headers; attachments keep their own st
   assert.equal(res.headers.get('x-frame-options'), 'DENY');
   assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
   assert.equal(res.headers.get('referrer-policy'), 'no-referrer');
-  assert.match(res.headers.get('permissions-policy') ?? '', /geolocation=\(\)/);
+  assert.match(res.headers.get('permissions-policy') ?? '', /geolocation=\(self\)/);
   const api = await app.request('/api/me');
   assert.ok(api.headers.get('content-security-policy'), 'API responses too');
 });

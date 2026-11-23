@@ -70,7 +70,8 @@ export function suspension(userId: number): { reason: string | null; until: stri
   return { reason: u.suspended_reason ?? null, until: u.suspended_until ?? null };
 }
 
-export const endSessions = (userId: number) => { run('DELETE FROM sessions WHERE user_id = ?', userId); closeUserSockets(userId); };
+// Ending every session (suspend, ban, sign out everywhere) also stops notifications to this person's devices.
+export const endSessions = (userId: number) => { run('DELETE FROM sessions WHERE user_id = ?', userId); run('DELETE FROM push_subscriptions WHERE user_id = ?', userId); closeUserSockets(userId); };
 export const staff = () => all("SELECT id, name, admin_role AS role FROM users WHERE admin_role IS NOT NULL ORDER BY id");
 
 /** Private staff notes on a person or a family (never shown to them), newest first. */
