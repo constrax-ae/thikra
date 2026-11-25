@@ -5,6 +5,7 @@ import { useI18n } from './i18n';
 import { Dialog } from './Dialog';
 import { deviceLock } from './lock';
 import { Icon } from './icons';
+import { getE2ee } from './e2ee';
 
 // ---- chat lock: the device's PIN ---------------------------------------------------------------
 
@@ -218,12 +219,27 @@ export function ViewOnceBubble({ m, mine, meId }: { m: Message; mine: boolean; m
   const opened = m.viewOnce?.openedBy ?? [];
   const mineOpened = opened.includes(meId);
   const gone = !isVoice ? !file : !m.hasAudio;
+  // In an encrypted chat the file on the server is ciphertext: once the open is claimed it is downloaded, checked and decrypted
+  // here, shown from memory, and the decrypted copy is thrown away when the viewer closes (never cached like other media).
+  const sealed = m.attachments?.[0]?.enc ? m.attachments[0] : null;
+  const [plain, setPlain] = useState<string | null>(null);
+  useEffect(() => { if (step !== 'viewing' && plain) { URL.revokeObjectURL(plain); setPlain(null); } }, [step, plain]);
+  useEffect(() => () => { if (plain) URL.revokeObjectURL(plain); }, [plain]);
   async function open() {
     setMsg('');
-    try { await api(`/messages/${m.id}/open`, { method: 'POST', body: {} }); setFailed(false); setStep('viewing'); }
+    try {
+      await api(`/messages/${m.id}/open`, { method: 'POST', body: {} });
+      setFailed(false); setStep('viewing');
+      if (sealed) {
+        const e2ee = getE2ee();
+        if (!e2ee) { setFailed(true); return; }
+        try { setPlain(URL.createObjectURL(new Blob([await e2ee.openAttachment(sealed) as BlobPart], { type: sealed.mime || 'application/octet-stream' }))); }
+        catch { setFailed(true); }
+      }
+    }
     catch (e) { setStep('idle'); setMsg(t.errors[e instanceof ApiError ? e.code : 'generic'] ?? t.errors.generic); }
   }
-  const src = isVoice ? `/api/messages/${m.id}/audio` : `/api/media/${file?.id}`;
+  const src = sealed ? plain ?? undefined : isVoice ? `/api/messages/${m.id}/audio` : `/api/media/${file?.id}`;
   return (
     <div className="my-1 select-none">
       <div className="flex items-center gap-2 rounded-2xl border border-dashed border-current/40 px-3 py-2">
@@ -249,6 +265,7 @@ export function ViewOnceBubble({ m, mine, meId }: { m: Message; mine: boolean; m
       {step === 'viewing' && (
         <Dialog onClose={() => setStep('idle')} label={t.priv.viewOnce}>
           {failed ? <p role="alert" className="text-danger">{t.priv.viewOnceFail}</p>
+            : sealed && !plain ? <div aria-hidden className="h-48 rounded-lg bg-line animate-pulse" />
             : isVoice ? <audio autoPlay controls controlsList="nodownload" className="w-full" src={src} onError={() => setFailed(true)} />
             : file?.kind === 'video' ? <video autoPlay controls playsInline controlsList="nodownload" className="max-w-full max-h-[65vh] mx-auto rounded-lg bg-black" src={src} onError={() => setFailed(true)} onContextMenu={e => e.preventDefault()} />
             : <img alt="" className="max-w-full max-h-[65vh] mx-auto rounded-lg" src={src} onError={() => setFailed(true)} onContextMenu={e => e.preventDefault()} draggable={false} />}

@@ -275,7 +275,7 @@ export const dict = {
     },
     sys: {
       photoChanged: '{name} غيّر صورة المجموعة', photoRemoved: '{name} حذف صورة المجموعة', descChanged: '{name} غيّر وصف المجموعة', nameChanged: '{name} غيّر اسم المجموعة إلى «{to}»', sendAdmins: '{name} جعل الإرسال للمشرفين فقط', sendAll: '{name} سمح لكل الأعضاء بالإرسال',
-      groupToCircle: '{name} حوّل المجموعة إلى دائرة', joined: '{name} انضم إلى الدائرة',
+      groupToCircle: '{name} حوّل المجموعة إلى دائرة', joined: '{name} انضم',
  disappearOn: '{name} فعّل الرسائل المؤقتة: تُحذف الرسائل الجديدة بعد {dur}', disappearOff: '{name} أوقف الرسائل المؤقتة', callMissed: 'مكالمة صوتية فائتة من {name}', callDeclined: 'رفض {name} المكالمة الصوتية', callEnded: 'مكالمة صوتية، {dur}', dur86400: '24 ساعة', dur604800: '7 أيام', dur7776000: '90 يومًا',
       agentOn: 'فعّل {name} حافظ الذكريات. من الآن تُحفظ لحظات العائلة المهمة التي تُشارَك هنا في الأرشيف.', agentOff: 'أوقف {name} حافظ الذكريات مؤقتاً. لم تعد الرسائل الجديدة تُحفظ في الأرشيف.',
       deathOpened: 'رحم الله {who}. فُتحت رسائله المختومة وحُفظت في أرشيف العائلة.',
@@ -691,7 +691,7 @@ export const dict = {
     },
     sys: {
       photoChanged: '{name} changed the group photo', photoRemoved: '{name} removed the group photo', descChanged: '{name} changed the group description', nameChanged: '{name} changed the group name to "{to}"', sendAdmins: '{name} allowed only admins to send messages', sendAll: '{name} allowed all members to send messages',
-      groupToCircle: '{name} turned the group into a family circle', joined: '{name} joined the circle',
+      groupToCircle: '{name} turned the group into a family circle', joined: '{name} joined',
  disappearOn: '{name} turned on disappearing messages: new messages are deleted after {dur}', disappearOff: '{name} turned off disappearing messages', callMissed: 'Missed voice call from {name}', callDeclined: '{name} declined the voice call', callEnded: 'Voice call, {dur}', dur86400: '24 hours', dur604800: '7 days', dur7776000: '90 days',
       agentOn: '{name} turned on the Memory keeper. From now on, the family\u2019s important moments shared here are saved to the archive.', agentOff: '{name} paused the Memory keeper. New messages are no longer saved to the archive.',
       deathOpened: 'May {who} rest in peace. Their sealed messages were opened and kept in the family archive.',

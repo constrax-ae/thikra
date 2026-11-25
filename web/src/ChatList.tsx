@@ -215,8 +215,8 @@ export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) =
 
   // The preview line. Line icons from the app's set stand for the attachment kind (never
   // emoji: they render differently on every platform and ignore the theme's text colour).
-  const KIND_ICON: Record<string, IconName> = { image: 'image', video: 'video', voice: 'mic', file: 'file', deleted: 'ban', contact: 'you', location: 'pin', sticker: 'smile', gif: 'smile' };
-  const KIND_WORD = (k: string) => ({ image: t.photoWord, video: t.videoWord, voice: t.voiceWord, file: t.fileWord, deleted: t.deletedPreview, text: '', gif: t.gifWord, sticker: t.stickerWord, contact: t.contactWord, location: t.locationWord } as Record<string, string>)[k] ?? '';
+  const KIND_ICON: Record<string, IconName> = { image: 'image', video: 'video', voice: 'mic', file: 'file', deleted: 'ban', contact: 'you', location: 'pin', live: 'location', sticker: 'smile', gif: 'smile', poll: 'chart' };
+  const KIND_WORD = (k: string) => ({ image: t.photoWord, video: t.videoWord, voice: t.voiceWord, file: t.fileWord, deleted: t.deletedPreview, text: '', gif: t.gifWord, sticker: t.stickerWord, contact: t.contactWord, location: t.locationWord, live: t.liveWord, poll: t.newPoll } as Record<string, string>)[k] ?? '';
   const Preview = ({ c }: { c: CircleSummary }) => {
     const typing = typingLabel(typersOf(c.id), t, c.kind !== 'direct');
     if (typing) return <span className="truncate text-green font-medium">{typing}</span>;
