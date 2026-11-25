@@ -7,6 +7,7 @@ import { useI18n } from './i18n';
 import { getE2ee, onChatChange, restoreDevice, forgetDevice, stopE2ee, useE2ee } from './e2ee';
 import type { DeviceInfo, Notice } from './e2ee/engine';
 import { QrImage, QrScanner } from './QrUi';
+import { askConfirm } from './confirm';
 
 // ---- encrypted files, shown ------------------------------------------------------------------------------------------------------------------
 
@@ -279,7 +280,7 @@ export function EncryptionPanel({ me }: { me: Me }) {
             {needsMe(d) && <span className="block text-xs text-gold-dark">{t.e2ee.awaiting} — {t.e2ee.approveHelp}</span>}
             {!d.mine && <span className="flex gap-2 mt-1">
               {needsMe(d) && <button className="btn !py-1 text-xs" onClick={async () => { await e2ee.approveDevice(d.deviceId); reload(); }}>{t.e2ee.approve}</button>}
-              <button className="btn btn-ghost !py-1 text-xs" onClick={async () => { if (confirm(t.e2ee.revokeConfirm)) { await e2ee.revokeDevice(d.deviceId); reload(); } }}>{t.e2ee.revoke}</button>
+              <button className="btn btn-ghost !py-1 text-xs" onClick={async () => { if (await askConfirm(t.e2ee.revokeConfirm, { danger: true })) { await e2ee.revokeDevice(d.deviceId); reload(); } }}>{t.e2ee.revoke}</button>
             </span>}
           </li>
         ))}
@@ -359,7 +360,7 @@ export function EncryptionPanel({ me }: { me: Me }) {
         </form>
       )}
       {msg && <p role="status" className="text-sm mt-2">{msg}</p>}
-      <button className="btn btn-ghost mt-4 text-sm" onClick={async () => { if (confirm(t.e2ee.forgetConfirm)) { stopE2ee(); await forgetDevice(me.id); location.reload(); } }}>{t.e2ee.forget}</button>
+      <button className="btn btn-ghost mt-4 text-sm" onClick={async () => { if (await askConfirm(t.e2ee.forgetConfirm, { danger: true })) { stopE2ee(); await forgetDevice(me.id); location.reload(); } }}>{t.e2ee.forget}</button>
     </section>
   );
 }

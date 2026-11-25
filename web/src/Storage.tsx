@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { askConfirm } from './confirm';
 import { api, ApiError } from './api';
 import { useI18n } from './i18n';
 import { Icon } from './icons';
@@ -77,7 +78,7 @@ function Sweep({ circleId, onDone }: { circleId: number; onDone: () => void }) {
     try { setFound(await api(`/circles/${circleId}/media/cleanup`, { body: body() })); } catch (e) { fail(e); } finally { setBusy(false); }
   };
   const sweep = async () => {
-    if (!found || !confirm(t.store.deleteConfirm.replace('{n}', String(found.messages)).replace('{size}', sizeText(found.bytes)))) return;
+    if (!found || !(await askConfirm(t.store.deleteConfirm.replace('{n}', String(found.messages)).replace('{size}', sizeText(found.bytes)), { danger: true }))) return;
     setBusy(true); setError('');
     try { await api(`/circles/${circleId}/media/cleanup`, { body: { ...body(), preview: false } }); onDone(); } catch (e) { fail(e); } finally { setBusy(false); }
   };

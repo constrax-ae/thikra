@@ -26,8 +26,9 @@ import { beginShare } from './livelocation';
 import { firstLink, splitLinks } from './links';
 import { Formatted } from './Formatted';
 import { PhotoViewer, type ViewerItem } from './PhotoViewer';
+import { askConfirm } from './confirm';
 import { RemindSheet } from './RemindersUi';
-import { forget as forgetReminder, remind, useReminders, JUMP_KEY } from './reminders';
+import { forget as forgetReminder, remind, useReminders, JUMP_KEY, JUMP_EVENT } from './reminders';
 import { unreadMark } from './unread.ts';
 import { MAX_TEXT, plainText, toggleMark, type Style } from '../../core/format';
 import type { UploadFile } from './uploads';
@@ -298,7 +299,7 @@ export function CircleView({ id, me, initialTab, onBack, onLeft, onTab, docked }
       </div>}
       {tab === 'chat' && circle.kind === 'circle' && <TodayBanner circleId={circle.id} onOpen={() => goTab('archive')} />}
       <div className="flex-1 min-h-0">
-        {tab === 'chat' && <Chat circle={circle} me={me} panel={panel} setPanel={setPanel} onOpenArchive={() => goTab('archive')} onLeave={onLeft} />}
+        {tab === 'chat' && <Chat circle={circle} me={me} panel={panel} setPanel={setPanel} onOpenArchive={() => goTab('archive')} onLeave={onLeft} blocked={blocked} onUnblock={toggleBlock} />}
         {tab === 'archive' && <Archive circle={circle} />}
         {tab === 'settings' && <Settings circle={circle} me={me} reload={loadCircle} onLeft={onLeft} openArchive={() => goTab('archive')} />}
       </div>
@@ -433,7 +434,8 @@ function withNotices(list: Message[], notices: Array<{ at: number }>): Message[]
   });
   return out;
 }
-function Chat({ circle, me, panel, setPanel, onOpenArchive, onLeave }: { circle: CircleDetail; me: Me; panel: Panel; setPanel: React.Dispatch<React.SetStateAction<Panel>>; onOpenArchive: () => void; onLeave: () => void }) {
+function Chat({ circle, me, panel, setPanel, onOpenArchive, onLeave, blocked = false, onUnblock }: { circle: CircleDetail; me: Me; panel: Panel; setPanel: React.Dispatch<React.SetStateAction<Panel>>; onOpenArchive: () => void; onLeave: () => void;
+  /** A one-to-one chat with someone you blocked: as in WhatsApp, no message box, only a way to unblock. */ blocked?: boolean; onUnblock?: () => void }) {
   // A message request from someone you do not know: read it, then accept, decline, block or report. Until then nothing is sent back.
   const [requestOpen, setRequestOpen] = useState(!!circle.request);
   useEffect(() => setRequestOpen(!!circle.request), [circle.id, circle.request]);
@@ -548,6 +550,9 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive, onLeave }: { circle:
   useEffect(() => { loadPins(); }, [loadPins]);
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
   const [light, setLight] = useState<number | null>(null);           // the attachment open in the photo viewer
+  const [toastText, setToastText] = useState('');                        // a short confirmation ("Copied") that fades by itself
+  const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const toast = (text: string) => { setToastText(text); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToastText(''), 1600); };
   const [picked, setPicked] = useState<File[] | null>(null);          // files chosen, shown in the sheet before sending
   const [attachMenu, setAttachMenu] = useState(false);
   const [sharing, setSharing] = useState<null | 'panel' | 'contact' | 'location'>(null);
@@ -1038,6 +1043,9 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive, onLeave }: { circle:
   // up to HUNT_PAGES of them, after which the jump is dropped rather than dragging in years of history.
   const hunted = useRef(0);
   useEffect(() => { hunted.current = 0; }, [circle.id]);
+  // A jump asked for while this chat is already open (a reminder's Open): look again, there is no reload to trigger it.
+  const [jumpTick, setJumpTick] = useState(0);
+  useEffect(() => { const on = () => setJumpTick(n => n + 1); window.addEventListener(JUMP_EVENT, on); return () => window.removeEventListener(JUMP_EVENT, on); }, []);
   useEffect(() => {
     let want = 0; try { want = Number(sessionStorage.getItem(JUMP_KEY)) || 0; } catch { /* no jump */ }
     if (!want) return;
@@ -1047,7 +1055,7 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive, onLeave }: { circle:
     if (olderRef.current === 'end' || hunted.current >= HUNT_PAGES) { drop(); return; }   // the chat begins above it, or it is too far back
     hunted.current++;
     loadOlder();
-  }, [msgs, loaded, loadOlder, circle.id]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [msgs, loaded, loadOlder, circle.id, jumpTick]);   // eslint-disable-line react-hooks/exhaustive-deps
   const jumpTo = (id: number) => {
     const el = document.getElementById(`m${id}`);
     if (!el) return;
@@ -1078,7 +1086,7 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive, onLeave }: { circle:
 
   // As in WhatsApp: the sender can delete for everyone for a limited time, a manager at any time.
   // Two days for a sender, a week for the circle's owner and admins (same rule as the server).
-  const canDeleteForEveryone = (m: Message) => { if (m.sealedOn) return m.userId === me.id; const age = Date.now() - toDate(m.createdAt).getTime(); return manager ? age < 7 * 24 * 3600_000 : m.userId === me.id && age < 48 * 3600_000; };
+  const canDeleteForEveryone = (m: Message) => { if (m.sealedOn) return m.userId === me.id; const age = Date.now() - toDate(m.createdAt).getTime(); return manager && circle.kind !== 'direct' ? age < 7 * 24 * 3600_000 : m.userId === me.id && age < 48 * 3600_000; };   // a one-to-one chat has no admins
 
   async function deleteForEveryone(m: Message) {
     setDel(null);
@@ -1130,7 +1138,10 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive, onLeave }: { circle:
   return (
     <div className="chat-root flex flex-col h-full">
       {/* The search / starred / media tools now live in the header, beside the name. */}
-      {pins.length > 0 && (() => { const p = pins[Math.min(pinIdx, pins.length - 1)]; return (
+      {pins.length > 0 && (() => {
+        // In an encrypted chat the sender cannot decrypt their own message from the server's copy; the one already read on this
+        // device (in the timeline) has its words, so the bar uses that when it is there.
+        const pinned = pins[Math.min(pinIdx, pins.length - 1)]; const p = msgs.find(m => m.id === pinned.id && !m.undecryptable) ?? pinned; return (
         <button type="button" className="flex items-center gap-2 w-full text-start rounded-lg bg-gold/15 text-ink px-3 py-1.5 mb-2 text-sm"
           onClick={() => { jumpTo(p.id); setPinIdx(i => (i + 1) % pins.length); }}>
           <Icon name="pin" className="w-4 h-4 shrink-0" />
@@ -1198,7 +1209,7 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive, onLeave }: { circle:
             <Icon name="trash" className="w-4 h-4" />{t.pick.delMe}
           </button>
           {chosenMsgs.some(canDeleteForEveryone) && (
-            <button type="button" className="btn btn-ghost !py-1 text-sm !text-danger" onClick={() => { if (confirm(t.deleteForEveryone)) deletePicked(true); }}>
+            <button type="button" className="btn btn-ghost !py-1 text-sm !text-danger" onClick={async () => { if (await askConfirm(t.deleteForEveryone, { danger: true })) deletePicked(true); }}>
               <Icon name="trash" className="w-4 h-4" />{t.pick.delAll}
             </button>
           )}
@@ -1338,7 +1349,7 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive, onLeave }: { circle:
                     <b className="block">{m.replyTo.author ?? ''}</b>
                     <span className="line-clamp-2">{m.replyTo.deleted
                       ? <span className="inline-flex items-center gap-1 italic"><Icon name="ban" className="w-3 h-3" />{t.quotedDeleted}</span>
-                      : m.replyTo.text || cardWord(m.replyTo.card, t) || (m.replyTo.kind === 'voice' ? <span className="inline-flex items-center gap-1"><Icon name="mic" className="w-3 h-3" />{t.voiceWord}</span> : '')}</span>
+                      : (m.replyTo.text && plainText(m.replyTo.text)) || cardWord(m.replyTo.card, t) || (m.replyTo.kind === 'voice' ? <span className="inline-flex items-center gap-1"><Icon name="mic" className="w-3 h-3" />{t.voiceWord}</span> : '')}</span>
                   </button>
                 )}
                 {m.viewOnce && <ViewOnceBubble m={m} mine={mine} meId={me.id} />}
@@ -1480,7 +1491,7 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive, onLeave }: { circle:
         )}
       </div>
       {error && <p role="alert" className="text-sm text-danger py-1">{error}</p>}
-      {enc && encState !== 'ok' && <p role="status" className="text-xs rounded-lg bg-gold/15 text-ink p-2 mb-1">{encState === 'waiting' ? t.e2ee.waiting : encState === 'not_member' ? t.e2ee.notMember : encWhy === 'restored_behind' ? t.e2ee.behind : t.e2ee.stuck}{encState === 'stuck' && encWhy === 'restored_behind' && e2ee && <button type="button" className="btn !py-1 text-xs ms-2" onClick={() => { if (confirm(t.e2ee.startFreshConfirm)) e2ee.startFresh().catch(() => { alert(t.e2ee.startFreshFailed); }); }}>{t.e2ee.startFresh}</button>}</p>}
+      {enc && encState !== 'ok' && <p role="status" className="text-xs rounded-lg bg-gold/15 text-ink p-2 mb-1">{encState === 'waiting' ? t.e2ee.waiting : encState === 'not_member' ? t.e2ee.notMember : encWhy === 'restored_behind' ? t.e2ee.behind : t.e2ee.stuck}{encState === 'stuck' && encWhy === 'restored_behind' && e2ee && <button type="button" className="btn !py-1 text-xs ms-2" onClick={async () => { if (await askConfirm(t.e2ee.startFreshConfirm, { danger: true })) e2ee.startFresh().catch(() => setError(t.e2ee.startFreshFailed)); }}>{t.e2ee.startFresh}</button>}</p>}
       {enc && circle.kind === 'direct' && notices.some(n => n.kind === 'gone') && <p role="status" className="text-xs rounded-lg bg-gold/15 text-ink p-2 mb-1">{t.e2ee.goneNote}</p>}
       {safety && <ChatSecuritySheet circle={circle} me={me} onClose={() => setSafety(false)} />}
       {encBusy && <p role="status" className="text-xs text-muted py-0.5">{t.e2ee.sending}</p>}
@@ -1514,6 +1525,7 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive, onLeave }: { circle:
           <button className="btn btn-ghost w-full mt-3" onClick={() => setReporting(null)}>{reported ? t.closePanel : t.cancel}</button>
         </Dialog>
       )}
+      {toastText && <div role="status" className="fixed z-50 bottom-28 inset-x-0 mx-auto w-fit max-w-[90vw] rounded-full bg-ink text-paper text-sm px-4 py-2 elevated-2 animate-fade-in pointer-events-none">{toastText}</div>}
       {light !== null && (() => {
         const start = photos.findIndex(p => p.key === light);
         return start < 0 ? null : (
@@ -1568,6 +1580,11 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive, onLeave }: { circle:
         <RequestBar circle={circle} me={me} lastText={[...msgs].reverse().find(m => m.userId !== me.id && !m.deleted)?.body ?? ''}
           onAccepted={() => { setRequestOpen(false); window.dispatchEvent(new Event('thikra:chats')); }}
           onGone={() => { window.dispatchEvent(new Event('thikra:chats')); onLeave(); }} />
+      ) : blocked && circle.kind === 'direct' ? (
+        <div role="status" className="mt-2 mb-[max(0.75rem,env(safe-area-inset-bottom))] rounded-2xl bg-card border border-line py-2.5 px-4 flex items-center justify-center gap-3 text-sm text-muted">
+          <Icon name="ban" className="w-4 h-4 shrink-0" /><span>{t.blockedNote}</span>
+          {onUnblock && <button type="button" className="btn btn-ghost !py-1 text-sm" onClick={onUnblock}>{t.unblock}</button>}
+        </div>
       ) : circle.sendPolicy === 'admins' && !manager ? (
         <p role="status" className="mt-2 text-center text-sm text-muted rounded-2xl bg-card border border-line py-3 px-4 flex items-center justify-center gap-2">
           <Icon name="lock" className="w-4 h-4 shrink-0" />{t.onlyAdminsSend}
@@ -1711,6 +1728,10 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive, onLeave }: { circle:
           {!del.deleted && <p className="mt-2 text-sm text-muted line-clamp-2 rounded-xl bg-paper border border-line px-3 py-2">{lineOf(del)}</p>}
           <div className="mt-3 flex flex-col">
             {row('chats', t.reply, () => { setReplyTo(del); setEditing(null); setDel(null); requestAnimationFrame(() => box2.current?.focus()); })}
+            {(() => {
+              const words = del.deleted || del.viewOnce ? '' : del.kind === 'voice' ? (del.transcript ?? '') : del.body;
+              return words.trim() ? row('copy', t.copy, () => { setDel(null); navigator.clipboard.writeText(plainText(words)).then(() => toast(t.copied), () => {}); }) : null;
+            })()}
             {canEdit(del) && !del.sealedOn && row('pen', t.edit, () => { setEditing(del); setReplyTo(null); setText(del.body); setDel(null); requestAnimationFrame(() => box2.current?.focus()); })}
             {del.kind === 'voice' && !!del.transcript && row('file', transcribed.has(del.id) ? t.hideTranscript : t.showTranscript, () => { const id = del.id; setTranscribed(p => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; }); setDel(null); })}
             {canForward(del) && row('forward', t.forward, () => openForward(del))}
@@ -2184,7 +2205,7 @@ function Settings({ circle, me, reload, onLeft, openArchive }: { circle: CircleD
     await api(`/circles/${circle.id}/members/${uid}`, { method: 'PATCH', body: { role } }); reload();
   }
   async function transfer(uid: number) {
-    if (!confirm(t.confirmTransfer)) return;
+    if (!(await askConfirm(t.confirmTransfer))) return;
     await api(`/circles/${circle.id}/transfer`, { method: 'POST', body: { userId: uid } }); reload();
   }
   async function deleteCircle() {
@@ -2487,7 +2508,7 @@ function Settings({ circle, me, reload, onLeft, openArchive }: { circle: CircleD
 
       {circle.kind !== 'direct' && circle.role !== 'owner' && (
         <section className="card p-4 space-y-2">
-          <button className="text-danger font-bold" onClick={() => { if (confirm(t.infoExitNote)) removeMember(me.id); }}>{t.infoExit}</button>
+          <button className="text-danger font-bold" onClick={async () => { if (await askConfirm(t.infoExitNote, { danger: true })) removeMember(me.id); }}>{t.infoExit}</button>
         </section>
       )}
       {circle.createdAt && <p className="text-xs text-muted text-center">{t.infoCreated} {toDate(circle.createdAt).toLocaleDateString(intlLocale(lang), { dateStyle: 'long' })}</p>}

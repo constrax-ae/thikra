@@ -1143,7 +1143,8 @@ export class E2ee {
   private async remember(circle: number, m: Message, p: Payload) {
     const was = await getJson<{ seq: number }>(this.kv, PREFIX.last + circle);
     if (was && (m.seq ?? 0) < was.seq) return;
-    await setJson(this.kv, PREFIX.last + circle, { seq: m.seq ?? 0, id: m.id, at: m.createdAt, userId: m.userId, ...lineOf(p) });
+    // An edited message shows its new words in the chat list too, not the ones it was first sent with.
+    await setJson(this.kv, PREFIX.last + circle, { seq: m.seq ?? 0, id: m.id, at: m.createdAt, userId: m.userId, ...lineOf(p), ...(m.editedAt && typeof m.body === 'string' ? { text: m.body } : {}) });
   }
   async preview(circle: number): Promise<{ text: string; kind: string; at: string; userId: number | null } | null> { return (await getJson<any>(this.kv, PREFIX.last + circle)) ?? null; }
 

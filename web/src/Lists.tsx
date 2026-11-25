@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { askConfirm } from './confirm';
 import { api, ApiError, type CircleSummary } from './api';
 import { useI18n } from './i18n';
 import { Dialog } from './Dialog';
@@ -65,7 +66,7 @@ export function ListsDialog({ lists, chats, onChange, onClose }: {
                 <button type="button" aria-label={`${t.lists.rename} ${list.name}`} disabled={busy} className="p-2 rounded-lg text-muted hover:text-green hover:bg-green-soft"
                   onClick={() => setRenaming(renaming?.id === list.id ? null : { id: list.id, value: list.name })}><Icon name="pen" className="w-4 h-4" /></button>
                 <button type="button" aria-label={`${t.lists.remove} ${list.name}`} disabled={busy} className="p-2 rounded-lg text-muted hover:text-danger hover:bg-danger/10"
-                  onClick={() => { if (confirm(t.lists.removeConfirm.replace('{name}', list.name))) run(() => api(`/lists/${list.id}`, { method: 'DELETE' })); }}><Icon name="trash" className="w-4 h-4" /></button>
+                  onClick={async () => { if (await askConfirm(t.lists.removeConfirm.replace('{name}', list.name), { danger: true })) run(() => api(`/lists/${list.id}`, { method: 'DELETE' })); }}><Icon name="trash" className="w-4 h-4" /></button>
               </div>
               {open && (
                 <ul className="px-3 pb-3 space-y-1 max-h-56 overflow-y-auto">

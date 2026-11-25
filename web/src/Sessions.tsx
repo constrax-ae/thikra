@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { askConfirm } from './confirm';
 import { api, toDate } from './api';
 import { useI18n, intlLocale } from './i18n';
 import { Icon } from './icons';
@@ -27,7 +28,7 @@ export function Sessions() {
   useEffect(() => { load(); }, []);
   const when = (iso: string | null) => (iso ? toDate(iso).toLocaleString(intlLocale(lang), { dateStyle: 'medium', timeStyle: 'short' }) : '—');
   async function end(s: Sess) {
-    if (!confirm(s.current ? t.sess.endThisConfirm : t.sess.endConfirm)) return;
+    if (!(await askConfirm(s.current ? t.sess.endThisConfirm : t.sess.endConfirm, { danger: true }))) return;
     setBusy(true); setMsg('');
     try {
       const r = await api<{ signedOutHere: boolean }>(`/me/sessions/${s.id}`, { method: 'DELETE' });
@@ -36,7 +37,7 @@ export function Sessions() {
     } catch { setMsg(t.errors.generic); } finally { setBusy(false); }
   }
   async function endOthers() {
-    if (!confirm(t.sess.endOthersConfirm)) return;
+    if (!(await askConfirm(t.sess.endOthersConfirm, { danger: true }))) return;
     setBusy(true); setMsg('');
     try { const r = await api<{ ended: number }>('/me/sessions/revoke-others', { body: {} }); setMsg(t.sess.ended.replace('{n}', String(r.ended))); await load(); }
     catch { setMsg(t.errors.generic); } finally { setBusy(false); }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useI18n, intlLocale, fill } from './i18n';
 import { Dialog } from './Dialog';
 import { Icon } from './icons';
-import { forget, presets, readReminders, split, useReminders, JUMP_KEY, type Reminder } from './reminders';
+import { forget, presets, readReminders, split, useReminders, JUMP_KEY, JUMP_EVENT, type Reminder } from './reminders';
 
 const when = (at: number, lang: string) => new Date(at).toLocaleString(intlLocale(lang), { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 // <input type="datetime-local"> speaks local time with no zone: "2026-11-23T20:30".
@@ -90,7 +90,7 @@ export function ReminderAlarm({ meId, onOpen }: { meId: number; onOpen: (circleI
             <b className="block text-sm">{t.rem.ringing}</b>
             <span className="block text-sm text-muted truncate"><bdi>{r.chat}</bdi> · <span dir="auto">{when(r.at, lang)}</span></span>
           </span>
-          <button className="btn btn-primary !px-3 !py-1.5 text-sm" onClick={() => { drop(r.id); try { sessionStorage.setItem(JUMP_KEY, String(r.messageId)); } catch { /* opens the chat, without the jump */ } onOpen(r.circleId); }}>{t.rem.open}</button>
+          <button className="btn btn-primary !px-3 !py-1.5 text-sm" onClick={() => { drop(r.id); try { sessionStorage.setItem(JUMP_KEY, String(r.messageId)); } catch { /* opens the chat, without the jump */ } onOpen(r.circleId); window.dispatchEvent(new Event(JUMP_EVENT)); }}>{t.rem.open}</button>
           <button aria-label={t.rem.dismiss} title={t.rem.dismiss} className="w-8 h-8 rounded-lg flex items-center justify-center text-muted hover:bg-green-soft hover:text-green" onClick={() => drop(r.id)}><Icon name="x" className="w-4 h-4" /></button>
         </div>
       ))}

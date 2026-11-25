@@ -1,4 +1,5 @@
 import { StrictMode, Suspense, lazy, useCallback, useEffect, useState } from 'react';
+import { ConfirmHost, askConfirm, tellUser } from './confirm';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 import './theme';
@@ -124,8 +125,8 @@ function App() {
 
   async function logout() { stopE2ee(); endSending(); stopWatching(); deviceLock.clear(); await dropPush(); await api('/auth/logout', { method: 'POST', body: {} }); setMe(null); go('/'); }
   async function deleteAccount() {
-    if (!confirm(t.confirmDelete)) return;
-    try { await api('/me', { method: 'DELETE' }); await dropPush(); endSending(); stopE2ee(); await forgetDevice(me!.id).catch(() => {}); deviceLock.clear(); setMe(null); } catch (e: any) { alert(t.errors[e.code] ?? t.errors.generic); }
+    if (!(await askConfirm(t.confirmDelete, { danger: true }))) return;
+    try { await api('/me', { method: 'DELETE' }); await dropPush(); endSending(); stopE2ee(); await forgetDevice(me!.id).catch(() => {}); deviceLock.clear(); setMe(null); } catch (e: any) { tellUser(t.errors[e.code] ?? t.errors.generic); }
   }
 
   // The bottom tab bar is WhatsApp's: always there on the main screens, out of the way inside a chat.
@@ -148,6 +149,8 @@ function App() {
     return (
       <div className="h-[100dvh] flex bg-paper overflow-clip">
         <ReminderAlarm meId={me.id} onOpen={id => go(`/circle/${id}`)} />
+      <ConfirmHost />
+        <ConfirmHost />
         {/* The sidebar comes first in the source, so without this a keyboard user tabs through
             every chat in the list before reaching the conversation they already opened.
             Centred rather than tucked into the corner: at the start edge it landed on top of
@@ -197,6 +200,7 @@ function App() {
     // empty while its own rows were cramped.
     <div className={`${route.name === 'admin' ? 'max-w-[1400px]' : route.name === 'plans' ? 'max-w-5xl' : 'max-w-2xl'} mx-auto px-4`}>
       <ReminderAlarm meId={me.id} onOpen={id => go(`/circle/${id}`)} />
+      <ConfirmHost />
       {route.name !== 'circle' && (
         <header className="h-16 pt-1 flex items-center gap-3">
           <button onClick={toCircles} aria-label={t.appName}><Wordmark name={t.appName} /></button>

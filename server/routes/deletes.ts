@@ -16,8 +16,12 @@ app.delete('/api/messages/:mid', async c => {
   // (owner's rule, 2026-10-19). Not the owner, not an admin, and no time limit for the author.
   if (m.sealed_on) { if (m.user_id !== user.id) return c.json({ error: 'sealed_protected' }, 403); }
   else {
-    if (!isManager(member.role) && m.user_id !== user.id) return c.json({ error: 'forbidden' }, 403);
-    const window = isManager(member.role) ? MANAGER_DELETE_WINDOW_MS : DELETE_WINDOW_MS;
+    // A one-to-one chat has no admins: whoever started it is recorded as its "owner", but that gives no power over the other
+    // person's messages. Only a group or circle's managers may take back someone else's message.
+    const direct = one('SELECT kind FROM circles WHERE id = ?', m.circle_id)?.kind === 'direct';
+    const manager = !direct && isManager(member.role);
+    if (!manager && m.user_id !== user.id) return c.json({ error: 'forbidden' }, 403);
+    const window = manager ? MANAGER_DELETE_WINDOW_MS : DELETE_WINDOW_MS;
     if (Date.now() - toMs(m.created_at) > window) return c.json({ error: 'delete_window_closed' }, 403);
   }
 

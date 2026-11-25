@@ -61,3 +61,5 @@ export function useReminders(uid: number | undefined): Reminder[] {
 
 /** The message a reminder (or a notification) asked to show, picked up by the chat once it has loaded. */
 export const JUMP_KEY = 'tamtim_jump_to';
+/** Fired after JUMP_KEY is set, so a chat that is already open looks for the message again. */
+export const JUMP_EVENT = 'tamtim:jump';

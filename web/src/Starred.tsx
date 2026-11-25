@@ -24,7 +24,10 @@ export function StarredAll() {
   };
   if (failed) return <p className="text-muted">{t.errors.generic}</p>;
   if (rows === null) return <p className="text-muted">{t.loading}</p>;
-  if (!rows.length) return <p className="text-muted">{t.starredNone}</p>;
+  // Stars in an encrypted chat are on the list too, but the server cannot read those messages to show them here: say so,
+  // rather than "nothing starred", and point to where they are (the star filter inside that chat).
+  const encNote = skipped > 0 && <p className="text-caption text-muted mt-1">{t.starredSkipped.replace('{n}', String(skipped))}</p>;
+  if (!rows.length) return <div><p className="text-muted">{skipped > 0 ? t.starredNoneHere : t.starredNone}</p>{encNote}</div>;
   return (
     <ul className="divide-y divide-line -mx-1">
       {rows.map(m => (
@@ -44,7 +47,7 @@ export function StarredAll() {
           </button>
         </li>
       ))}
-      {skipped > 0 && <li className="px-2 py-2 text-caption text-muted">{t.searchSkipped.replace('{n}', String(skipped))}</li>}
+      {skipped > 0 && <li className="px-2 py-2">{encNote}</li>}
     </ul>
   );
 }

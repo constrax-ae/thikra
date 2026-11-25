@@ -277,9 +277,10 @@ export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) =
   const openSheet = (s: NonNullable<typeof sheet>) => { setSheet(s); setError(''); setField(''); };
 
   const chip = (k: Filter, label: string, n?: number) => {
-    const on = filter === k;
+    // "All" means everything: it also lets go of a personal list, and is only lit when no list is narrowing the chats.
+    const on = filter === k && !(k === 'all' && listId !== null);
     return (
-      <button key={k} onClick={() => setFilter(k)} aria-pressed={on}
+      <button key={k} onClick={() => { setFilter(k); if (k === 'all') setListId(null); }} aria-pressed={on}
         className={`shrink-0 h-9 px-3.5 rounded-xl text-sm inline-flex items-center gap-1.5
           transition-[background-color,color,box-shadow] duration-[var(--dur-fast)] ease-[var(--ease-standard)]
           ${on ? 'bg-green-soft text-green font-bold elevated-1' : 'text-muted hover:text-ink hover:bg-green-soft/50'}`}>

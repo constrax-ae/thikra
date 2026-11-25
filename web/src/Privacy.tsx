@@ -1,4 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
+import { askConfirm } from './confirm';
 import { api, ApiError, type CircleDetail, type Message } from './api';
 import { useI18n } from './i18n';
 import { Dialog } from './Dialog';
@@ -176,7 +177,7 @@ export function ChatOptions({ circle, meId, onClose, reload }: { circle: CircleD
           <h3 className="font-bold text-sm flex items-center gap-2"><span aria-hidden className="w-8 h-8 rounded-xl bg-green-soft text-green flex items-center justify-center shrink-0"><Icon name="ban" className="w-4 h-4" /></span>{t.priv.clearHead}</h3>
           <p className="text-xs text-muted mt-1">{t.priv.clearNote}</p>
           <button type="button" className="btn btn-ghost mt-2" onClick={async () => {
-            if (!confirm(t.priv.clearConfirm)) return;
+            if (!(await askConfirm(t.priv.clearConfirm, { danger: true }))) return;
             setError('');
             try { await api(`/circles/${circle.id}/clear`, { body: {} }); reload(); onClose(); } catch (e) { fail(e); }
           }}>{t.priv.clearHistory}</button>
