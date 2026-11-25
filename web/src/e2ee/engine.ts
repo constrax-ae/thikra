@@ -1141,10 +1141,14 @@ export class E2ee {
   }
   /** The newest message of a chat, as one line, kept on the device for the chat list (the server cannot make one). */
   private async remember(circle: number, m: Message, p: Payload) {
-    const was = await getJson<{ seq: number }>(this.kv, PREFIX.last + circle);
+    const was = await getJson<{ seq: number; id?: number; text?: string }>(this.kv, PREFIX.last + circle);
     if (was && (m.seq ?? 0) < was.seq) return;
     // An edited message shows its new words in the chat list too, not the ones it was first sent with.
-    await setJson(this.kv, PREFIX.last + circle, { seq: m.seq ?? 0, id: m.id, at: m.createdAt, userId: m.userId, ...lineOf(p), ...(m.editedAt && typeof m.body === 'string' ? { text: m.body } : {}) });
+    const next = { seq: m.seq ?? 0, id: m.id, at: m.createdAt, userId: m.userId, ...lineOf(p), ...(m.editedAt && typeof m.body === 'string' ? { text: m.body } : {}) };
+    await setJson(this.kv, PREFIX.last + circle, next);
+    // The same newest message with new words (an edit read after the chat list last looked): tell the list to look again.
+    // Only a real change is announced, so the chat's own refresh, which comes back here, does not go round in a loop.
+    if (was && was.id === next.id && was.text !== next.text) this.changed(circle);
   }
   async preview(circle: number): Promise<{ text: string; kind: string; at: string; userId: number | null } | null> { return (await getJson<any>(this.kv, PREFIX.last + circle)) ?? null; }
 
