@@ -17,6 +17,8 @@ import { Notices } from './Notices';
 import { CallProvider } from './CallUi';
 import { PersonAvatar } from './Groups';
 import { Icon, Wordmark, type IconName } from './icons';
+import { ReminderAlarm } from './RemindersUi';
+import { resumeShares, stopWatching } from './livelocation';
 // After an update, a browser that still holds the OLD app asks for a screen file the server no longer has ("Failed to fetch dynamically
 // imported module") and would show a blank page. Reload once to pick up the new app; the flag stops a loop if the file is really missing.
 const staleChunk = (m: string) => /dynamically imported module|Importing a module script failed|error loading dynamically imported/i.test(m);
@@ -113,12 +115,14 @@ function App() {
   useEffect(() => { if (myId) startE2ee(myId, showPreview); }, [myId, showPreview]);
   // After signing in, tie this browser's existing notification subscription to the person now signed in (a shared device may hold the previous person's).
   useEffect(() => { if (myId) rebindPush(); }, [myId]);
+  // A live location left running before the page was refreshed carries on (until its own end time) rather than silently freezing.
+  useEffect(() => { if (myId) resumeShares(); }, [myId]);
 
   if (me === undefined) return null;
   if (me === null) return <Suspense fallback={null}><Login onDone={loadMe} /></Suspense>;
   if (route.name === 'join') return <JoinByLink code={route.code} onDone={id => go(id ? `/circle/${id}` : '/')} />;
 
-  async function logout() { stopE2ee(); endSending(); deviceLock.clear(); await dropPush(); await api('/auth/logout', { method: 'POST', body: {} }); setMe(null); go('/'); }
+  async function logout() { stopE2ee(); endSending(); stopWatching(); deviceLock.clear(); await dropPush(); await api('/auth/logout', { method: 'POST', body: {} }); setMe(null); go('/'); }
   async function deleteAccount() {
     if (!confirm(t.confirmDelete)) return;
     try { await api('/me', { method: 'DELETE' }); await dropPush(); endSending(); stopE2ee(); await forgetDevice(me!.id).catch(() => {}); deviceLock.clear(); setMe(null); } catch (e: any) { alert(t.errors[e.code] ?? t.errors.generic); }
@@ -143,6 +147,7 @@ function App() {
     const openId = route.name === 'circle' ? route.id : undefined;
     return (
       <div className="h-[100dvh] flex bg-paper overflow-clip">
+        <ReminderAlarm meId={me.id} onOpen={id => go(`/circle/${id}`)} />
         {/* The sidebar comes first in the source, so without this a keyboard user tabs through
             every chat in the list before reaching the conversation they already opened.
             Centred rather than tucked into the corner: at the start edge it landed on top of
@@ -191,6 +196,7 @@ function App() {
     // The admin area is tables and dense lists: a 5xl column left most of a desktop screen
     // empty while its own rows were cramped.
     <div className={`${route.name === 'admin' ? 'max-w-[1400px]' : route.name === 'plans' ? 'max-w-5xl' : 'max-w-2xl'} mx-auto px-4`}>
+      <ReminderAlarm meId={me.id} onOpen={id => go(`/circle/${id}`)} />
       {route.name !== 'circle' && (
         <header className="h-16 pt-1 flex items-center gap-3">
           <button onClick={toCircles} aria-label={t.appName}><Wordmark name={t.appName} /></button>

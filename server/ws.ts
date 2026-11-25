@@ -16,6 +16,7 @@ import { attach, isJoined, join, publish, setVisible } from './live.ts';
 import { suspension } from './lib/admin.ts';
 import { trackSocket } from './lib/sockets.ts';
 import { count } from './metrics.ts';
+import { MAX_TEXT } from '../core/format.ts';
 
 export interface GatewayDeps {
   sendText(circleId: number, userId: number, body: string, clientMsgId: string | null, replyTo?: number | null, mentions?: unknown, preview?: unknown): { id: number; seq: number; duplicate: boolean };
@@ -97,8 +98,9 @@ export function attachGateway(server: Server, deps: GatewayDeps) {
           const cmid = typeof f.client_msg_id === 'string' && f.client_msg_id.length <= 64 ? f.client_msg_id : null;
           const fail = (error: string) => send({ t: 'err', client_msg_id: cmid, error });
           if (!deps.membership(circle, userId)) return fail('not_found');
-          const body = String(f.body ?? '').trim().slice(0, 4000);
+          const body = String(f.body ?? '').trim();
           if (!body) return fail('empty');
+          if (body.length > MAX_TEXT) return fail('too_long');
           // A retry of a message the server already holds costs nothing and must never be refused: after a
           // dropped connection the client resends everything unacknowledged, and refusing that would lose messages.
           const retry = cmid !== null && deps.known(circle, userId, cmid);

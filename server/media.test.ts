@@ -197,8 +197,9 @@ test('uploads: cancelling leaves no message and no bytes; another person cannot 
 
 test('uploads: an oversized file is refused before any byte is sent, with the limit; so are a forbidden type, an oversized piece and a non-sender', async () => {
   const g = await group();
-  const big = await call(g.owner.cookie, `/api/circles/${g.id}/uploads`, 'POST', { name: 'film.mp4', size: 64 * 1024 * 1024 + 1 });
-  assert.equal(big.status, 413); assert.equal(big.json.error, 'attachment_too_large'); assert.equal(big.json.max, 64 * 1024 * 1024);
+  const big = await call(g.owner.cookie, `/api/circles/${g.id}/uploads`, 'POST', { name: 'film.mp4', size: 100 * 1024 * 1024 + 1 });
+  assert.equal(big.status, 413); assert.equal(big.json.error, 'attachment_too_large'); assert.equal(big.json.max, 100 * 1024 * 1024);
+  assert.equal((await call(g.owner.cookie, `/api/circles/${g.id}/uploads`, 'POST', { name: 'film.mp4', size: 100 * 1024 * 1024 })).status, 201, 'a video of exactly the limit is accepted');
   assert.equal((await call(g.owner.cookie, `/api/circles/${g.id}/uploads`, 'POST', { name: 'virus.exe', size: 10 })).status, 400);
   assert.equal((await call(g.owner.cookie, `/api/circles/${g.id}/uploads`, 'POST', { name: 'a.png', size: 0 })).status, 400);
   const id = (await call(g.owner.cookie, `/api/circles/${g.id}/uploads`, 'POST', { name: 'a.mp4', size: 20 * 1024 * 1024 })).json.id as string;
@@ -545,4 +546,78 @@ test('review: thumbnails of GIFs the server has not just listed are tightly limi
     for (let i = 0; i < 40; i++) codes.push((await app.request(`/api/gifs/guess${i}/preview`, { headers: { cookie: p.cookie } })).status);
     assert.ok(codes.includes(429)); assert.ok(lookups <= 20, `${lookups} lookups`);
   } finally { setGifProvider(null); }
+});
+
+/**
+ * MED-05 (transfer policy) and MED-01 (voice) of the chat specification name these figures. They are the contract with
+ * the client, not a preference, so they are asserted here: changing one by hand should fail until the document changes too.
+ */
+test('the transfer limits are exactly the ones the specification names', async () => {
+  const MB = 1024 * 1024;
+  const { MAX_FILES, MAX_IMAGE, MAX_OTHER } = await import('./lib/attachments.ts');
+  const { MAX_AUDIO } = await import('./lib/moments.ts');
+  assert.equal(MAX_IMAGE / MB, 20, 'an image: 20 MB');
+  assert.equal(MAX_OTHER / MB, 100, 'a video or a document: 100 MB');
+  assert.equal(MAX_AUDIO / MB, 25, 'a voice note: 25 MB');
+  assert.equal(MAX_FILES, 20, 'twenty files in one message');
+});
+
+// ---- M-11 forwarding a file ------------------------------------------------------------------
+// Forwarding used to be text only, which is the one thing a family does most: pass on a photo. The copy carries the
+// same stored bytes (content-addressed, so the server keeps ONE copy however many chats it reaches).
+
+test('forward carries the picture itself: same bytes stored once, thumbnail and caption travel, hop count grows', async () => {
+  const g = await group();
+  const other = (await call(g.owner.cookie, '/api/circles', 'POST', { name: 'الثانية', kind: 'group' })).json.id as number;
+  const code = (await call(g.owner.cookie, `/api/circles/${other}`)).json.inviteCode as string;
+  const far = await person('بدر');
+  await call(far.cookie, '/api/circles/join', 'POST', { code });
+  await call(g.member.cookie, '/api/circles/join', 'POST', { code });   // the one who passes the picture on is not the one who took it
+  const sent = await form(g.owner.cookie, `/api/circles/${g.id}/attachments`, [
+    ['file', new Blob([PNG_BYTES], { type: 'image/png' }), 'رحلة.png'],
+    ['thumb', new Blob([PNG_BYTES], { type: 'image/png' }), 't.png'],
+    ['caption', 'من الرحلة'], ['w', '1'], ['h', '1'],
+  ]);
+  assert.equal(sent.status, 201);
+  const blobsBefore = one('SELECT COUNT(*) AS n FROM blobs')!.n as number;
+
+  const res = await call(g.member.cookie, `/api/messages/${sent.json.id}/forward`, 'POST', { circles: [other] });
+  assert.equal(res.status, 200);
+  const fwd = (await messages(far, other)).find(x => x.id === res.json.sent[0]);
+  assert.equal(fwd.body, 'من الرحلة', 'the caption goes with the picture');
+  assert.equal(fwd.forwardCount, 1);
+  assert.equal(fwd.attachments.length, 1);
+  assert.equal(fwd.attachments[0].name, 'رحلة.png');
+  assert.equal(fwd.attachments[0].size, PNG_BYTES.length);
+  assert.ok(fwd.attachments[0].thumb, 'the small preview is copied too, so the list does not fetch the full picture');
+  assert.notEqual(fwd.attachments[0].id, (await messages(g.owner, g.id)).find(x => x.id === sent.json.id).attachments[0].id, 'a copy of its own, not a pointer into the other chat');
+  assert.equal(one('SELECT COUNT(*) AS n FROM blobs')!.n, blobsBefore, 'nothing is stored twice: the file is content-addressed');
+
+  // Someone who was never in the first chat can open the forwarded file; and the first chat is untouched.
+  const got = await app.request(`/api/media/${fwd.attachments[0].id}`, { headers: { cookie: far.cookie } });
+  assert.equal(got.status, 200);
+  assert.equal(Buffer.from(await got.arrayBuffer()).length, PNG_BYTES.length);
+  assert.equal((await messages(g.owner, g.id)).filter(x => x.attachments?.length).length, 1, 'the original message is left alone');
+
+  // A second hop says so, as WhatsApp does.
+  const again = await call(far.cookie, `/api/messages/${fwd.id}/forward`, 'POST', { circles: [other] });
+  assert.equal((await messages(far, other)).find(x => x.id === again.json.sent[0]).forwardCount, 2);
+});
+
+test('forward carries a voice note with its length and shape; a view-once photo is never forwardable', async () => {
+  const g = await group();
+  const other = (await call(g.owner.cookie, '/api/circles', 'POST', { name: 'الثالثة', kind: 'group' })).json.id as number;
+  const voice = await form(g.owner.cookie, `/api/circles/${g.id}/voice`, [['audio', AUDIO, 'voice'], ['duration', '4200'], ['waveform', JSON.stringify([0, 50, 100, 25])]]);
+  const res = await call(g.owner.cookie, `/api/messages/${voice.json.id}/forward`, 'POST', { circles: [other] });
+  assert.equal(res.status, 200);
+  const fwd = (await messages(g.owner, other)).find(x => x.id === res.json.sent[0]);
+  assert.equal(fwd.kind, 'voice');
+  assert.equal(fwd.audioMs, 4200);
+  assert.deepEqual(fwd.waveform, [0, 50, 100, 25], 'the shape the sender\'s device measured travels with it');
+  assert.equal(fwd.archiveStatus, 'none', 'a forwarded clip is somebody else\'s words from elsewhere: the archive agent never reads it');
+  assert.equal((await app.request(`/api/messages/${fwd.id}/audio`, { headers: { cookie: g.owner.cookie } })).status, 200, 'and it plays');
+
+  const once = await form(g.owner.cookie, `/api/circles/${g.id}/attachments`, [['file', new Blob([PNG_BYTES], { type: 'image/png' }), 'once.png'], ['view_once', '1']]);
+  assert.equal(once.status, 201);
+  assert.equal((await call(g.owner.cookie, `/api/messages/${once.json.id}/forward`, 'POST', { circles: [other] })).status, 404, 'a view-once picture cannot be passed on');
 });

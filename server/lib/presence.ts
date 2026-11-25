@@ -10,7 +10,7 @@ import { live } from '../live.ts';
 //   - never across a block, in either direction;
 //   - the person's own setting: everyone they share a chat with / only people in one of their family circles / nobody;
 //   - reciprocal: someone who shows theirs to nobody sees nobody's;
-//   - never to a stranger (no shared chat), so a user id cannot be probed.
+//   - never to a stranger (no shared chat, or only a message request not yet accepted), so a user id cannot be probed.
 // When someone STOPS being allowed (privacy tightened, a block) they are told to forget what they knew: `{ gone: true }`.
 
 export const LAST_SEEN_PRIVACY = ['everyone', 'family', 'nobody'] as const;
@@ -30,7 +30,7 @@ export function canSeePresence(viewerId: number, targetId: number): boolean {
             EXISTS (SELECT 1 FROM blocks WHERE (user_id = v.id AND blocked_id = t.id) OR (user_id = t.id AND blocked_id = v.id)) AS blocked,
             (SELECT MAX(CASE WHEN c.kind = 'circle' THEN 2 ELSE 1 END)
                FROM circle_members a JOIN circle_members b ON b.circle_id = a.circle_id JOIN circles c ON c.id = a.circle_id AND c.deleted_at IS NULL
-              WHERE a.user_id = v.id AND b.user_id = t.id) AS shared
+              WHERE a.user_id = v.id AND b.user_id = t.id AND a.request = 0 AND b.request = 0) AS shared   -- a message request not yet accepted shares nothing
        FROM users t, users v WHERE t.id = ? AND v.id = ?`, targetId, viewerId);
   if (!r || r.blocked || !r.shared) return false;
   if (r.mine === 'nobody' || r.theirs === 'nobody') return false;

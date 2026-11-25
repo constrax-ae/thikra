@@ -28,6 +28,11 @@ import { e2ee } from './0026_e2ee.ts';
 import { e2eeBackup } from './0027_e2ee_backup.ts';
 import { e2eeLink } from './0028_e2ee_link.ts';
 import { e2eeEndorse } from './0029_e2ee_endorse.ts';
+import { messageRequests } from './0030_message_requests.ts';
+import { listsAndNotify } from './0031_lists_notify.ts';
+import { reportOutcome } from './0032_report_outcome.ts';
+import { specGaps } from './0033_spec_gaps.ts';
+import { aboutLine } from './0034_about.ts';
 
 /**
  * Numbered, ordered, applied once. Every schema change is a new entry here (a new file, a new number); an applied one is never edited.
@@ -65,6 +70,11 @@ export const MIGRATIONS: Migration[] = [
   { version: 27, name: 'e2ee_backup', up: e2eeBackup },
   { version: 28, name: 'e2ee_link', up: e2eeLink },
   { version: 29, name: 'e2ee_endorse', up: e2eeEndorse },
+  { version: 30, name: 'message_requests', up: messageRequests },
+  { version: 31, name: 'lists_and_notify', up: listsAndNotify },
+  { version: 32, name: 'report_outcome', up: reportOutcome },
+  { version: 33, name: 'spec_gaps', up: specGaps },
+  { version: 34, name: 'about_line', up: aboutLine },
 ];
 
 /** Bring a database to the latest version. Safe on a fresh file, on a database from before versioning (the baseline is idempotent), and when already current. Returns the versions applied now. */

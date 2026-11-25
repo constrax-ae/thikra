@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { PhotoViewer, type ViewerItem } from './PhotoViewer';
 import { api, ApiError, type CircleDetail } from './api';
 import { useI18n } from './i18n';
 import { Dialog } from './Dialog';
@@ -71,7 +72,7 @@ function AlbumView({ album, manager, onBack }: { album: Album; manager: boolean;
   const [kind, setKind] = useState<'' | 'image' | 'voice' | 'video'>('');
   const [items, setItems] = useState<Item[]>([]);
   const [more, setMore] = useState(false);
-  const [light, setLight] = useState<Item | null>(null);
+  const [light, setLight] = useState<number | null>(null);   // the item open in the viewer
   // Only the first page shows a skeleton: paging in more should not blank what is already there.
   const [loading, setLoading] = useState(true);
   const load = useCallback(async (after = 0) => {
@@ -80,7 +81,7 @@ function AlbumView({ album, manager, onBack }: { album: Album; manager: boolean;
     setItems(p => (after ? [...p, ...r] : r)); setMore(r.length === 60); setLoading(false);
   }, [album.id, year, kind]);
   useEffect(() => { load(); }, [load]);
-  async function remove(it: Item) { await api(`/album-items/${it.id}`, { method: 'DELETE' }); setItems(p => p.filter(x => x.id !== it.id)); setLight(null); }
+  async function remove(it: Item) { await api(`/album-items/${it.id}`, { method: 'DELETE' }); setItems(p => p.filter(x => x.id !== it.id)); }
   const when = (it: Item) => `${it.takenAt}${it.sender ? ` · ${it.sender}` : ''}`;
   const yearInfo = album.years.find(y => y.year === year);
   return (
@@ -97,7 +98,7 @@ function AlbumView({ album, manager, onBack }: { album: Album; manager: boolean;
       {loading && <GridSkeleton tiles={12} className="grid-cols-3 sm:grid-cols-4 gap-1" />}
       <div className="grid grid-cols-3 sm:grid-cols-4 gap-1">
         {items.filter(i => i.kind !== 'voice').map(i => (
-          <button key={i.id} className="relative aspect-square overflow-hidden rounded-lg bg-line" onClick={() => setLight(i)} aria-label={when(i)}>
+          <button key={i.id} className="relative aspect-square overflow-hidden rounded-lg bg-line" onClick={() => setLight(i.id)} aria-label={when(i)}>
             <img alt="" loading="lazy" className="w-full h-full object-cover" src={fileUrl(i.id, i.hasThumb)} />
             {i.kind === 'video' && <span className="absolute bottom-1.5 start-1.5 w-6 h-6 rounded-full bg-black/60 text-white flex items-center justify-center"><Icon name="play" className="w-3 h-3" /></span>}
           </button>
@@ -110,15 +111,17 @@ function AlbumView({ album, manager, onBack }: { album: Album; manager: boolean;
       </ul>
       {items.length === 0 && <p className="text-sm text-muted">{t.albumEmptyYear}</p>}
       {more && <button className="btn btn-ghost w-full" onClick={() => load(items[items.length - 1].id)}>{t.admMore}</button>}
-      {light && (
-        <Dialog onClose={() => setLight(null)} label={when(light)}>
-          <p className="text-xs text-muted mb-2" dir="ltr">{when(light)}</p>
-          {light.kind === 'video'
-            ? <video controls autoPlay preload="metadata" playsInline className="w-full rounded-lg max-h-[70vh] bg-black" src={fileUrl(light.id)} />
-            : <img alt={light.name ?? ''} className="max-w-full max-h-[70vh] mx-auto rounded-lg" src={fileUrl(light.id)} />}
-          <div className="flex gap-2 mt-3">{manager && <button className="btn btn-ghost !text-danger" onClick={() => remove(light)}>{t.deleteEntry}</button>}<button className="btn flex-1" onClick={() => setLight(null)}>{t.cancel}</button></div>
-        </Dialog>
-      )}
+      {light !== null && (() => {
+        const shown = items.filter(i => i.kind !== 'voice');
+        const start = shown.findIndex(i => i.id === light);
+        if (start < 0) return null;
+        const view: ViewerItem[] = shown.map(i => ({ key: i.id, kind: i.kind === 'video' ? 'video' : 'image', src: fileUrl(i.id), alt: i.name ?? '', caption: when(i), name: i.name ?? undefined }));
+        return (
+          <PhotoViewer items={view} start={start} onClose={() => setLight(null)}
+            actions={item => manager ? <button type="button" className="h-11 px-4 rounded-full bg-white/10 text-white text-sm font-bold hover:bg-red-700 inline-flex items-center gap-2"
+              onClick={() => { const it = items.find(x => x.id === item.key); if (it) remove(it); }}><Icon name="trash" className="w-4 h-4" />{t.deleteEntry}</button> : null} />
+        );
+      })()}
     </section>
   );
 }

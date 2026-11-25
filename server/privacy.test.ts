@@ -246,7 +246,7 @@ test('voice-to-text: with a provider the reader gets the text once per request, 
   const r = await form(g.member.cookie, '/api/transcribe', [['audio', AUDIO(), 'v.webm']]);
   assert.equal(r.status, 200); assert.equal(r.json.text, 'مرحبا بالجميع'); assert.equal(seen.length, 1);
   assert.equal(one('SELECT COUNT(*) AS n FROM messages')!.n, before, 'nothing written to any message');
-  assert.equal((await form(g.member.cookie, '/api/transcribe', [['audio', new Blob([new Uint8Array(6 * 1024 * 1024)], { type: 'audio/webm' }), 'big.webm']])).status, 413, 'over 5 MB');
+  assert.equal((await form(g.member.cookie, '/api/transcribe', [['audio', new Blob([new Uint8Array(26 * 1024 * 1024)], { type: 'audio/webm' }), 'big.webm']])).status, 413, 'over the 25 MB a voice note may be');
   assert.equal((await form(g.member.cookie, '/api/transcribe', [['audio', new Blob(['x'], { type: 'text/html' }), 'x.html']])).status, 400, 'only audio');
   const p = await person('مكثر');
   let last = 0; for (let i = 0; i < 12; i++) last = (await form(p.cookie, '/api/transcribe', [['audio', AUDIO(), 'v.webm']])).status;

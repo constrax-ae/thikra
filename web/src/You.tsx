@@ -8,13 +8,16 @@ import { useUploadQuality } from './quality';
 import { usePref } from './prefs';
 import { useInstall } from './install';
 import { LangPicker, MachineNote } from './LangPicker';
+import { StorageByChat } from './Storage';
+import { StarredAll } from './Starred';
+import { Sessions } from './Sessions';
 import { useChatTheme, WALLPAPERS, BUBBLES } from './chattheme';
 import { Icon, type IconName } from './icons';
 import { Toggle, BusyButton, Spinner } from './States';
 import { PersonAvatar } from './Groups';
 import { prepare } from './media';
 
-type Row = 'install' | 'starred' | 'account' | 'privacy' | 'chats' | 'appearance' | 'notifications' | 'storage' | 'rights' | 'help' | null;
+type Row = 'install' | 'starred' | 'account' | 'privacy' | 'chats' | 'appearance' | 'notifications' | 'devices' | 'storage' | 'rights' | 'help' | null;
 
 
 interface SupportCase { id: number; subject: string; status: 'open' | 'answered' | 'closed'; createdAt: string; messages: Array<{ fromStaff: number; body: string; createdAt: string }> }
@@ -243,6 +246,31 @@ function MiniChat({ wall, bubble, selected }: { wall: string; bubble: string; se
 }
 
 import { EncryptionPanel } from './E2eeUi';
+/** The keyboard shortcuts of the chat list, written down where they can be found (they are useless if nobody knows them). */
+function Shortcuts() {
+  const { t } = useI18n();
+  const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+  const mod = mac ? '⌘' : 'Ctrl', alt = mac ? '⌥' : 'Alt';
+  const keys: Array<[string, string]> = [
+    [`${mod} K`, t.keys.search], [`${mod} ${alt} N`, t.keys.newChat], [`${mod} ${alt} M`, t.keys.mute],
+    [`${mod} ${alt} E`, t.keys.archive], [`${mod} ${alt} P`, t.keys.pin], [`${mod} ${alt} U`, t.keys.unread],
+  ];
+  return (
+    <div className="pt-2">
+      <p className="font-bold">{t.keys.title}</p>
+      <p className="text-muted">{t.keys.note}</p>
+      <ul className="mt-1 space-y-1">
+        {keys.map(([k, label]) => (
+          <li key={k} className="flex items-center gap-2">
+            <kbd className="inline-flex items-center h-6 px-1.5 rounded-md border border-line bg-paper text-caption text-muted font-sans shrink-0" dir="ltr">{k}</kbd>
+            <span className="text-muted">{label}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function You({ me, onLogout, onDeleteAccount, onAdmin, onSealed, onChanged }: {
   me: Me; onLogout: () => void; onDeleteAccount: () => void; onAdmin: () => void; onSealed: () => void; onChanged: () => void;
 }) {
@@ -256,6 +284,7 @@ export function You({ me, onLogout, onDeleteAccount, onAdmin, onSealed, onChange
   const [motion, setMotion] = usePref('motion');
   const [saver, setSaver] = usePref('saver');
   const [previews, setPreviews] = usePref('previews');
+  const [voiceNext, setVoiceNext] = usePref('voiceNext');
   const themes: Array<[Theme, string]> = [['system', t.themeSystem], ['light', t.themeLight], ['dark', t.themeDark]];
   const [receipts, setReceipts] = useState(me.read_receipts === 1);
   const [copied, setCopied] = useState(false);
@@ -336,7 +365,7 @@ export function You({ me, onLogout, onDeleteAccount, onAdmin, onSealed, onChange
       <MachineNote />
 
       <ul className="card divide-y divide-line overflow-hidden">
-        {row('starred', 'star', t.rowStarred, <p className="text-muted inline-flex items-center gap-1.5">{t.starred}: <Icon name="star-fill" className="w-4 h-4 text-gold-dark" /> {t.search}…</p>)}
+        {row('starred', 'star', t.rowStarred, <StarredAll />)}
         {row('account', 'key', t.rowAccount, (
           <>
             <TwoStep has={!!me.has_pin} onDone={onChanged} />
@@ -368,7 +397,9 @@ export function You({ me, onLogout, onDeleteAccount, onAdmin, onSealed, onChange
         {row('chats', 'chats', t.rowChats, (
           <>
             <Toggle checked={keepArchived} onChange={saveKeepArchived} label={t.keepArchived} note={t.keepArchivedNote} />
+            <Toggle checked={voiceNext} onChange={setVoiceNext} label={t.voiceNext.label} note={t.voiceNext.note} />
             <p className="text-muted">{t.chatsNote}</p>
+            <Shortcuts />
           </>
         ))}
         {row('appearance', 'palette', t.rowAppearance, (
@@ -433,7 +464,8 @@ export function You({ me, onLogout, onDeleteAccount, onAdmin, onSealed, onChange
             <p className="text-muted">{t.notificationsSoon}</p>
           </>
         ))}
-        {row('storage', 'storage', t.rowStorage, <p className="text-muted">{t.storageRowNote}</p>)}
+        {row('devices', 'phone', t.sess.title, <Sessions />)}
+        {row('storage', 'storage', t.rowStorage, <StorageByChat />)}
         {row('install', 'phone', t.rowInstall, <InstallHelp />)}
         {row('rights', 'storage', t.rowRights, <DataRights />)}
         {row('help', 'help', t.rowHelp, <SupportBox />)}
@@ -471,6 +503,62 @@ export function You({ me, onLogout, onDeleteAccount, onAdmin, onSealed, onChange
 
 /** Your face and name at the top of You: tap the camera to set a profile picture (the same one the phone app sets),
  *  which the people you share a chat with see beside your messages. */
+/** The longest "about" line, as the server counts it (characters as a person sees them, so an emoji is one). */
+const ABOUT_MAX = 140;
+/**
+ * AUTH-01's optional bio: one short line under your name, seen by the people you share a chat with. Tap it to edit; an empty
+ * line removes it. Enter saves, Escape puts it back as it was.
+ */
+function AboutLine({ me, onChanged }: { me: Me; onChanged: () => void }) {
+  const { t } = useI18n();
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(me.about ?? '');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [error, setError] = useState('');
+  const used = [...value.trim()].length;
+  const open = () => { setValue(me.about ?? ''); setError(''); setMsg(''); setEditing(true); };
+  async function save(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (used > ABOUT_MAX) return;
+    setBusy(true); setError('');
+    try {
+      const r = await api<Me>('/me', { method: 'PATCH', body: { about: value } });
+      setEditing(false); setMsg(r.about ? t.about.saved : t.about.removed); onChanged();
+    } catch (err) { setError(t.errors[err instanceof ApiError ? err.code : 'generic'] ?? t.errors.generic); }
+    finally { setBusy(false); }
+  }
+  if (!editing) return (
+    <div className="mt-1">
+      <button type="button" onClick={open} data-about-edit
+        className={`max-w-full text-start text-sm inline-flex items-start gap-1.5 rounded-lg -mx-1 px-1 py-0.5 hover:bg-green-soft ${me.about ? 'text-ink' : 'text-green font-medium'}`}>
+        {me.about ? <span className="break-words" dir="auto">{me.about}</span> : <><Icon name="plus" className="w-4 h-4 mt-0.5 shrink-0" />{t.about.label}</>}
+        {me.about && <Icon name="pen" className="w-3.5 h-3.5 mt-1 shrink-0 text-muted" />}
+      </button>
+      {msg && <p role="status" className="text-xs text-green">{msg}</p>}
+    </div>
+  );
+  return (
+    <form onSubmit={save} className="mt-2 space-y-1.5">
+      <label className="block">
+        <span className="block text-xs font-medium text-muted mb-1">{t.about.label}</span>
+        <input className="field" dir="auto" autoFocus value={value} maxLength={ABOUT_MAX * 2} placeholder={t.about.placeholder}
+          aria-invalid={used > ABOUT_MAX} aria-describedby="about-hint"
+          onChange={e => { setValue(e.target.value); setError(''); }} onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setEditing(false); } }} />
+      </label>
+      <div className="flex items-center justify-between gap-2 text-xs">
+        <span id="about-hint" className="text-muted">{t.about.hint}</span>
+        <span className={`tabular-nums shrink-0 ${used > ABOUT_MAX ? 'text-danger font-bold' : 'text-muted'}`} dir="ltr">{used}/{ABOUT_MAX}</span>
+      </div>
+      {error && <p role="alert" className="text-xs text-danger">{error}</p>}
+      <div className="flex gap-2">
+        <BusyButton busy={busy} className="btn !py-1.5 flex-1" disabled={used > ABOUT_MAX || value.trim() === (me.about ?? '')}>{t.save}</BusyButton>
+        <button type="button" className="btn btn-ghost !py-1.5" onClick={() => setEditing(false)}>{t.cancel}</button>
+      </div>
+    </form>
+  );
+}
+
 function ProfileHead({ me, onChanged }: { me: Me; onChanged: () => void }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
@@ -498,6 +586,7 @@ function ProfileHead({ me, onChanged }: { me: Me; onChanged: () => void }) {
       <div className="min-w-0 flex-1">
         <div className="text-xl font-bold truncate text-ink">{me.name}</div>
         <div className="text-muted text-sm" dir="ltr">{me.phone}</div>
+        <AboutLine me={me} onChanged={onChanged} />
         {me.avatar_at && <button type="button" className="mt-1 text-xs text-danger inline-flex items-center gap-1 hover:underline" disabled={busy} onClick={remove}><Icon name="trash" className="w-3.5 h-3.5" />{t.removePhoto}</button>}
         {error && <p role="alert" className="mt-1 text-xs text-danger">{error}</p>}
       </div>

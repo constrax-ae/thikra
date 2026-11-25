@@ -1,3 +1,4 @@
+import { type Context } from 'hono';
 import { REPORT_REASONS } from '../lib/safety.ts';
 import { all, one, run } from '../db.ts';
 import { app } from '../app.ts';
@@ -44,4 +45,44 @@ app.post('/api/messages/:mid/report', async c => {
     user.id, m.user_id, m.circle_id, m.id, b.reason, note || null, snapshot, encrypted ? 1 : 0);
   count('report_filed');
   return c.json({ ok: true, duplicate: Number(r.changes) === 0 });
+});
+
+/**
+ * Report a PERSON, or a whole CHAT, rather than one message: the two things a member could not do until now, and the
+ * two things they reach for when the trouble is a pattern rather than a sentence. Neither carries any conversation
+ * content — only the reason, the note the reporter chose to write, and who or where. (A message report still carries
+ * that message's text, with the reporter told so; that is the only content moderation ever sees.)
+ * One open report per person per target, and the same ten-an-hour limit as message reports.
+ */
+async function fileReport(c: Context, target: { user?: number; circle?: number }) {
+  const user = c.get('user');
+  const b = await c.req.json().catch(() => ({}));
+  if (!REPORT_REASONS.has(b.reason)) return c.json({ error: 'invalid_report' }, 400);
+  if (await limited(`report:${user.id}`, 10, 3600_000)) return c.json({ error: 'too_many_requests' }, 429);
+  const open = one(
+    `SELECT 1 FROM reports WHERE reporter_id = ? AND message_id IS NULL AND status != 'resolved'
+       AND COALESCE(reported_user_id, 0) = ? AND COALESCE(circle_id, 0) = ?`, user.id, target.user ?? 0, target.circle ?? 0);
+  if (open) return c.json({ ok: true, duplicate: true });
+  const note = typeof b.note === 'string' ? b.note.trim().slice(0, 500) : null;
+  run('INSERT INTO reports (reporter_id, reported_user_id, circle_id, message_id, reason, note, snapshot) VALUES (?, ?, ?, NULL, ?, ?, NULL)',
+    user.id, target.user ?? null, target.circle ?? null, b.reason, note || null);
+  count('report_filed');
+  return c.json({ ok: true, duplicate: false });
+}
+
+app.post('/api/users/:id/report', async c => {
+  const me = c.get('user');
+  const target = Number(c.req.param('id'));
+  if (!Number.isInteger(target) || target === me.id || !one('SELECT 1 FROM users WHERE id = ?', target)) return c.json({ error: 'not_found' }, 404);
+  // Only about someone you actually share a conversation with — as with blocking, this must not become a way to probe user ids.
+  const shared = one('SELECT a.circle_id AS id FROM circle_members a JOIN circle_members b ON a.circle_id = b.circle_id WHERE a.user_id = ? AND b.user_id = ? LIMIT 1', me.id, target);
+  if (!shared) return c.json({ error: 'not_found' }, 404);
+  return fileReport(c, { user: target });
+});
+
+app.post('/api/circles/:id/report', async c => {
+  const me = c.get('user');
+  const circleId = Number(c.req.param('id'));
+  if (!membership(circleId, me.id)) return c.json({ error: 'not_found' }, 404);
+  return fileReport(c, { circle: circleId });
 });

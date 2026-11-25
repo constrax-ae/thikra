@@ -251,6 +251,25 @@ test('M-11 forward: copies text to circles you belong to with a hop count; the a
   assert.equal((await call(outsider.cookie, `/api/messages/${src.id}/forward`, 'POST', { circles: [foreign] })).status, 404);
 });
 
+test('M-11 a chain message (five hops or more) goes to one chat at a time', async () => {
+  const { a, b, circle } = await trio();
+  const names = ['أ', 'ب', 'ج', 'د'];
+  const others = [] as number[];
+  for (const n of names) others.push((await call(b.cookie, '/api/circles', 'POST', { name: n })).json.id as number);
+  // Walk a message up to five hops.
+  let id = (await call(a.cookie, `/api/circles/${circle}/messages`, 'POST', { body: 'أرسلها لعشرة أشخاص' })).json.id as number;
+  for (let hop = 0; hop < 5; hop++) {
+    const to = others[hop % others.length];
+    const r = await call(b.cookie, `/api/messages/${id}/forward`, 'POST', { circles: [to] });
+    assert.equal(r.status, 200, `hop ${hop + 1}`);
+    id = r.json.sent[0];
+  }
+  const chain = (await call(b.cookie, `/api/circles/${others[0]}/messages?after_seq=0`)).json.find((m: any) => m.id === id);
+  assert.ok(chain.forwardCount >= 5, 'it is now a chain message');
+  assert.equal((await call(b.cookie, `/api/messages/${id}/forward`, 'POST', { circles: [others[1], others[2]] })).json.error, 'chain_one_chat', 'not to several at once');
+  assert.equal((await call(b.cookie, `/api/messages/${id}/forward`, 'POST', { circles: [others[1]] })).status, 200, 'one at a time is still allowed');
+});
+
 test('chat list: preview, kind, sender, time; pin/mute/archive/favourite are personal; pin limit; opening clears "mark as unread"', async () => {
   const { a, b, circle } = await trio();
   const second = (await call(a.cookie, '/api/circles', 'POST', { name: 'ثانية' })).json.id as number;

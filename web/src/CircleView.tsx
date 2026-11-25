@@ -19,16 +19,24 @@ import { mentionQuery, mentionedIds, pickMention, splitMentions } from './mentio
 import { PollBubble, PollComposer } from './Poll';
 import { Avatar, GroupFace, GroupRules, PersonAvatar, personColour } from './Groups';
 import { lastSeenText } from './lastseen';
-import { VoicePlayer, VoiceRecorder, type Recorded } from './VoiceUi';
+import { VoiceMessage, VoiceRecorder, type Recorded } from './VoiceUi';
 import { PendingUpload, SendSheet } from './UploadUi';
-import { ContactCard, ContactSheet, LinkCard, LocationCard, LocationSheet, SharePanel, StickerView, cardWord, useLinkPreview } from './Cards';
+import { ContactCard, ContactSheet, LinkCard, LiveCard, LocationCard, LocationSheet, SharePanel, StickerView, cardWord, useLinkPreview } from './Cards';
+import { beginShare } from './livelocation';
 import { firstLink, splitLinks } from './links';
+import { Formatted } from './Formatted';
+import { PhotoViewer, type ViewerItem } from './PhotoViewer';
+import { RemindSheet } from './RemindersUi';
+import { forget as forgetReminder, remind, useReminders, JUMP_KEY } from './reminders';
+import { unreadMark } from './unread.ts';
+import { MAX_TEXT, plainText, toggleMark, type Style } from '../../core/format';
 import type { UploadFile } from './uploads';
 import { useE2ee, openDirect, onChatChange, E2eeError, NetError } from './e2ee';
 import { isKnownEncrypted } from './e2ee/known';
 import { ChatSecuritySheet, ChatTypeNote, MediaFile, MediaImg, MediaVideo, NoticeLine, useMediaUrl, useNotices } from './E2eeUi';
-import { ChatOptions, PinGate, Transcribe, ViewOnceBubble, timerWord, useLock, wallProps } from './Privacy';
+import { ChatOptions, PinGate, ViewOnceBubble, timerWord, useLock, wallProps } from './Privacy';
 import { CallButton } from './CallUi';
+import { CALLS_IN_UI } from './calls';
 
 // The WhatsApp importer carries a chat parser and a draft builder that most families will never open, so it arrives
 // only when someone actually taps Import.
@@ -75,6 +83,22 @@ function ReactionPicker({ onPick, onClose, t }: { onPick: (e: string) => void; o
       </div>
       <button className="btn btn-ghost w-full mt-3" onClick={onClose}>{t.cancel}</button>
     </Dialog>
+  );
+}
+
+/**
+ * "Unread messages": the line WhatsApp draws where you stopped reading last time. It is placed from the read mark the
+ * chat was OPENED with, so it stays where it is while you read (the server is told at once, but the landmark must not
+ * run away from under the eye). It is not drawn when the message just before it is not loaded, because then its
+ * position would be a guess, nor in a chat nothing has ever been read in — there everything is new.
+ */
+function UnreadLine({ count, t }: { count: number; t: { unread: string; unread1: string } }) {
+  return (
+    <div data-unread-line className="flex items-center gap-2 my-3" role="separator" aria-label={count === 1 ? t.unread1 : t.unread.replace('{n}', String(count))}>
+      <span className="h-px flex-1 bg-green/40" />
+      <span className="text-caption text-green bg-green-soft rounded-full px-3 py-1 select-none">{count === 1 ? t.unread1 : t.unread.replace('{n}', String(count))}</span>
+      <span className="h-px flex-1 bg-green/40" />
+    </div>
   );
 }
 
@@ -162,6 +186,7 @@ export function CircleView({ id, me, initialTab, onBack, onLeft, onTab, docked }
   const [sealedTotal, setSealedTotal] = useState(0);
   const [options, setOptions] = useState(false);
   const [security, setSecurity] = useState(false);
+  const [profile, setProfile] = useState(false);   // a one-to-one chat: the other person's card (photo, name, About)
 
   const loadCircle = useCallback(() => api<CircleDetail>(`/circles/${id}`).then(c => { circleCache.set(id, c); setCircle(c); }).catch(onBack), [id, onBack]);
   useEffect(() => { prefetchMessages(id).catch(() => {}); loadCircle(); }, [id, loadCircle]);
@@ -179,7 +204,7 @@ export function CircleView({ id, me, initialTab, onBack, onLeft, onTab, docked }
   async function toggleBlock() {
     if (!other) return;
     const on = !blocked; setBlocked(on);
-    try { await api(`/users/${other.id}/block`, { body: { on } }); } catch { setBlocked(!on); }
+    try { await api(`/users/${other.id}/block`, { body: { on } }); window.dispatchEvent(new Event('thikra:blocks')); } catch { setBlocked(!on); }
   }
   const lock = useLock();
   if (!circle) return <ChatSkeleton docked={docked} />;
@@ -201,9 +226,15 @@ export function CircleView({ id, me, initialTab, onBack, onLeft, onTab, docked }
       <div className="chat-head flex items-center gap-2 mb-3">
         <button className="w-10 h-10 shrink-0 rounded-xl text-muted flex items-center justify-center hover:bg-green-soft hover:text-green transition-colors duration-[var(--dur-instant)]"
           onClick={onBack} aria-label={t.back} title={t.back}><Icon name="arrow-back" className="w-5 h-5 rtl:-scale-x-100" /></button>
-        <Avatar name={circle.name} kind={circle.kind} photo={circle.photo} person={other ? { id: other.id, avatarAt: other.avatarAt } : null} className="w-11 h-11 text-base" />
+        {other
+          ? <button type="button" className="shrink-0 rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-green" onClick={() => setProfile(true)} aria-label={t.viewProfile.replace('{name}', circle.name)} title={t.viewProfile.replace('{name}', circle.name)}>
+              <Avatar name={circle.name} kind={circle.kind} photo={circle.photo} person={{ id: other.id, avatarAt: other.avatarAt }} className="w-11 h-11 text-base" />
+            </button>
+          : <Avatar name={circle.name} kind={circle.kind} photo={circle.photo} person={null} className="w-11 h-11 text-base" />}
         <span className="min-w-0 flex-1">
-          <h2 className="text-[1.05rem] font-bold !text-ink truncate leading-tight"><bdi>{circle.name}</bdi></h2>
+          <h2 className="text-[1.05rem] font-bold !text-ink truncate leading-tight">{other
+            ? <button type="button" className="max-w-full truncate text-start hover:underline" onClick={() => setProfile(true)} data-open-profile><bdi>{circle.name}</bdi></button>
+            : <bdi>{circle.name}</bdi>}</h2>
           {/* One quiet line: who is here (or whether they are online), and the chat's kind as a small tag that opens the details.
               The full sentence about who can read it lives in that sheet, not across the header. */}
           <span className="mt-0.5 flex items-center gap-2 min-w-0 text-caption">
@@ -230,7 +261,7 @@ export function CircleView({ id, me, initialTab, onBack, onLeft, onTab, docked }
             ))}
           </div>
         )}
-        {other && !blocked && <CallButton circle={circle.id} name={other.name} peer={{ id: other.id, avatarAt: other.avatarAt }} />}
+        {CALLS_IN_UI && other && !blocked && <CallButton circle={circle.id} name={other.name} peer={{ id: other.id, avatarAt: other.avatarAt }} />}
         {other && <button className="btn btn-ghost !py-1 text-sm" onClick={toggleBlock}>{blocked ? t.unblock : t.block}</button>}
         {!!circle.disappearSeconds && <button type="button" className="hidden sm:inline-flex shrink-0 items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-green-soft text-green" title={t.priv.timerBadge.replace('{when}', timerWord(circle.disappearSeconds, t))} onClick={() => setOptions(true)}><Icon name="clock" className="w-3.5 h-3.5" />{timerWord(circle.disappearSeconds, t)}</button>}
         {circle.kind === 'circle' && sealedTotal > 0 && <span className="hidden sm:inline-flex shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-gold/20 text-gold-dark" title={t.sealedCount.replace('{n}', String(sealedTotal))}><span className="inline-flex items-center gap-1"><Icon name="envelope" className="w-3.5 h-3.5" />{sealedTotal}</span></span>}
@@ -239,7 +270,23 @@ export function CircleView({ id, me, initialTab, onBack, onLeft, onTab, docked }
           aria-label={t.priv.chatOptions} title={t.priv.chatOptions} onClick={() => setOptions(true)}><Icon name="more" className="w-[18px] h-[18px]" /></button>
       </div>
       {security && <ChatSecuritySheet circle={circle} me={me} onClose={() => setSecurity(false)} />}
-      {options && <ChatOptions circle={circle} reload={loadCircle} onClose={() => setOptions(false)} />}
+      {profile && other && (
+        <Dialog onClose={() => setProfile(false)} label={circle.name}>
+          <div className="flex flex-col items-center text-center pt-2" data-profile-card>
+            <PersonAvatar id={other.id} name={circle.name} avatarAt={other.avatarAt} className="w-24 h-24 text-4xl" />
+            <h2 className="mt-3 text-xl font-bold !text-ink break-words"><bdi>{circle.name}</bdi></h2>
+            {!blocked && <p className="mt-1 text-sm"><PresenceLine userId={other.id} /></p>}
+            {other.about && (
+              <div className="mt-4 w-full rounded-2xl bg-paper border border-line px-4 py-3 text-start">
+                <span className="block text-xs text-muted">{t.about.label}</span>
+                <p className="mt-0.5 text-ink break-words" dir="auto" data-about>{other.about}</p>
+              </div>
+            )}
+          </div>
+          <button className="btn btn-ghost w-full mt-4" onClick={() => setProfile(false)}>{t.closePanel}</button>
+        </Dialog>
+      )}
+      {options && <ChatOptions circle={circle} meId={me.id} reload={loadCircle} onClose={() => setOptions(false)} />}
       {blocked && <p role="status" className="text-xs text-gold-dark bg-gold/15 rounded-lg p-2 mb-2">{t.blockedNote}</p>}
       {tabs.length > 1 && <div className="chat-tabs flex gap-1 mb-3 border-b border-line">
         {tabs.map(k => (
@@ -251,7 +298,7 @@ export function CircleView({ id, me, initialTab, onBack, onLeft, onTab, docked }
       </div>}
       {tab === 'chat' && circle.kind === 'circle' && <TodayBanner circleId={circle.id} onOpen={() => goTab('archive')} />}
       <div className="flex-1 min-h-0">
-        {tab === 'chat' && <Chat circle={circle} me={me} panel={panel} setPanel={setPanel} onOpenArchive={() => goTab('archive')} />}
+        {tab === 'chat' && <Chat circle={circle} me={me} panel={panel} setPanel={setPanel} onOpenArchive={() => goTab('archive')} onLeave={onLeft} />}
         {tab === 'archive' && <Archive circle={circle} />}
         {tab === 'settings' && <Settings circle={circle} me={me} reload={loadCircle} onLeft={onLeft} openArchive={() => goTab('archive')} />}
       </div>
@@ -371,6 +418,9 @@ async function thumbUrl(b: Blob | null): Promise<string | undefined> {
 
 /** How many messages a chat loads at a time (the same number the server pages by). */
 const PAGE = 50;
+const HUNT_PAGES = 8;   // how many older pages a jump may pull in before it gives up (see the jump effect)
+const MANY_TIMES = 5;    // hops after which a forward is a chain message (the server uses the same number)
+const CHAIN_CHARS = 280; // how much of a chain message is shown before "show the whole message"
 
 /** The notices the device wrote (keys changed...) slotted into the thread by time; each stands in as a system line with a negative id. */
 function withNotices(list: Message[], notices: Array<{ at: number }>): Message[] {
@@ -383,7 +433,10 @@ function withNotices(list: Message[], notices: Array<{ at: number }>): Message[]
   });
   return out;
 }
-function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDetail; me: Me; panel: Panel; setPanel: React.Dispatch<React.SetStateAction<Panel>>; onOpenArchive: () => void }) {
+function Chat({ circle, me, panel, setPanel, onOpenArchive, onLeave }: { circle: CircleDetail; me: Me; panel: Panel; setPanel: React.Dispatch<React.SetStateAction<Panel>>; onOpenArchive: () => void; onLeave: () => void }) {
+  // A message request from someone you do not know: read it, then accept, decline, block or report. Until then nothing is sent back.
+  const [requestOpen, setRequestOpen] = useState(!!circle.request);
+  useEffect(() => setRequestOpen(!!circle.request), [circle.id, circle.request]);
   const { t, lang } = useI18n();
   const agentReason = useAgentReason();
   const enc = !!circle.encrypted || isKnownEncrypted(circle.id);   // a server cannot talk this device out of a chat it knows is encrypted
@@ -432,9 +485,30 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
   const [onceVoice, setOnceVoice] = useState(false);                   // the next voice note is view once
   const [open, setOpen] = useState<number | null>(null);
   const [del, setDel] = useState<Message | null>(null);
+  const [reminding, setReminding] = useState<Message | null>(null);   // the "Remind me" sheet, for this message
+  const reminders = useReminders(me.id);
+  const remindedHere = useMemo(() => new Map(reminders.filter(r => r.circleId === circle.id).map(r => [r.messageId, r])), [reminders, circle.id]);
   const [reacting, setReacting] = useState<Message | null>(null);
   // A machine transcript is a tool, not part of the message: shown only when asked for.
   const [transcribed, setTranscribed] = useState<Set<number>>(new Set());
+  // Blocking is meant to work both ways: they cannot write to you, and in a group you share you do not have to read
+  // them either. Their messages are folded away for you alone — nobody is told, and one tap opens any of them, because
+  // hiding a message outright would leave replies to it hanging in the air.
+  const [blockedIds, setBlockedIds] = useState<Set<number>>(new Set());
+  const [shownBlocked, setShownBlocked] = useState<Set<number>>(new Set());
+  // A chain message — passed along five times or more — is folded to its first lines. These things are long by
+  // design; the family sees what it is and decides, instead of the whole thing taking over the screen.
+  const [openChains, setOpenChains] = useState<Set<number>>(new Set());
+  // MSG-02 "select multiple": chosen from a message's own menu, then the bar at the top does one thing to all of
+  // them. `null` means the mode is off — an empty Set would hide every message's controls for nothing.
+  const [chosen, setChosen] = useState<Set<number> | null>(null);
+  const inPick = chosen !== null;
+  useEffect(() => {
+    const load = () => api<Array<{ id: number }>>('/me/blocks').then(l => setBlockedIds(new Set(l.map(x => x.id)))).catch(() => { /* the chat reads fine without it */ });
+    load();
+    window.addEventListener('thikra:blocks', load);
+    return () => window.removeEventListener('thikra:blocks', load);
+  }, []);
   const [marks, setMarks] = useState(circle.members);                 // each member's delivered/read "up to here"
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
@@ -454,8 +528,9 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
   const [pinIdx, setPinIdx] = useState(0);
   const [pinning, setPinning] = useState<Message | null>(null);
   const [polling, setPolling] = useState(false);                      // the "new poll" sheet
-  const box2 = useRef<HTMLInputElement>(null);                        // the message box (for the caret, when a name is picked)
+  const box2 = useRef<HTMLTextAreaElement>(null);                     // the message box (for the caret, when a name is picked)
   const [caret, setCaret] = useState(0);
+  const [selEnd, setSelEnd] = useState(0);                            // with caret: the selected stretch, which the formatting bar acts on
   const names = useMemo(() => new Map(circle.members.map(x => [x.id, x.name])), [circle.members]);
   const memberById = useMemo(() => new Map(marks.map(x => [x.id, x])), [marks]);
   const fail = useCallback((code: string) => setError(t.errors[code] ?? t.errors.generic), [t]);
@@ -466,10 +541,13 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
     infoFor.current = m.id;
     api<MessageInfo>(`/messages/${m.id}/info`).then(r => { if (infoFor.current === m.id) setInfo(r); }).catch(() => {});
   }, []);
-  const loadPins = useCallback(() => api<Message[]>(`/circles/${circle.id}/pins`).then(dec).then(p => { setPins(p); setPinIdx(0); }).catch(() => {}), [circle.id, dec]);
+  // Only a real change replaces the bar (and goes back to the first pin): the fallback poll below asks again and again.
+  const loadPins = useCallback(() => api<Message[]>(`/circles/${circle.id}/pins`).then(dec).then(p => {
+    setPins(prev => { if (prev.length === p.length && prev.every((x, i) => x.id === p[i].id)) return prev; setPinIdx(0); return p; });
+  }).catch(() => {}), [circle.id, dec]);
   useEffect(() => { loadPins(); }, [loadPins]);
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
-  const [light, setLight] = useState<Attachment | null>(null);
+  const [light, setLight] = useState<number | null>(null);           // the attachment open in the photo viewer
   const [picked, setPicked] = useState<File[] | null>(null);          // files chosen, shown in the sheet before sending
   const [attachMenu, setAttachMenu] = useState(false);
   const [sharing, setSharing] = useState<null | 'panel' | 'contact' | 'location'>(null);
@@ -516,6 +594,11 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
   const uploads = uploader.list(circle.id);            // photos, files and voice notes on their way (read on every redraw, like `waiting`)
   const oldestLoaded = useRef(0);                     // the seq this screen's window of history starts at (0 = the whole chat is loaded)
   const nearBottom = useRef(true);                    // is the person looking at the newest messages (then new ones keep the view down)
+  // How far this person had read when they opened this chat: fixed for as long as the chat is on screen (see UnreadLine).
+  const openedRead = useRef<{ id: number; seq: number }>({ id: 0, seq: 0 });
+  if (openedRead.current.id !== circle.id) openedRead.current = { id: circle.id, seq: (circle.members.find(x => x.id === me.id)?.readSeq as number | null) ?? 0 };
+  const unreadFrom = openedRead.current.seq;
+  const jumpedUnread = useRef(0);                     // the chat whose unread line has already been jumped to
   // After you send something the view follows it down for a while, even while the upload bubble is swapped for the real
   // message and its photo loads (both briefly move the scroll position). Any scroll of your own (wheel, touch, keys) ends it.
   const followUntil = useRef(0);
@@ -609,7 +692,8 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
     });
     live.join([circle.id]);   // a chat made or joined after the page loaded is not in the socket's room yet
     let n = 0;
-    const timer = setInterval(() => { if (!live.connected || ++n % 10 === 0) refresh().catch(() => {}); }, 3000);
+    // Without the live connection nothing announces a new pin, so the poll that fetches messages also checks the pins (every 3rd tick).
+    const timer = setInterval(() => { n++; if (!live.connected || n % 10 === 0) refresh().catch(() => {}); if (!live.connected && n % 3 === 0) loadPins(); }, 3000);
     return () => { off(); clearInterval(timer); };
   }, [refresh, merge, dec, encReady, loadPins, circle.id, me.id, me.read_receipts]);
 
@@ -636,6 +720,48 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
     setDel(null);
     setStarredIds(prev => { const n = new Set(prev); if (on) n.add(m.id); else n.delete(m.id); return n; });
     try { await api(`/messages/${m.id}/star`, { body: { on } }); } catch { setStarredIds(prev => { const n = new Set(prev); if (on) n.delete(m.id); else n.add(m.id); return n; }); }
+  }
+
+  /**
+   * What may be passed on: text, and now a photo, video, document or voice note (the server copies the stored bytes
+   * into the other chat, so nothing is uploaded again). A poll, a live location, a view-once file and a message
+   * deleted or still on its way stay where they are. In an encrypted chat the forward happens on this device, which
+   * can re-encrypt text and cards but not files, so there it is text only.
+   */
+  const canForward = (m: Message) => !m.deleted && !m.poll && !m.viewOnce && !m.pending && m.id > 0
+    && (m.kind === 'text' || m.kind === 'voice')
+    && (!m.card || m.card.type === 'link' || enc)
+    && (!enc || (m.kind === 'text' && !m.attachments?.length));
+
+  const togglePick = (id: number) => setChosen(p => { const n = new Set(p ?? []); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  /** Forward everything chosen, one after another, into the chats the picker returns. */
+  async function forwardPicked(targets: number[]) {
+    const list = chosenMsgs.filter(canForward);
+    setChosen(null); setFwd(null); setFwdPick([]);
+    try {
+      for (const m of list) await api(`/messages/${m.id}/forward`, { body: { circles: targets } });
+      setError('');
+      if (targets.includes(circle.id)) refresh().catch(() => {});
+    } catch (err) { setError(t.errors[err instanceof ApiError ? err.code : 'generic'] ?? t.errors.generic); }
+  }
+  /** Delete everything chosen that I may delete: for me always, for everyone where the window allows it. */
+  async function deletePicked(everyone: boolean) {
+    const list = chosenMsgs.filter(m => (everyone ? canDeleteForEveryone(m) : !m.deleted));
+    setChosen(null);
+    try {
+      for (const m of list) {
+        if (everyone && enc && e2ee) await e2ee.remove(circle.id, m.id);
+        else await api(`/messages/${m.id}${everyone ? '' : '/hide'}`, everyone ? { method: 'DELETE' } : { body: {} });
+      }
+      setError(''); refresh().catch(() => {});
+    } catch (err) { setError(t.errors[err instanceof ApiError ? err.code : 'generic'] ?? t.errors.generic); }
+  }
+  /** Star (or unstar) everything chosen: one tap for a whole conversation's worth of keepers. */
+  async function starPicked(on: boolean) {
+    const list = chosenMsgs.filter(m => !m.deleted);
+    setChosen(null);
+    setStarredIds(prev => { const n = new Set(prev); for (const m of list) { if (on) n.add(m.id); else n.delete(m.id); } return n; });
+    for (const m of list) await api(`/messages/${m.id}/star`, { body: { on } }).catch(() => {});
   }
 
   async function openForward(m: Message) {
@@ -665,11 +791,12 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
 
   // Tell the server how far we have read, whenever the chat is on screen and something newer arrived.
   useEffect(() => {
+    if (requestOpen) return;   // a request not yet accepted is not "read" (the server ignores it too)
     const top = Math.max(0, ...msgs.map(m => m.seq ?? 0));
     if (top <= reportedRead.current || document.hidden) return;
     reportedRead.current = top;
     if (!live.send({ t: 'read', circle: circle.id, seq: top })) api(`/circles/${circle.id}/read`, { body: { seq: top } }).catch(() => { reportedRead.current = 0; });
-  }, [msgs, circle.id]);
+  }, [msgs, circle.id, requestOpen]);
   useEffect(() => {
     const on = () => { if (!document.hidden) { reportedRead.current = 0; setMsgs(m => [...m]); } };
     document.addEventListener('visibilitychange', on);
@@ -818,6 +945,19 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
     catch (err) { fail(err instanceof ApiError ? err.code : 'generic'); }
   }
 
+  /**
+   * Live location. Not in an encrypted chat: the server holds the one card and overwrites it as the person moves, and
+   * it cannot do that to something it cannot read. The button is simply not offered there.
+   */
+  async function sendLive(fix: { lat: number; lng: number; accuracy: number }, minutes: number) {
+    setSharing(null); setError('');
+    try {
+      const r = await api<{ id: number }>(`/circles/${circle.id}/cards`, { body: { type: 'live', lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy, minutes, client_msg_id: crypto.randomUUID() } });
+      beginShare(r.id, circle.id, Date.now() + minutes * 60_000);
+      follow(); await refresh();
+    } catch (err) { fail(err instanceof ApiError ? err.code : 'generic'); }
+  }
+
   // "Typing…" to the others: at most one frame every 2.5 s while keys are pressed.
   function typed(value: string, at = value.length) {
     setText(value); setCaret(at);
@@ -844,6 +984,33 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
     typed(next.text, next.caret);
     requestAnimationFrame(() => { box2.current?.focus(); box2.current?.setSelectionRange(next.caret, next.caret); });
   }
+  // *bold*, _italic_, ~strike~, `code`: the bar (or Ctrl/Cmd+B / I) wraps the selected words in the marker, and takes it off again.
+  function format(style: Style) {
+    const el = box2.current; if (!el) return;
+    const r = toggleMark(text, el.selectionStart ?? 0, el.selectionEnd ?? 0, style);
+    if (r.text === text && r.start === r.end) return;
+    typed(r.text, r.end); setCaret(r.start); setSelEnd(r.end);
+    requestAnimationFrame(() => { el.focus(); el.setSelectionRange(r.start, r.end); });
+  }
+  // The box grows with what is written, up to about six lines, then scrolls.
+  useLayoutEffect(() => {
+    const el = box2.current; if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 168)}px`;
+  }, [text]);
+  // Enter sends and Shift+Enter starts a new line on a keyboard; on a phone's keyboard Enter is a new line (the send button sends).
+  function composerKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.nativeEvent.isComposing) return;
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && !e.shiftKey && (e.key === 'b' || e.key === 'B')) { e.preventDefault(); format('b'); return; }
+    if (mod && !e.shiftKey && (e.key === 'i' || e.key === 'I')) { e.preventDefault(); format('i'); return; }
+    if (e.key === 'Enter' && !e.shiftKey && !mod && !matchMedia('(pointer: coarse)').matches) {
+      e.preventDefault();
+      if (picker.length && asking) { choose(picker[0].name); return; }   // a name is being picked: Enter takes the first match
+      e.currentTarget.form?.requestSubmit();
+    }
+  }
+  const selecting = selEnd > caret && !!text.slice(caret, selEnd).trim();
 
   const canEdit = (m: Message) => m.userId === me.id && m.kind === 'text' && !m.deleted && !m.poll && (!m.card || m.card.type === 'link') && Date.now() - toDate(m.createdAt).getTime() < 15 * 60_000;
 
@@ -859,20 +1026,55 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
     const type = typeof m.card === 'string' ? m.card : m.card?.type;
     if (type && type !== 'link') return cardWord(type, t);
     if (m.kind === 'voice') return m.transcript || <span className="inline-flex items-center gap-1"><Icon name="mic" className="w-3.5 h-3.5" />{t.voiceWord}</span>;
-    return m.body || (m.attachments?.length ? <span className="inline-flex items-center gap-1"><Icon name="attach" className="w-3.5 h-3.5" />{m.attachments[0].name ?? ''}</span> : '');
+    return (m.body && plainText(m.body)) || (m.attachments?.length ? <span className="inline-flex items-center gap-1"><Icon name="attach" className="w-3.5 h-3.5" />{m.attachments[0].name ?? ''}</span> : '');
   };
   /** Text with its links as links (opened in a new tab, telling the site nothing about where the click came from). */
   const linked = (text: string, key = 0) => splitLinks(text).map((part, i) => part.href
     ? <a key={`${key}-${i}`} href={part.href} target="_blank" rel="noopener noreferrer nofollow" className="underline underline-offset-2 break-all">{part.text}</a> : part.text);
   // Jumping to a message scrolls it to the middle and flashes a ring round it, so after
   // the gallery or a search result closes you can see where you landed.
+  // Opened from a reminder, a notification or a search result: show that message once it is on screen. A result can be
+  // far older than the page that loads with the chat, so older pages are fetched, one at a time, until it is there —
+  // up to HUNT_PAGES of them, after which the jump is dropped rather than dragging in years of history.
+  const hunted = useRef(0);
+  useEffect(() => { hunted.current = 0; }, [circle.id]);
+  useEffect(() => {
+    let want = 0; try { want = Number(sessionStorage.getItem(JUMP_KEY)) || 0; } catch { /* no jump */ }
+    if (!want) return;
+    const drop = () => { try { sessionStorage.removeItem(JUMP_KEY); } catch { /* fine */ } };
+    if (msgs.some(m => m.id === want)) { drop(); hunted.current = 0; requestAnimationFrame(() => jumpTo(want)); return; }
+    if (!loaded || olderRef.current === 'loading') return;
+    if (olderRef.current === 'end' || hunted.current >= HUNT_PAGES) { drop(); return; }   // the chat begins above it, or it is too far back
+    hunted.current++;
+    loadOlder();
+  }, [msgs, loaded, loadOlder, circle.id]);   // eslint-disable-line react-hooks/exhaustive-deps
   const jumpTo = (id: number) => {
     const el = document.getElementById(`m${id}`);
     if (!el) return;
+    // Reading something older: stop following the newest message, or the next arrival (or the next render) pulls the
+    // view straight back down and the jump looks as if it never happened.
+    nearBottom.current = false; followUntil.current = 0; setAtBottom(false);
     el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     el.classList.add('flash');
     setTimeout(() => el.classList.remove('flash'), 1600);
   };
+
+  // Every photo of the chat loaded so far, oldest first: the viewer moves through them like an album (MED-03 gallery swipe).
+  // View-once, deleted and expired messages stay out; so does anything still uploading.
+  const { photos, photoMessage } = useMemo(() => {
+    const items: ViewerItem[] = [], owner = new Map<number, number>();
+    for (const m of msgs) {
+      if (m.deleted || m.viewOnce || m.expired || m.pending || !m.attachments?.length) continue;
+      const when = toDate(m.createdAt).toLocaleString(intlLocale(lang), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+      for (const x of m.attachments) {
+        if (x.kind !== 'image') continue;
+        items.push({ key: x.id, kind: 'image', att: x, alt: x.name ?? '', name: x.name ?? 'photo.jpg', caption: `${m.userId === me.id ? t.youLabel : m.author ?? ''} · ${when}` });
+        owner.set(x.id, m.id);
+      }
+    }
+    return { photos: items, photoMessage: owner };
+  }, [msgs, lang, me.id, t]);
+  const closeLight = useCallback(() => setLight(null), []);
 
   // As in WhatsApp: the sender can delete for everyone for a limited time, a manager at any time.
   // Two days for a sender, a week for the circle's owner and admins (same rule as the server).
@@ -907,6 +1109,23 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
 
   // What is drawn: the messages, then those still in the outbox, without the ones whose time ran out, with the device's notices slotted in.
   const thread = withNotices([...msgs, ...waiting].filter(m => !m.expired && !(m.expiresAt && toDate(m.expiresAt).getTime() <= clock)), notices);
+  const chosenMsgs = chosen ? thread.filter(m => chosen.has(m.id)) : [];
+
+  // Where the "unread messages" line goes, and how many sit below it. Only other people's messages count: your own,
+  // and the chat's own notices, are not news to you.
+  const { id: unreadId, count: unreadCount } = requestOpen ? { id: 0, count: 0 } : unreadMark(thread, unreadFrom, me.id);
+  // Opening a chat with unread messages lands on the line, not at the newest message: the person reads on from where
+  // they stopped. Once per chat; scrolling or a new message takes over from there.
+  useEffect(() => {
+    if (!unreadId || jumpedUnread.current === circle.id) return;
+    jumpedUnread.current = circle.id;
+    requestAnimationFrame(() => {
+      const line = wall.current?.querySelector('[data-unread-line]');
+      if (!line) return;
+      nearBottom.current = false; followUntil.current = 0; setAtBottom(false);
+      line.scrollIntoView({ block: 'center' });
+    });
+  }, [unreadId, circle.id]);
 
   return (
     <div className="chat-root flex flex-col h-full">
@@ -956,7 +1175,7 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
                 <li key={r.id}>
                   <button className="row-interactive w-full text-start py-2 px-1 rounded-lg" onClick={() => { setPanel(null); setTimeout(() => jumpTo(r.id), 120); }}>
                     <span className="text-xs text-muted">{r.author} · {toDate(r.createdAt).toLocaleString(intlLocale(lang), { dateStyle: 'medium', timeStyle: 'short' })}</span>
-                    <span className="block whitespace-pre-wrap break-words">{r.kind === 'voice' ? r.transcript : r.body}</span>
+                    <span className="block whitespace-pre-wrap break-words">{r.kind === 'voice' ? r.transcript : plainText(r.body ?? '')}</span>
                   </button>
                 </li>
               ))}
@@ -964,7 +1183,29 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
           )}
         </div>
       )}
-      <div ref={wall} {...wallProps(circle.wallpaper)} className="chat-wall flex-1 overflow-y-auto pb-3" onScroll={e => onWallScroll(e.currentTarget)}
+      {inPick && (
+        <div className="flex flex-wrap items-center gap-2 mb-2 p-2 rounded-2xl bg-card border border-line elevated-1 animate-slide-up">
+          <b className="text-sm">{chosen!.size ? t.pick.count.replace('{n}', String(chosen!.size)) : t.pick.none}</b>
+          <span className="flex-1" />
+          <button type="button" className="btn btn-ghost !py-1 text-sm" disabled={!chosenMsgs.some(canForward)}
+            onClick={() => { setFwd(chosenMsgs.find(canForward) ?? null); setFwdPick([]); api<Array<{ id: number; name: string; locked?: boolean; encrypted?: boolean }>>('/circles').then(l => setFwdTargets(l.filter(c => !c.locked && (enc ? !!c.encrypted : !c.encrypted)))).catch(() => setFwdTargets([])); }}>
+            <Icon name="forward" className="w-4 h-4" />{t.pick.forward}
+          </button>
+          <button type="button" className="btn btn-ghost !py-1 text-sm" disabled={!chosen!.size} onClick={() => starPicked(!chosenMsgs.every(m => starredIds.has(m.id)))}>
+            <Icon name="star" className="w-4 h-4" />{chosenMsgs.length && chosenMsgs.every(m => starredIds.has(m.id)) ? t.pick.unstar : t.pick.star}
+          </button>
+          <button type="button" className="btn btn-ghost !py-1 text-sm" disabled={!chosen!.size} onClick={() => deletePicked(false)}>
+            <Icon name="trash" className="w-4 h-4" />{t.pick.delMe}
+          </button>
+          {chosenMsgs.some(canDeleteForEveryone) && (
+            <button type="button" className="btn btn-ghost !py-1 text-sm !text-danger" onClick={() => { if (confirm(t.deleteForEveryone)) deletePicked(true); }}>
+              <Icon name="trash" className="w-4 h-4" />{t.pick.delAll}
+            </button>
+          )}
+          <button type="button" className="btn btn-ghost !py-1 text-sm" onClick={() => setChosen(null)}>{t.pick.cancel}</button>
+        </div>
+      )}
+      <div ref={wall} data-chat-wall {...wallProps(circle.wallpaper)} className="chat-wall flex-1 overflow-y-auto pb-3" onScroll={e => onWallScroll(e.currentTarget)}
         onWheel={() => { followUntil.current = 0; }} onTouchMove={() => { followUntil.current = 0; }} onKeyDown={() => { followUntil.current = 0; }}>
         {/* Messages start at the top of the thread. (Bottom-anchoring was tried and
             reverted: on a tall desktop window it left a large void above a short chat.) */}
@@ -1022,12 +1263,23 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
               </button>);
           // A new calendar day gets a divider, so scrolling back has landmarks.
           const newDay = !prev || toDate(prev.createdAt).toDateString() !== toDate(m.createdAt).toDateString();
-          const withDay = (node: React.ReactNode) => newDay
-            ? <Fragment key={`d${m.id}`}><DayDivider iso={m.createdAt} lang={lang} t={t} />{node}</Fragment>
+          const unreadHere = m.id === unreadId;
+          const withDay = (node: React.ReactNode) => newDay || unreadHere
+            ? <Fragment key={`d${m.id}`}>{newDay && <DayDivider iso={m.createdAt} lang={lang} t={t} />}{unreadHere && <UnreadLine count={unreadCount} t={t} />}{node}</Fragment>
             : node;
           // The square corner is the tail: only the last bubble of a block has one, on the
           // side the bubble is anchored to. Logical corners, so it mirrors in Arabic.
           const tail = lastOfGroup ? (mine ? 'rounded-ee-md' : 'rounded-es-md') : '';
+          if (!mine && m.userId && blockedIds.has(m.userId) && !shownBlocked.has(m.id)) {
+            return withDay(
+              <p key={m.id} id={`m${m.id}`} className="mx-auto my-1 w-fit max-w-full flex items-center gap-2 text-xs text-muted rounded-full border border-dashed border-line px-3 py-1">
+                <Icon name="ban" className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">{t.blockedMsg}</span>
+                <button type="button" className="underline underline-offset-2 shrink-0"
+                  onClick={() => setShownBlocked(p => new Set(p).add(m.id))}>{t.blockedShow}</button>
+              </p>,
+            );
+          }
           if (m.deleted) {
             return withDay(
               <div key={m.id} id={`m${m.id}`} className={`flex gap-2 ${gap} ${mine ? 'justify-end' : 'justify-start'}`}>
@@ -1041,7 +1293,10 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
           }
           const b = badge(m);
           // A voice note's machine transcript is a tool, not part of the message: shown only when asked for.
-          const shown = m.viewOnce ? '' : m.kind === 'voice' ? (transcribed.has(m.id) ? m.transcript : '') : m.body;
+          const voiceCard = !m.viewOnce && m.kind === 'voice' && !!m.hasAudio;   // a voice note draws its own card, with its text inside it
+          const whole = m.viewOnce ? '' : m.kind === 'voice' ? (voiceCard ? '' : transcribed.has(m.id) ? m.transcript : '') : m.body;
+          const folded = (m.forwardCount ?? 0) >= MANY_TIMES && !openChains.has(m.id) && (whole?.length ?? 0) > CHAIN_CHARS;
+          const shown = folded ? `${whole!.slice(0, CHAIN_CHARS).trimEnd()}…` : whole;
           // The controls live beside the bubble, never on top of it: floating them inside
           // covered the author's name and the start of the text.
           const actions = !m.pending && (
@@ -1060,13 +1315,19 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
           const media = !m.viewOnce && !!m.attachments?.some(x => x.kind === 'image' || x.kind === 'video');
           // A sticker stands on its own, without a bubble round it (a bubble made it look like a pasted image).
           const bare = m.card?.type === 'sticker' && !m.replyTo && !m.forwardCount && !shown && !m.sealedOn;
+          const pickable = inPick && !m.pending && m.id > 0 && !m.deleted;
           return withDay(
-            <div key={m.id} id={`m${m.id}`} className={`group/row flex gap-2 ${gap} animate-slide-up ${mine ? 'justify-end' : 'justify-start'}`}>
+            <div key={m.id} id={`m${m.id}`} onClick={pickable ? () => togglePick(m.id) : undefined}
+              className={`group/row flex gap-2 ${gap} animate-slide-up ${mine ? 'justify-end' : 'justify-start'} ${pickable ? 'cursor-pointer' : ''} ${chosen?.has(m.id) ? 'bg-green-soft/60 rounded-2xl' : ''}`}>
+              {pickable && (
+                <input type="checkbox" className="check self-center shrink-0" checked={chosen!.has(m.id)} aria-label={t.pick.one}
+                  onChange={() => togglePick(m.id)} onClick={e => e.stopPropagation()} />
+              )}
               {face}
-              {mine && actions}
+              {mine && !inPick && actions}
               {/* A photo or video message has a fixed width, as in WhatsApp Web: across a wide desktop pane, 85% made a
                   single photo the size of the screen. Text keeps the flexible 85%. */}
-              <div className={`group/msg relative ${media ? 'w-[min(80%,22rem)]' : 'max-w-[min(80%,36rem)]'} rounded-2xl ${tail} ${bare ? 'bubble-bare w-fit' : `px-3 py-2 ${mine ? 'bubble-mine' : 'bubble-other'}`} ${m.pending ? 'opacity-60' : ''}
+              <div className={`group/msg relative ${media ? 'w-[min(80%,22rem)]' : voiceCard ? 'w-[min(88%,21.5rem)]' : 'max-w-[min(80%,36rem)]'} rounded-2xl ${tail} ${bare ? 'bubble-bare w-fit' : `${voiceCard ? 'px-3.5 pt-3 pb-2.5 !rounded-[1.25rem]' : 'px-3 py-2'} ${mine ? 'bubble-mine' : 'bubble-other'}`} ${m.pending ? 'opacity-60' : ''}
                 transition-opacity duration-[var(--dur-base)] ease-[var(--ease-standard)]`}>
                 {!mine && !grouped && !bare && circle.kind !== 'direct' && <div className="text-[0.8rem] font-bold mb-0.5 leading-tight select-none" style={{ color: nameColour(m.userId ?? 0) }}>{m.author}</div>}
                 {m.sealedOn && <div className={`text-[11px] mb-0.5 flex items-center gap-1 ${mine ? 'opacity-80' : 'text-gold-dark'}`}><Icon name="lock" className="w-3 h-3" />{t.sealedOnLabel} {m.sealedOn}</div>}
@@ -1089,7 +1350,7 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
                   return (
                   <div className={`${flush ? '-mx-3 -mt-2 mb-1.5 overflow-hidden rounded-t-2xl' : 'mb-1'} grid gap-1 ${m.attachments!.filter(x => x.kind !== 'file').length > 1 ? 'grid-cols-2' : ''}`}>
                     {m.attachments.map(x => x.kind === 'image' ? (
-                      <button key={x.id} type="button" onClick={() => setLight(x)} className="relative block overflow-hidden rounded-lg bg-black/10"
+                      <button key={x.id} type="button" onClick={() => setLight(x.id)} className="relative block overflow-hidden rounded-lg bg-black/10"
                         style={x.w && x.h ? { aspectRatio: `${x.w} / ${x.h}`, maxHeight: '22rem' } : undefined}>
                         {enc ? <MediaImg att={x} thumb alt={x.name ?? ''} className="w-full h-full object-cover" />
                           : <img alt={x.name ?? ''} loading="lazy" decoding="async" className="w-full h-full object-cover" {...sharpSrc(x, '(min-width: 1024px) 22rem, 80vw')} />}
@@ -1104,12 +1365,11 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
                     ))}
                   </div>
                   ); })()}
-                {!m.viewOnce && m.kind === 'voice' && m.hasAudio ? <VoicePlayer m={m} mine={mine} meId={me.id} others={others.length} /> : null}
-                {!m.viewOnce && m.kind === 'voice' && m.hasAudio && !m.encrypted ? <Transcribe m={m} /> : null}
                 {m.card?.type === 'link' && previewsOn && <LinkCard url={m.card.url} title={m.card.title} description={m.card.description} site={m.card.site} image={m.card.image && !m.encrypted ? `/api/media/${m.card.image}` : null} mine={mine} />}
                 {m.card?.type === 'sticker' && <StickerView pack={m.card.pack} id={m.card.id} />}
                 {m.card?.type === 'contact' && <ContactCard card={m.card} mine={mine} />}
                 {m.card?.type === 'location' && <LocationCard card={m.card} mine={mine} />}
+                {m.card?.type === 'live' && <LiveCard card={m.card} mine={mine} mid={m.id} onChanged={refresh} />}
                 {(() => {
                   const starred = starredIds.has(m.id);
                   // The words: @mentions as buttons that open a private chat, links as links.
@@ -1122,6 +1382,7 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
                       {/* A star belongs beside the time, not floated into the text, where it
                           pushed the words around and forced the meta onto its own line. */}
                       {starred && <Icon name="star" className="w-3 h-3 shrink-0" aria-label={t.starred} />}
+                      {remindedHere.has(m.id) && <Icon name="bell" className="w-3 h-3 shrink-0" aria-label={t.rem.has} />}
                       <span className="tabular-nums">{toDate(m.createdAt).toLocaleTimeString(intlLocale(lang), { hour: '2-digit', minute: '2-digit' })}</span>
                       {m.editedAt && <span>{t.edited}</span>}
                       {mine && !m.failed && <Ticks kind={tick(m)} t={t} />}
@@ -1138,14 +1399,19 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
                   // chat app does it: an invisible spacer reserves the room, and the meta is
                   // placed in it. Anything richer (media, voice, a card, a poll, an edit, an agent
                   // badge) keeps the meta on its own row, where it does not have to fight for space.
-                  const inline = !!shown && m.kind !== 'voice' && !m.attachments?.length && !m.editedAt && !b && !m.poll && !m.card && !m.failed && !m.viewOnce;
+                  if (voiceCard) return (
+                    <VoiceMessage m={m} mine={mine} meId={me.id} others={others.length} meta={meta} canTranscribe={!m.encrypted}
+                      open={transcribed.has(m.id)} onOpen={on => setTranscribed(p => { const n = new Set(p); if (on) n.add(m.id); else n.delete(m.id); return n; })}
+                      after={failed && <div className="mt-1.5 flex flex-wrap items-center gap-1.5">{failed}</div>} />
+                  );
+                  const inline = !!shown && !folded && m.kind !== 'voice' && !m.attachments?.length && !m.editedAt && !b && !m.poll && !m.card && !m.failed && !m.viewOnce;
                   if (inline) return (
                     <p dir="auto" className="relative whitespace-pre-wrap break-words">
-                      {words(shown)}
+                      <Formatted text={shown} leaf={words} />
                       {/* The gap the meta sits in. It has to cover everything the meta can
                           contain — a star adds width, and too small a reservation means the
                           time lands on top of the text. */}
-                      <span aria-hidden className="inline-block" style={{ width: `${(mine ? 4.6 : 3.2) + (starred ? 1 : 0)}rem` }} />
+                      <span aria-hidden className="inline-block" style={{ width: `${(mine ? 4.6 : 3.2) + (starred ? 1 : 0) + (remindedHere.has(m.id) ? 1 : 0)}rem` }} />
                       <span className="absolute bottom-0 end-0 leading-none pb-[0.1rem]">{meta}</span>
                     </p>
                   );
@@ -1156,8 +1422,12 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
                       {shown && (
                         <p dir="auto" className={`whitespace-pre-wrap break-words ${m.kind === 'voice' ? 'text-sm opacity-75 mt-1.5 pt-1.5 border-t border-current/15' : ''} ${m.poll ? 'font-bold flex items-start gap-1.5' : ''}`}>
                           {m.poll && <Icon name="chart" className="w-4 h-4 mt-0.5 shrink-0" />}
-                          <span>{words(shown)}</span>
+                          <span><Formatted text={shown} leaf={words} /></span>
                         </p>
+                      )}
+                      {folded && (
+                        <button type="button" className="text-xs underline underline-offset-2 opacity-80"
+                          onClick={() => setOpenChains(p => new Set(p).add(m.id))}>{t.chainShow}</button>
                       )}
                       {m.poll && !m.deleted && <PollBubble m={m} meId={me.id} names={names} onError={fail} {...(enc && e2ee ? { onVote: (opts: number[]) => e2ee.vote(circle.id, m.id, opts).then(() => refresh()) } : {})} />}
                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
@@ -1190,7 +1460,7 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
                   </p>
                 )}
               </div>
-              {!mine && actions}
+              {!mine && !inPick && actions}
             </div>,
           );
         })}
@@ -1243,31 +1513,38 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
           <button className="btn btn-ghost w-full mt-3" onClick={() => setReporting(null)}>{reported ? t.closePanel : t.cancel}</button>
         </Dialog>
       )}
-      {light && (
-        <Dialog onClose={() => setLight(null)} label={light.name ?? t.media}>
-          <MediaImg att={light} alt={light.name ?? ''} className="max-w-full max-h-[70vh] mx-auto rounded-lg" />
-          <div className="mt-3 flex gap-2">
-            <MediaFile att={{ ...light, name: light.name ?? 'photo.jpg' }} className="btn flex-1 text-center">{t.download}</MediaFile>
-            <button className="btn btn-ghost flex-1" onClick={() => setLight(null)}>{t.closePanel}</button>
-          </div>
-        </Dialog>
-      )}
+      {light !== null && (() => {
+        const start = photos.findIndex(p => p.key === light);
+        return start < 0 ? null : (
+          <PhotoViewer items={photos} start={start} onClose={closeLight}
+            actions={(item, close) => {
+              const mid = photoMessage.get(Number(item.key));
+              return mid ? <button type="button" className="h-11 px-4 rounded-full bg-white/10 text-white text-sm font-bold hover:bg-white/20 inline-flex items-center gap-2"
+                onClick={() => { close(); setTimeout(() => jumpTo(mid), 60); }}><Icon name="chats" className="w-4 h-4" />{t.viewer.showInChat}</button> : null;
+            }} />
+        );
+      })()}
       {fwd && (
         <Dialog onClose={() => setFwd(null)} label={t.forward}>
           <h2 className="text-lg font-bold">{t.forwardTo}</h2>
+          {/* A chain message goes one chat at a time (the server holds the same line), so the picker allows one. */}
+          {(fwd.forwardCount ?? 0) >= MANY_TIMES && <p className="mt-1 text-xs text-gold-dark bg-gold/15 rounded-lg p-2">{t.chainOne}</p>}
           <ul className="mt-3 space-y-1 max-h-64 overflow-y-auto">
-            {fwdTargets.map(c => (
+            {fwdTargets.map(c => {
+              const most = (fwd.forwardCount ?? 0) >= MANY_TIMES ? 1 : 5;
+              return (
               <li key={c.id}>
                 <label className="flex items-center gap-2 p-2 rounded-lg hover:bg-green-soft">
-                  <input type="checkbox" className="check" checked={fwdPick.includes(c.id)} disabled={!fwdPick.includes(c.id) && fwdPick.length >= 5}
+                  <input type="checkbox" className="check" checked={fwdPick.includes(c.id)} disabled={!fwdPick.includes(c.id) && fwdPick.length >= most}
                     onChange={e => setFwdPick(p => e.target.checked ? [...p, c.id] : p.filter(x => x !== c.id))} />
                   {c.name}
                 </label>
               </li>
-            ))}
+              );
+            })}
           </ul>
           <div className="mt-4 flex gap-2">
-            <button className="btn flex-1" disabled={!fwdPick.length} onClick={doForward}>{t.forward}</button>
+            <button className="btn flex-1" disabled={!fwdPick.length} onClick={() => (inPick ? forwardPicked(fwdPick) : doForward())}>{t.forward}</button>
             <button className="btn btn-ghost flex-1" onClick={() => setFwd(null)}>{t.cancel}</button>
           </div>
         </Dialog>
@@ -1286,7 +1563,11 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
           <button type="button" aria-label={t.cancel} className="px-2 text-base" onClick={() => { setReplyTo(null); setEditing(null); if (editing) setText(''); }}><Icon name="x" className="w-4 h-4" /></button>
         </div>
       )}
-      {circle.sendPolicy === 'admins' && !manager ? (
+      {requestOpen ? (
+        <RequestBar circle={circle} me={me} lastText={[...msgs].reverse().find(m => m.userId !== me.id && !m.deleted)?.body ?? ''}
+          onAccepted={() => { setRequestOpen(false); window.dispatchEvent(new Event('thikra:chats')); }}
+          onGone={() => { window.dispatchEvent(new Event('thikra:chats')); onLeave(); }} />
+      ) : circle.sendPolicy === 'admins' && !manager ? (
         <p role="status" className="mt-2 text-center text-sm text-muted rounded-2xl bg-card border border-line py-3 px-4 flex items-center justify-center gap-2">
           <Icon name="lock" className="w-4 h-4 shrink-0" />{t.onlyAdminsSend}
         </p>
@@ -1296,7 +1577,7 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
             image={linkPreview.found.image ? `/api/link-preview/image/${linkPreview.found.image}` : null} onRemove={linkPreview.dismiss} />}
           {/* What opens above the message box floats over the conversation instead of pushing it up:
               the @mention list, the attach menu, and the stickers panel. */}
-          <div ref={composerRef} className="relative">
+          <div ref={composerRef} className="relative pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <div className="absolute bottom-full inset-x-0 mb-2 z-30 flex flex-col gap-2 pointer-events-none">
           {/* @mentions: the people of this group whose name matches what follows the @. */}
           {picker.length > 0 && (
@@ -1334,18 +1615,33 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
           {/* One pill holding attach, the text, stickers and view-once, with the send or record
               button separate and round: the shape people already know from every chat app. */}
           <form onSubmit={send} className="relative flex items-end gap-2 pt-2">
+            {/* The formatting bar: shown while words in the box are selected. */}
+            {selecting && (
+              <div data-fmt-bar role="toolbar" aria-label={t.fmtBar} className="absolute bottom-full mb-1 start-12 z-10 flex items-center gap-0.5 p-1 rounded-xl bg-card border border-line elevated-2 animate-fade-in">
+                {([['b', t.fmtBold, 'font-bold', 'B'], ['i', t.fmtItalic, 'italic font-serif', 'I'], ['s', t.fmtStrike, 'line-through', 'S'], ['m', t.fmtCode, 'font-mono text-xs', '{ }']] as const).map(([k, label, cls, glyph]) => (
+                  <button key={k} type="button" aria-label={label} title={label} onMouseDown={e => e.preventDefault()} onClick={() => format(k)}
+                    className={`w-9 h-9 rounded-lg text-ink hover:bg-green-soft hover:text-green transition-colors duration-[var(--dur-instant)] ${cls}`}>{glyph}</button>
+                ))}
+              </div>
+            )}
+            {text.length > MAX_TEXT - 500 && (
+              <span role="status" className={`absolute -top-4 end-14 text-[11px] tabular-nums ${text.length >= MAX_TEXT ? 'text-danger font-bold' : 'text-muted'}`} dir="ltr">{text.length.toLocaleString()} / {MAX_TEXT.toLocaleString()}</span>
+            )}
             <input ref={fileInput} type="file" multiple hidden accept="image/*,video/*,.pdf,.txt,.csv,.zip,.docx,.xlsx,.pptx" onChange={e => pick(e.target.files)} />
-            <div className="field-group !rounded-full flex-1 min-w-0 items-center">
-              <button type="button" className={`field-prefix !border-0 !px-3 transition-colors duration-[var(--dur-instant)] ${attachMenu ? 'text-green' : 'text-muted hover:text-green'}`}
+            <div className="field-group !rounded-[1.375rem] flex-1 min-w-0 !items-end">
+              <button type="button" className={`field-prefix !border-0 !px-3 h-11 self-end transition-colors duration-[var(--dur-instant)] ${attachMenu ? 'text-green' : 'text-muted hover:text-green'}`}
                 aria-label={t.attach} title={t.attach} aria-expanded={attachMenu} onClick={() => { setSharing(null); setAttachMenu(v => !v); }}>
                 <Icon name="attach" className="w-5 h-5" />
               </button>
-              <input ref={box2} className="!px-1 min-w-0" value={text} maxLength={4000} placeholder={t.typeMessage}
-                onChange={e => typed(e.target.value, e.target.selectionStart ?? e.target.value.length)}
+              <textarea ref={box2} rows={1} dir="auto" className="!px-1 !py-2.5 min-w-0 resize-none leading-snug max-h-[168px] overflow-y-auto" value={text} maxLength={MAX_TEXT} placeholder={t.typeMessage}
+                aria-label={t.typeMessage} title={t.fmtHint}
+                onChange={e => { typed(e.target.value, e.target.selectionStart ?? e.target.value.length); setSelEnd(e.target.selectionEnd ?? e.target.value.length); }}
+                onKeyDown={composerKey}
                 onPaste={e => { const files = [...e.clipboardData.files]; if (files.length) { e.preventDefault(); pick(files); } }}
-                onSelect={e => setCaret(e.currentTarget.selectionStart ?? 0)} />
+                onSelect={e => { setCaret(e.currentTarget.selectionStart ?? 0); setSelEnd(e.currentTarget.selectionEnd ?? 0); }}
+                onBlur={() => setTimeout(() => { if (document.activeElement !== box2.current && !document.activeElement?.closest('[data-fmt-bar]')) setSelEnd(0); }, 0)} />
               {!editing && (
-                <button type="button" className={`px-2 self-center transition-colors duration-[var(--dur-instant)] ${sharing === 'panel' ? 'text-green' : 'text-muted hover:text-green'}`}
+                <button type="button" className={`px-2 self-end h-11 transition-colors duration-[var(--dur-instant)] ${sharing === 'panel' ? 'text-green' : 'text-muted hover:text-green'}`}
                   aria-label={t.stickersAndGifs} title={t.stickersAndGifs} aria-expanded={sharing === 'panel'}
                   onClick={() => { setAttachMenu(false); setSharing(v => (v === 'panel' ? null : 'panel')); }}>
                   <Icon name="sticker" className="w-5 h-5" />
@@ -1353,7 +1649,7 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
               )}
               {!text.trim() && !editing && !recording && (
                 <button type="button" aria-pressed={onceVoice} aria-label={t.priv.viewOnceFor} title={`${t.priv.viewOnceFor}: ${t.priv.viewOnceVoice}`}
-                  className={`pe-3 ps-1 self-center transition-colors duration-[var(--dur-instant)] ${onceVoice ? 'text-green' : 'text-muted hover:text-green'}`}
+                  className={`pe-3 ps-1 self-end h-11 transition-colors duration-[var(--dur-instant)] ${onceVoice ? 'text-green' : 'text-muted hover:text-green'}`}
                   onClick={() => setOnceVoice(v => !v)}>
                   <Icon name="once" className="w-5 h-5" />
                 </button>
@@ -1361,17 +1657,23 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
             </div>
             {!text.trim() && !editing
               ? <VoiceRecorder circleId={circle.id} drafts={media.drafts} rtl={LANG_INFO[lang as Lang]?.rtl ?? false} lang={lang} onSend={sendVoice} onActive={setRecording} onError={setError} />
-              : <button className="btn btn-primary !rounded-full !w-11 !h-11 !px-0 shrink-0 flex items-center justify-center" disabled={!text.trim()} aria-label={editing ? t.save : t.send} title={editing ? t.save : t.send}>
+              : <button className="fab-accent w-11 h-11 rounded-full shrink-0 flex items-center justify-center animate-pop-in disabled:opacity-50" disabled={!text.trim()} aria-label={editing ? t.save : t.send} title={editing ? t.save : t.send}>
                   <Icon name={editing ? 'check' : 'send'} className="w-5 h-5 rtl:-scale-x-100" />
                 </button>}
           </form>
           </div>
         </>
       )}
+      {reminding && (
+        <RemindSheet current={remindedHere.get(reminding.id)} onClose={() => setReminding(null)}
+          onClear={() => { forgetReminder(me.id, `${circle.id}:${reminding.id}`); setReminding(null); }}
+          onPick={at => { remind(me.id, { circleId: circle.id, messageId: reminding.id, chat: circle.name, at }); setReminding(null); }} />
+      )}
       {reacting && <ReactionPicker t={t} onClose={() => setReacting(null)} onPick={e => { const m = reacting; setReacting(null); react(m, e); }} />}
       {picked && <SendSheet picked={picked} caption0={text.trim()} onClose={() => setPicked(null)} onSend={sendFiles} />}
       {sharing === 'contact' && <ContactSheet onClose={() => setSharing(null)} onSend={(name, phones) => sendCard({ type: 'contact', name, phones })} />}
-      {sharing === 'location' && <LocationSheet onClose={() => setSharing(null)} onSend={(fix, label) => sendCard({ type: 'location', lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy, label })} />}
+      {sharing === 'location' && <LocationSheet onClose={() => setSharing(null)} onSend={(fix, label) => sendCard({ type: 'location', lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy, label })}
+        {...(enc ? {} : { onSendLive: (fix, minutes) => sendLive(fix, minutes) })} />}
       {polling && <PollComposer circleId={circle.id} onClose={() => setPolling(false)} onError={fail} {...(enc && e2ee ? { onCreate: (q: string, o: string[], multiple: boolean) => e2ee.sendPoll(circle.id, q, o, multiple).then(() => refresh()) } : {})} />}
       {info && (
         <Dialog onClose={() => setInfo(null)} label={t.msgInfo}>
@@ -1410,11 +1712,13 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive }: { circle: CircleDe
             {row('chats', t.reply, () => { setReplyTo(del); setEditing(null); setDel(null); requestAnimationFrame(() => box2.current?.focus()); })}
             {canEdit(del) && !del.sealedOn && row('pen', t.edit, () => { setEditing(del); setReplyTo(null); setText(del.body); setDel(null); requestAnimationFrame(() => box2.current?.focus()); })}
             {del.kind === 'voice' && !!del.transcript && row('file', transcribed.has(del.id) ? t.hideTranscript : t.showTranscript, () => { const id = del.id; setTranscribed(p => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; }); setDel(null); })}
-            {del.kind === 'text' && !del.deleted && !del.poll && !del.attachments?.length && (!del.card || del.card.type === 'link' || enc) && row('forward', t.forward, () => openForward(del))}
+            {canForward(del) && row('forward', t.forward, () => openForward(del))}
+            {!del.deleted && del.id > 0 && !del.pending && row('check-double', t.pick.start, () => { const m = del; setDel(null); setChosen(new Set([m.id])); })}
             {!del.deleted && row(starredIds.has(del.id) ? 'star-fill' : 'star', starredIds.has(del.id) ? t.unstar : t.star, () => toggleStar(del))}
             {!del.deleted && (isPinned
               ? row('pin', t.unpinMessage, async () => { const m = del; setDel(null); await api(`/messages/${m.id}/pin`, { method: 'DELETE' }).catch(() => {}); loadPins(); })
               : row('pin', t.pinMessage, () => { setPinning(del); setDel(null); }))}
+            {!del.deleted && del.kind !== 'system' && !del.pending && del.id > 0 && row('bell', remindedHere.has(del.id) ? t.rem.at.replace('{when}', '\u2068' + new Date(remindedHere.get(del.id)!.at).toLocaleString(intlLocale(lang), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) + '\u2069') : t.rem.title, () => { setReminding(del); setDel(null); })}
             {!del.deleted && del.userId === me.id && del.kind !== 'system' && !del.pending && row('check-double', t.msgInfo, () => { const m = del; setDel(null); openInfo(m); })}
             {!!circle.agentActive && !del.deleted && !!del.body && del.archiveStatus !== 'archived' && del.archiveStatus !== 'rejected' && row('memory', t.archiveThis, () => { const m = del; setDel(null); archiveManually(m); })}
             {del.userId !== me.id && del.kind !== 'system' && !del.deleted && row('alert', t.report, () => { setReporting(del); setReported(false); setDel(null); })}
@@ -1469,7 +1773,7 @@ function Archive({ circle }: { circle: CircleDetail }) {
       <div className="flex flex-col sm:flex-row gap-2">
         <label className="w-full sm:flex-1 shrink-0 flex items-center gap-2.5 h-11 px-4 rounded-xl bg-card border border-line elevated-1
           transition-[border-color,box-shadow] duration-[var(--dur-fast)]
-          focus-within:border-green focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-focus)_16%,transparent)]">
+          focus-within:border-green focus-within:shadow-[inset_0_0_0_1px_var(--color-green)]">
           <Icon name="search" className="w-[18px] h-[18px] text-muted shrink-0" />
           <input className="bare-input flex-1 min-w-0 bg-transparent text-ink placeholder:text-muted" type="search"
             placeholder={t.searchArchive} aria-label={t.searchArchive} value={q} onChange={e => setQ(e.target.value)} />
@@ -1589,6 +1893,66 @@ function MessagesSkeleton() {
 }
 
 /** The whole chat screen before the chat itself has loaded: header, tabs, bubbles, composer. */
+/**
+ * The bar that stands in for the message box while a message request waits: who this is, and the four answers.
+ * Accepting turns the chat into an ordinary one; declining, blocking and reporting take it out of the list.
+ */
+function RequestBar({ circle, me, lastText, onAccepted, onGone }: { circle: CircleDetail; me: Me; lastText: string; onAccepted: () => void; onGone: () => void }) {
+  const { t } = useI18n();
+  const [busy, setBusy] = useState<'' | 'accept' | 'decline' | 'block' | 'report'>('');
+  const [error, setError] = useState('');
+  const [confirmBlock, setConfirmBlock] = useState(false);
+  const [reporting, setReporting] = useState(false);
+  const name = circle.members.find(x => x.id !== me.id)?.name ?? circle.name;
+  async function answer(kind: 'accept' | 'decline' | 'block' | 'report', reason?: string) {
+    setBusy(kind); setError('');
+    try {
+      if (kind === 'accept') { await api(`/requests/${circle.id}/accept`, { method: 'POST', body: {} }); onAccepted(); }
+      else if (kind === 'report') { await api(`/requests/${circle.id}/report`, { body: { reason, ...(circle.encrypted ? { snapshot: lastText.slice(0, 1000) } : {}) } }); onGone(); }
+      else { await api(`/requests/${circle.id}/decline`, { body: { block: kind === 'block' } }); onGone(); }
+    } catch (err) { setError(t.errors[err instanceof ApiError ? err.code : 'generic'] ?? t.errors.generic); setBusy(''); }
+  }
+  return (
+    <section aria-label={t.req.title} className="mt-2 rounded-2xl bg-card border border-line elevated-1 p-4 animate-fade-in">
+      <div className="flex items-start gap-3">
+        <span aria-hidden className="w-10 h-10 rounded-xl bg-gold/15 text-gold-dark flex items-center justify-center shrink-0"><Icon name="envelope" className="w-5 h-5" /></span>
+        <div className="min-w-0">
+          <p className="font-bold text-ink">{fill(t.req.banner, { name })}</p>
+          <p className="text-sm text-muted mt-0.5">{t.req.bannerHelp}</p>
+        </div>
+      </div>
+      {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
+      <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <button className="btn btn-primary inline-flex items-center justify-center gap-2" disabled={!!busy} onClick={() => answer('accept')}>{busy === 'accept' ? <Spinner /> : <Icon name="check" className="w-4 h-4" />}{t.req.accept}</button>
+        <button className="btn btn-ghost inline-flex items-center justify-center gap-2" disabled={!!busy} onClick={() => answer('decline')}>{busy === 'decline' ? <Spinner /> : <Icon name="x" className="w-4 h-4" />}{t.req.decline}</button>
+        <button className="btn btn-ghost text-danger inline-flex items-center justify-center gap-2" disabled={!!busy} onClick={() => setConfirmBlock(true)}><Icon name="ban" className="w-4 h-4" />{t.req.block}</button>
+        <button className="btn btn-ghost text-danger inline-flex items-center justify-center gap-2" disabled={!!busy} onClick={() => setReporting(true)}><Icon name="alert" className="w-4 h-4" />{t.req.report}</button>
+      </div>
+      {confirmBlock && (
+        <Dialog onClose={() => setConfirmBlock(false)} label={t.req.block}>
+          <h2 className="text-lg font-bold">{fill(t.req.blockConfirm, { name })}</h2>
+          <div className="mt-4 flex gap-2">
+            <button className="btn btn-danger flex-1 inline-flex items-center justify-center gap-2" disabled={!!busy} onClick={() => answer('block')}>{busy === 'block' && <Spinner />}{t.req.block}</button>
+            <button className="btn btn-ghost" onClick={() => setConfirmBlock(false)}>{t.cancel}</button>
+          </div>
+        </Dialog>
+      )}
+      {reporting && (
+        <Dialog onClose={() => setReporting(false)} label={t.req.report}>
+          <h2 className="text-lg font-bold">{fill(t.req.reportTitle, { name })}</h2>
+          <p className="text-sm text-muted mt-2">{t.req.reportHelp}</p>
+          <div className="mt-3 flex flex-col gap-2">
+            {Object.entries(t.reportReasons).map(([k, label]) => (
+              <button key={k} className="btn btn-ghost" disabled={!!busy} onClick={() => answer('report', k)}>{label}</button>
+            ))}
+          </div>
+          <button className="btn btn-ghost w-full mt-3" onClick={() => setReporting(false)}>{t.cancel}</button>
+        </Dialog>
+      )}
+    </section>
+  );
+}
+
 function ChatSkeleton({ docked }: { docked?: boolean }) {
   return (
     <div className={docked ? 'chat-docked flex flex-col h-full' : 'flex flex-col h-[100dvh] py-2'}>
@@ -2003,6 +2367,31 @@ function Settings({ circle, me, reload, onLeft, openArchive }: { circle: CircleD
             </div>
           </div>
           <Toggle checked={circle.inviteEnabled} onChange={v => patch({ inviteEnabled: v })} label={t.inviteEnabled} />
+          {/* GRP-02: how long a link lives, and what a newcomer may read. A family circle's past is never hidden. */}
+          {circle.inviteEnabled && (
+            <div>
+              <span className="block text-sm font-medium mb-1.5">{t.priv.inviteLife}</span>
+              <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={t.priv.inviteLife}>
+                {([null, 1, 7, 30] as Array<number | null>).map(d => {
+                  const on = d === null ? !circle.inviteExpiresAt : false;
+                  return <button key={String(d)} type="button" role="radio" aria-checked={on}
+                    className={`btn btn-ghost !py-1 ${on ? '!border-green !text-green font-bold' : ''}`}
+                    onClick={() => api(`/circles/${circle.id}/invite/expiry`, { method: 'PUT', body: { days: d } }).then(reload).catch(() => {})}>
+                    {d === null ? t.priv.inviteForever : d === 1 ? t.priv.inviteDay1 : t.priv.inviteDays.replace('{n}', String(d))}
+                  </button>;
+                })}
+              </div>
+              {circle.inviteExpiresAt && <p className="mt-1 text-xs text-muted">{t.priv.inviteEndsOn.replace('{date}', toDate(circle.inviteExpiresAt).toLocaleString(intlLocale(lang), { dateStyle: 'medium', timeStyle: 'short' }))}</p>}
+            </div>
+          )}
+          {circle.kind !== 'circle' && (
+            <div>
+              <span className="block text-sm font-medium mb-1.5">{t.priv.historyHead}</span>
+              <Picker label={t.priv.historyHead} value={circle.historyPolicy ?? 'all'} onChange={v => patch({ historyPolicy: v })}
+                options={[{ value: 'all', label: t.priv.historyAll }, { value: 'since_join', label: t.priv.historySince }]} />
+              <p className="mt-1 text-xs text-muted">{t.priv.historyNote}</p>
+            </div>
+          )}
         </section>
       )}
 
@@ -2055,6 +2444,7 @@ function Settings({ circle, me, reload, onLeft, openArchive }: { circle: CircleD
                   {!self && presence.get(m.id)?.online && <span role="img" aria-label={t.online} title={t.online} className="ms-2 inline-block w-2 h-2 rounded-full bg-green align-middle" />}
                   {m.role === 'owner' && <span className="ms-2 text-xs text-gold-dark">{t.owner}</span>}
                   {m.role === 'admin' && <span className="ms-2 text-xs text-green">{t.roleAdmin}</span>}
+                  {m.about && <span className="block text-xs text-muted truncate" dir="auto" title={m.about} data-about>{m.about}</span>}
                 </span>
                 {!self && <button className="text-xs text-green underline" onClick={() => api<{ id: number }>('/direct', { body: { userId: m.id } }).then(r => { location.hash = `/circle/${r.id}`; }).catch(() => {})}>{t.messagePrivately}</button>}
                 {owner && !self && m.role !== 'owner' && (

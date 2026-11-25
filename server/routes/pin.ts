@@ -7,7 +7,7 @@ import { isLang } from '../lib/lang.ts';
 import { deleteCookie, getCookie } from 'hono/cookie';
 import { normPhone, requireAuth } from '../lib/helpers.ts';
 import { isLastSeenPrivacy, presencePrivacyChanged, presenceViewers } from '../lib/presence.ts';
-import { one, run } from '../db.ts';
+import { all, type Row, one, run } from '../db.ts';
 import { isBanned, suspension } from '../lib/admin.ts';
 import { rekeyAllFor } from '../lib/e2ee.ts';
 
@@ -81,6 +81,8 @@ app.post('/api/me/pin/remove', async c => {
   run('UPDATE users SET pin_hash = NULL, pin_fails = 0, pin_locked_until = NULL, pin_reset_at = NULL WHERE id = ?', u.id);
   return c.json({ ok: true });
 });
+/** The longest 'about' line, in characters as a person counts them (an emoji is one). */
+export const ABOUT_MAX = 140;
 app.get('/api/me', c => c.json(c.get('user')));
 app.patch('/api/me', async c => {
   const b = await c.req.json().catch(() => ({}));
@@ -100,10 +102,17 @@ app.patch('/api/me', async c => {
   const lastSeen = isLastSeenPrivacy(b.last_seen_privacy) ? b.last_seen_privacy : u.last_seen_privacy;
   // 1 (the default, as in WhatsApp): an archived chat stays archived when a message arrives. 0: a new message brings it back to the list.
   const keepArchived = typeof b.keep_archived === 'boolean' ? (b.keep_archived ? 1 : 0) : u.keep_archived;
+  // AUTH-01's optional bio: one line, at most ABOUT_MAX characters. An empty string removes it.
+  let about = (u.about as string | null | undefined) ?? null;
+  if (typeof b.about === 'string') {
+    const line = b.about.replace(/\s+/g, ' ').trim();
+    if ([...line].length > ABOUT_MAX) return c.json({ error: 'too_long' }, 413);
+    about = line || null;
+  }
   const viewersBefore = lastSeen !== u.last_seen_privacy ? presenceViewers(u.id) : null;
-  run('UPDATE users SET name = ?, lang = ?, read_receipts = ?, push_preview = ?, email = ?, last_seen_privacy = ?, keep_archived = ? WHERE id = ?', name, lang, receipts, preview, email, lastSeen, keepArchived, u.id);
+  run('UPDATE users SET name = ?, lang = ?, read_receipts = ?, push_preview = ?, email = ?, last_seen_privacy = ?, keep_archived = ?, about = ? WHERE id = ?', name, lang, receipts, preview, email, lastSeen, keepArchived, about, u.id);
   if (viewersBefore) presencePrivacyChanged(u.id, viewersBefore);   // people who can no longer see you are told to forget you now
-  return c.json({ ...u, name, lang, read_receipts: receipts, push_preview: preview, email, last_seen_privacy: lastSeen, keep_archived: keepArchived });
+  return c.json({ ...u, name, lang, read_receipts: receipts, push_preview: preview, email, last_seen_privacy: lastSeen, keep_archived: keepArchived, about });
 });
 // Account deletion wipes the user's data (report §11, "right to be forgotten").
 app.delete('/api/me', async c => {
@@ -117,4 +126,27 @@ app.delete('/api/me', async c => {
   if (avatar) await dropBlobIfUnused(avatar);   // the profile picture goes with the account
   deleteCookie(c, 'thikra_session', { path: '/' });
   return c.json({ ok: true });
+});
+
+// ---- where you are signed in (RT-03) ----------------------------------------------------------
+// A session IS a device here. The list shows what the browser said it is, when it was first used and when it was
+// last used, and lets any of them be ended — including this one, which is simply signing out. No token, hashed or
+// otherwise, ever leaves the server; the rowid is the handle.
+app.get('/api/me/sessions', c => {
+  const mine = c.get('sessionId');
+  return c.json(all(
+    `SELECT rowid AS id, user_agent AS userAgent, created_at AS createdAt, last_seen_at AS lastSeenAt, expires_at AS expiresAt
+       FROM sessions WHERE user_id = ? AND expires_at > ? ORDER BY (rowid = ?) DESC, COALESCE(last_seen_at, created_at) DESC`,
+    c.get('user').id, Date.now(), mine).map((s: Row) => ({ ...s, current: s.id === mine })));
+});
+app.delete('/api/me/sessions/:id', c => {
+  const id = Number(c.req.param('id'));
+  const r = run('DELETE FROM sessions WHERE rowid = ? AND user_id = ?', id, c.get('user').id);
+  if (!Number(r.changes)) return c.json({ error: 'not_found' }, 404);
+  return c.json({ ok: true, signedOutHere: id === c.get('sessionId') });
+});
+/** Everything except the one asking: what you press when a device is lost. */
+app.post('/api/me/sessions/revoke-others', c => {
+  const r = run('DELETE FROM sessions WHERE user_id = ? AND rowid != ?', c.get('user').id, c.get('sessionId'));
+  return c.json({ ended: Number(r.changes) });
 });

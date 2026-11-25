@@ -7,13 +7,25 @@ import { isEncrypted } from './e2ee.ts';
 // One envelope for all of them: the message is a normal message (ordered, synced, replied to, deleted like any other) and ONE row
 // beside it says what it carries. The server never reads a message's text to build a card: the sender's device names it.
 
-export type CardType = 'link' | 'gif' | 'sticker' | 'contact' | 'location';
+export type CardType = 'link' | 'gif' | 'sticker' | 'contact' | 'location' | 'live';
 export type Card =
   | { type: 'link'; url: string; title: string; description: string; site: string; image: number | null }
   | { type: 'gif'; provider: string; title: string }
   | { type: 'sticker'; pack: string; id: string }
   | { type: 'contact'; name: string; phones: string[] }
-  | { type: 'location'; lat: number; lng: number; accuracy: number | null; label: string | null };
+  | { type: 'location'; lat: number; lng: number; accuracy: number | null; label: string | null }
+  | { type: 'live'; lat: number; lng: number; accuracy: number | null; until: string; ended: boolean; at: string };
+
+/** How long a live location may run for. */
+export const LIVE_MINUTES = [15, 60, 480];
+
+/** A point on the earth as given by a device, or null if it is not one. Six decimals is about 10 cm: more is noise, not accuracy. */
+export function cleanPoint(b: Row): { lat: number; lng: number; accuracy: number | null } | null {
+  const { lat, lng } = b;
+  if (typeof lat !== 'number' || typeof lng !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  const acc = typeof b.accuracy === 'number' && Number.isFinite(b.accuracy) && b.accuracy >= 0 ? Math.min(Math.round(b.accuracy), 1_000_000) : null;
+  return { lat: Math.round(lat * 1e6) / 1e6, lng: Math.round(lng * 1e6) / 1e6, accuracy: acc };
+}
 
 const text = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max) : '');
 
@@ -27,11 +39,17 @@ export function cleanCard(b: Row): { type: CardType; data: Record<string, unknow
     return { type: 'contact', data: { name, phones } };
   }
   if (b.type === 'location') {
-    const lat = b.lat, lng = b.lng;
-    if (typeof lat !== 'number' || typeof lng !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
-    const acc = typeof b.accuracy === 'number' && Number.isFinite(b.accuracy) && b.accuracy >= 0 ? Math.min(Math.round(b.accuracy), 1_000_000) : null;
-    // Six decimals is about 10 cm: more is noise, not accuracy.
-    return { type: 'location', data: { lat: Math.round(lat * 1e6) / 1e6, lng: Math.round(lng * 1e6) / 1e6, accuracy: acc, label: text(b.label, 100) || null } };
+    const point = cleanPoint(b);
+    return point ? { type: 'location', data: { ...point, label: text(b.label, 100) || null } } : null;
+  }
+  if (b.type === 'live') {
+    // Live location: the same point as a plain location, plus the moment it stops. It never runs on and on —
+    // the longest anyone can share is eight hours, and the sender can stop it at any time.
+    const point = cleanPoint(b);
+    if (!point) return null;
+    const minutes = LIVE_MINUTES.includes(Number(b.minutes)) ? Number(b.minutes) : 0;
+    if (!minutes) return null;
+    return { type: 'live', data: { ...point, until: new Date(Date.now() + minutes * 60_000).toISOString(), ended: false, at: new Date().toISOString() } };
   }
   if (b.type === 'sticker') {
     const s = findSticker(b.pack, b.id);

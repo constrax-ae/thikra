@@ -9,6 +9,16 @@ import { memberJoined } from '../live.ts';
 
 export const MAX_PINNED = 3;
 /** The one-to-one chat of two people (one per pair AND per kind: a readable one and an encrypted one are different chats, never converted into each other), created if it does not exist yet. */
+/** Whether `userId` already knows `otherId` here: they share a circle or a group, or `userId` started or accepted a one-to-one chat with them. */
+export function knownTo(userId: number, otherId: number): boolean {
+  return !!one(`SELECT 1 FROM circle_members a JOIN circle_members o ON o.circle_id = a.circle_id JOIN circles ci ON ci.id = a.circle_id
+                 WHERE a.user_id = ? AND o.user_id = ? AND ci.deleted_at IS NULL AND (ci.kind != 'direct' OR a.request = 0) LIMIT 1`, userId, otherId);
+}
+/**
+ * The one-to-one chat of two people, created if there is none. When the one being written to does not know the
+ * writer (no shared circle or group, no chat they ever accepted), it arrives as a message request: it waits outside
+ * their chat list, wakes no phone, and sends no read receipt, until they accept it.
+ */
 export function directChat(userId: number, otherId: number, encrypted = false): { id: number; created: boolean } {
   const existing = one(
     `SELECT c.id FROM circles c
@@ -19,7 +29,7 @@ export function directChat(userId: number, otherId: number, encrypted = false): 
   const r = run("INSERT INTO circles (name, owner_id, invite_code, invite_enabled, kind, region, encrypted) VALUES ('', ?, ?, 0, 'direct', ?, ?)", userId, randomBytes(5).toString('hex'), REGION, encrypted ? 1 : 0);
   const id = Number(r.lastInsertRowid);
   run("INSERT INTO circle_members (circle_id, user_id, role) VALUES (?, ?, 'owner')", id, userId);
-  run("INSERT INTO circle_members (circle_id, user_id, role) VALUES (?, ?, 'member')", id, otherId);
+  run("INSERT INTO circle_members (circle_id, user_id, role, request) VALUES (?, ?, 'member', ?)", id, otherId, knownTo(otherId, userId) ? 0 : 1);
   memberJoined(id, [userId, otherId]);
   return { id, created: true };
 }

@@ -57,8 +57,8 @@ export function endSending() {
 // ---- the media outbox's way to the server (web/src/uploads.ts has the rules) ----
 const fail = (e: unknown): UploadError => (e instanceof ApiError ? { code: e.code, offset: e.data.offset, max: e.data.max } : { code: 'generic' });
 const uploadTransport = {
-  async open(circle: number, name: string, size: number, signal: AbortSignal) {
-    try { return await api<{ id: string }>(`/circles/${circle}/uploads`, { body: { name, size }, signal }); } catch (e) { throw fail(e); }
+  async open(circle: number, name: string, size: number, checksum: string | null, signal: AbortSignal) {
+    try { return await api<{ id: string }>(`/circles/${circle}/uploads`, { body: { name, size, ...(checksum ? { checksum } : {}) }, signal }); } catch (e) { throw fail(e); }
   },
   async offset(id: string, signal: AbortSignal) {
     try { return (await api<{ offset: number }>(`/uploads/${id}`, { signal })).offset; }

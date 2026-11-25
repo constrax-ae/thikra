@@ -119,8 +119,9 @@ test('documents and video: documents are always a download; risky or fake files 
   // type comes from the bytes: PDF bytes named .jpg are stored as a PDF (a download), not as an image
   const sneaky = await upload(a.cookie, circle, [{ name: 'photo.jpg', data: PDF }]);
   assert.equal((await messages(a.cookie, circle)).find(m => m.id === sneaky.json.id).attachments[0].kind, 'file');
-  // too many files
-  const many = await upload(a.cookie, circle, Array.from({ length: 11 }, (_, i) => ({ name: `p${i}.jpg`, data: JPEG })));
+  // too many files: twenty in one message is the limit the specification names (MED-05), and twenty-one is refused
+  assert.equal((await upload(a.cookie, circle, Array.from({ length: 20 }, (_, i) => ({ name: `p${i}.jpg`, data: JPEG })))).status, 201);
+  const many = await upload(a.cookie, circle, Array.from({ length: 21 }, (_, i) => ({ name: `p${i}.jpg`, data: JPEG })));
   assert.equal(many.status, 400);
   // a refused upload leaves nothing behind: no message
   const before = (await messages(a.cookie, circle)).length;

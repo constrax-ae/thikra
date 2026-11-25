@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { BLOCKED_NAME, cleanName, sniff, sniffText, type Sniffed } from '../sniff.ts';
 import { MAX_FILES, MAX_IMAGE, MAX_OTHER, MAX_THUMB, serveMedia } from '../lib/attachments.ts';
 import { afterMessage, blockedInDirect, isFile } from '../lib/moments.ts';
@@ -34,7 +35,7 @@ app.post('/api/circles/:id/attachments', async c => {
   }
 
   // The files come either inside this request, or as the ids of resumable uploads that have finished (POST /api/circles/:id/uploads); never a mix.
-  type Incoming = { name: string; size: number; read(): Promise<Buffer | null>; uploadId?: string };
+  type Incoming = { name: string; size: number; checksum?: string | null; read(): Promise<Buffer | null>; uploadId?: string };
   const direct = (list(form.file).filter(isFile) as File[]).map((f): Incoming => ({ name: f.name, size: f.size, read: async () => Buffer.from(await f.arrayBuffer()) }));
   const ids = list(form.upload);
   if (direct.length && ids.length) return c.json({ error: 'invalid_attachment' }, 400);
@@ -43,7 +44,7 @@ app.post('/api/circles/:id/attachments', async c => {
     const up = uploadOf(id, a.user.id);
     if (!up || up.circle_id !== a.circleId || resumed.some(x => x.uploadId === up.id)) return c.json({ error: 'upload_not_found' }, 404);
     if (up.received !== up.size) return c.json({ error: 'upload_incomplete', offset: up.received }, 409);
-    resumed.push({ name: up.name, size: up.size, read: () => readUpload(up), uploadId: up.id });
+    resumed.push({ name: up.name, size: up.size, checksum: (up.checksum as string | null) ?? null, read: () => readUpload(up), uploadId: up.id });
   }
   const uploads = direct.length ? direct : resumed;
   if (!uploads.length || uploads.length > (once ? 1 : MAX_FILES)) return c.json({ error: 'invalid_attachment' }, 400);
@@ -56,6 +57,12 @@ app.post('/api/circles/:id/attachments', async c => {
     if (f.size > MAX_OTHER) return c.json({ error: 'attachment_too_large', max: MAX_OTHER, name }, 413);
     const buf = await f.read();
     if (!buf) return c.json({ error: 'upload_not_found' }, 404);
+    // MED-05: what arrived must be what the sender said they were sending. A mismatch is a corrupt or tampered
+    // upload, so no message is made and the pieces are dropped.
+    if (f.checksum && createHash('sha256').update(buf).digest('hex') !== f.checksum) {
+      for (const g of resumed) await dropUpload(g.uploadId!);
+      return c.json({ error: 'checksum_mismatch' }, 422);
+    }
     const sn = sniff(buf) ?? sniffText(name, buf);
     if (!sn) return c.json({ error: 'invalid_attachment' }, 400);
     if (sn.family === 'image' && sn.inline && buf.length > MAX_IMAGE) return c.json({ error: 'attachment_too_large', max: MAX_IMAGE, name }, 413);

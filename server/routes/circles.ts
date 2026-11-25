@@ -2,7 +2,7 @@ import { MAX_PINNED, RESTORE_DAYS, directChat } from '../lib/circles.ts';
 import { REGION, app } from '../app.ts';
 import { all, one, run, type Row } from '../db.ts';
 import { circleAccess, circleChanged, ensurePerson, isFrozen, isManager, limited, membership, normPhone, systemMessage, tx } from '../lib/helpers.ts';
-import { addMember, tellManagers } from '../lib/groups.ts';
+import { addMember, chatIsFull, tellManagers } from '../lib/groups.ts';
 import { randomBytes } from 'node:crypto';
 import { toMs } from '../lib/deletes.ts';
 import { e2eeEnabled, isEncrypted, requireRekey } from '../lib/e2ee.ts';
@@ -22,15 +22,18 @@ app.get('/api/circles', c => {
        CASE WHEN c.kind = 'direct' THEN (SELECT o.user_id FROM circle_members o WHERE o.circle_id = c.id AND o.user_id != cm.user_id) END AS peerId,
        CASE WHEN c.kind = 'direct' THEN (SELECT u.avatar_at FROM circle_members o JOIN users u ON u.id = o.user_id WHERE o.circle_id = c.id AND o.user_id != cm.user_id) END AS peerAvatarAt,
        (SELECT COUNT(*) FROM circle_members WHERE circle_id = c.id) AS members,
-       (SELECT id FROM messages WHERE circle_id = c.id AND kind != 'system' AND expired_at IS NULL AND COALESCE(enc_kind, '') NOT IN ('edit', 'ctl') ORDER BY id DESC LIMIT 1) AS lastId,
+       (SELECT id FROM messages WHERE circle_id = c.id AND kind != 'system' AND expired_at IS NULL AND COALESCE(enc_kind, '') NOT IN ('edit', 'ctl')
+          AND seq > MAX(COALESCE(p.clear_through, 0), CASE WHEN c.history_policy = 'since_join' THEN COALESCE(cm.joined_seq, 0) ELSE 0 END)
+        ORDER BY id DESC LIMIT 1) AS lastId,
        (SELECT COUNT(*) FROM messages m WHERE m.circle_id = c.id AND m.seq > cm.read_seq AND m.kind != 'system' AND COALESCE(m.enc_kind, '') NOT IN ('edit', 'ctl') AND m.deleted_at IS NULL
+          AND m.seq > MAX(COALESCE(p.clear_through, 0), CASE WHEN c.history_policy = 'since_join' THEN COALESCE(cm.joined_seq, 0) ELSE 0 END)
           AND (m.user_id IS NULL OR m.user_id != cm.user_id)) AS unread,
        p.pinned_at AS pinnedAt, CASE WHEN p.muted = 1 AND (p.muted_until IS NULL OR p.muted_until > datetime('now')) THEN 1 ELSE 0 END AS muted, p.muted_until AS mutedUntil, COALESCE(p.archived, 0) AS archived,
-       COALESCE(p.favourite, 0) AS favourite, COALESCE(p.marked_unread, 0) AS markedUnread, COALESCE(p.locked, 0) AS locked, p.wallpaper, c.disappear_seconds AS disappearSeconds,
+       cm.request AS request, COALESCE(p.favourite, 0) AS favourite, COALESCE(p.marked_unread, 0) AS markedUnread, COALESCE(p.locked, 0) AS locked, p.wallpaper, c.disappear_seconds AS disappearSeconds,
        EXISTS (SELECT 1 FROM message_mentions mm JOIN messages m ON m.id = mm.message_id
                 WHERE mm.user_id = cm.user_id AND m.circle_id = c.id AND m.seq > cm.read_seq AND m.deleted_at IS NULL
                   AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = cm.user_id)) AS mentioned
-     FROM circles c JOIN circle_members cm ON cm.circle_id = c.id AND cm.user_id = ? AND c.deleted_at IS NULL
+     FROM circles c JOIN circle_members cm ON cm.circle_id = c.id AND cm.user_id = ? AND c.deleted_at IS NULL AND cm.request != 2   -- a declined request stays out of the list
      LEFT JOIN chat_prefs p ON p.circle_id = c.id AND p.user_id = cm.user_id`, u.id);
   const out: Row[] = rows.map(r => {
     const m = r.lastId ? one(
@@ -42,7 +45,7 @@ app.get('/api/circles', c => {
     const lastKind = !m ? null : m.deleted ? 'deleted' : r.encrypted ? 'encrypted' : m.card ?? m.attachment ?? (m.kind === 'voice' ? 'voice' : 'text');
     const { lastId, ...rest } = r;
     return {
-      ...rest, encrypted: !!r.encrypted, locked: !!r.locked, mentioned: !!r.mentioned, pinned: !!r.pinnedAt, muted: !!r.muted, archived: !!r.archived, favourite: !!r.favourite, markedUnread: !!r.markedUnread,
+      ...rest, request: r.request === 1, encrypted: !!r.encrypted, locked: !!r.locked, mentioned: !!r.mentioned, pinned: !!r.pinnedAt, muted: !!r.muted, archived: !!r.archived, favourite: !!r.favourite, markedUnread: !!r.markedUnread,
       // A locked chat shows nothing of what was said: no text, no kind (the person asked for it to stay out of sight).
       lastMessage: m && !m.deleted && !r.locked ? (m.body || m.transcript || null) : null,   // kept for older clients
       lastKind: r.locked ? null : lastKind, lastText: m && !m.deleted && !r.locked ? (m.body || m.transcript || '') : '', lastAt: m?.created_at ?? r.createdAt,
@@ -72,6 +75,11 @@ app.patch('/api/circles/:id/prefs', async c => {
     // Mute for 8 hours, a week, or always (like WhatsApp). Unmuting clears it.
     const hours = b.muted && Number.isFinite(b.muteHours) && b.muteHours > 0 && b.muteHours <= 24 * 365 ? Math.floor(b.muteHours) : null;
     run(`UPDATE chat_prefs SET muted = ?, muted_until = ${hours ? `datetime('now', '+${hours} hours')` : 'NULL'} WHERE user_id = ? AND circle_id = ?`, b.muted ? 1 : 0, a.user.id, a.circleId);
+  }
+  if (b.notify !== undefined) {
+    // What this chat may interrupt you with. 'all' is the normal state and is stored as nothing at all.
+    if (!['all', 'mentions', 'none'].includes(String(b.notify))) return c.json({ error: 'invalid_value' }, 400);
+    run('UPDATE chat_prefs SET notify = ? WHERE user_id = ? AND circle_id = ?', b.notify === 'all' ? null : b.notify, a.user.id, a.circleId);
   }
   if (b.wallpaper !== undefined) {
     if (b.wallpaper !== null && !isWallpaper(b.wallpaper)) return c.json({ error: 'invalid_value' }, 400);
@@ -144,8 +152,10 @@ app.post('/api/circles/join', async c => {
   const u = c.get('user');
   const b = await c.req.json().catch(() => ({}));
   if (await limited(`join:${u.id}`, 20, 10 * 60_000)) return c.json({ error: 'too_many_requests' }, 429);
-  const circle = one('SELECT id, name, join_approval FROM circles WHERE invite_code = ? AND invite_enabled = 1 AND deleted_at IS NULL', String(b.code ?? '').trim());
+  const circle = one('SELECT id, name, join_approval, invite_expires_at FROM circles WHERE invite_code = ? AND invite_enabled = 1 AND deleted_at IS NULL', String(b.code ?? '').trim());
   if (!circle) return c.json({ error: 'invalid_invite' }, 404);
+  // An invite can be given a life: after it, the link is simply not a link any more (GRP-02). The code itself stays, so a manager can extend it.
+  if (circle.invite_expires_at && one("SELECT datetime('now') > ? AS gone", circle.invite_expires_at)!.gone) return c.json({ error: 'invite_expired' }, 410);
   if (isFrozen(circle.id)) return c.json({ error: 'circle_frozen' }, 423);
   if (!membership(circle.id, u.id)) {
     // With approval on, the link only files a request: the person is told it was sent and learns nothing else about the group until a manager approves.
@@ -158,6 +168,7 @@ app.post('/api/circles/join', async c => {
       }
       return c.json({ pending: true }, 202);
     }
+    if (chatIsFull(circle.id)) return c.json({ error: 'chat_full' }, 409);
     addMember(circle.id, u);
   }
   return c.json({ id: circle.id });
@@ -167,28 +178,30 @@ app.get('/api/circles/:id', c => {
   if (!a) return c.json({ error: 'not_found' }, 404);
   const circle = one(
     `SELECT id, kind, encrypted, e2ee_epoch AS e2eeEpoch, e2ee_min_epoch AS e2eeMinEpoch, CASE WHEN kind = 'direct' THEN (SELECT u.name FROM circle_members o JOIN users u ON u.id = o.user_id WHERE o.circle_id = circles.id AND o.user_id != ?) ELSE name END AS name, sensitivity, agent_active AS agentActive, owner_id AS ownerId, invite_code AS inviteCode,
-       invite_policy AS invitePolicy, invite_enabled AS inviteEnabled, created_at AS createdAt, story_title AS storyTitle,
+       invite_policy AS invitePolicy, invite_enabled AS inviteEnabled, invite_expires_at AS inviteExpiresAt, history_policy AS historyPolicy, created_at AS createdAt, story_title AS storyTitle,
        description, photo_media_id AS photo, disappear_seconds AS disappearSeconds, send_policy AS sendPolicy, edit_policy AS editPolicy, join_approval AS joinApproval FROM circles WHERE id = ?`, a.user.id, a.circleId)!;
-  const pref = one(`SELECT locked, wallpaper, CASE WHEN muted = 1 AND (muted_until IS NULL OR muted_until > datetime('now')) THEN 1 ELSE 0 END AS muted, muted_until AS mutedUntil, favourite FROM chat_prefs WHERE user_id = ? AND circle_id = ?`, a.user.id, a.circleId);
+  const pref = one(`SELECT locked, wallpaper, notify, CASE WHEN muted = 1 AND (muted_until IS NULL OR muted_until > datetime('now')) THEN 1 ELSE 0 END AS muted, muted_until AS mutedUntil, favourite FROM chat_prefs WHERE user_id = ? AND circle_id = ?`, a.user.id, a.circleId);
   // deliveredSeq / readSeq are each member's "up to here" marks, the basis of the ticks. As in WhatsApp, read marks are
   // reciprocal: you see another member's only if both of you have read receipts on (your own are always yours).
   const mine = a.user.read_receipts === 1;
   const members = all(
-    `SELECT u.id, u.name, cm.role, cm.delivered_seq AS deliveredSeq, cm.read_seq AS readSeq, u.read_receipts AS shares, u.avatar_at AS avatarAt
-       FROM circle_members cm JOIN users u ON u.id = cm.user_id WHERE cm.circle_id = ? ORDER BY cm.joined_at`, a.circleId)
+    `SELECT u.id, u.name, cm.role, cm.delivered_seq AS deliveredSeq, cm.read_seq AS readSeq, u.read_receipts AS shares, u.avatar_at AS avatarAt,
+            CASE WHEN EXISTS (SELECT 1 FROM blocks b WHERE b.user_id = u.id AND b.blocked_id = ?) THEN NULL ELSE u.about END AS about   -- someone who blocked you shows you no profile line
+       FROM circle_members cm JOIN users u ON u.id = cm.user_id WHERE cm.circle_id = ? ORDER BY cm.joined_at`, a.user.id, a.circleId)
     .map(({ shares, ...m }) => ({ ...m, readSeq: m.id === a.user.id || (mine && shares === 1) ? m.readSeq : null }));
   // The invite code is shown to managers, or to every member if the circle lets anyone invite. Never when invites are off.
   const sees = circle.inviteEnabled && (isManager(a.role) || circle.invitePolicy === 'members');
   // How many people wait for approval: managers only.
   const joinRequests = isManager(a.role) ? one('SELECT COUNT(*) AS n FROM join_requests WHERE circle_id = ?', a.circleId)!.n as number : undefined;
-  return c.json({ ...circle, encrypted: !!circle.encrypted, joinApproval: !!circle.joinApproval, joinRequests, inviteEnabled: !!circle.inviteEnabled, inviteCode: sees ? circle.inviteCode : undefined, role: a.role, members, muted: !!pref?.muted, mutedUntil: pref?.muted ? pref.mutedUntil ?? null : null, favourite: !!pref?.favourite, locked: !!pref?.locked, wallpaper: pref?.wallpaper ?? null,
+  const request = (one('SELECT request FROM circle_members WHERE circle_id = ? AND user_id = ?', a.circleId, a.user.id)?.request ?? 0) === 1;   // a message request still waiting for your answer
+  return c.json({ ...circle, request, encrypted: !!circle.encrypted, joinApproval: !!circle.joinApproval, joinRequests, inviteEnabled: !!circle.inviteEnabled, inviteCode: sees ? circle.inviteCode : undefined, role: a.role, members, muted: !!pref?.muted, mutedUntil: pref?.muted ? pref.mutedUntil ?? null : null, favourite: !!pref?.favourite, locked: !!pref?.locked, wallpaper: pref?.wallpaper ?? null, notify: (pref?.notify as string | null) ?? 'all',
     lastSeq: one('SELECT COALESCE(MAX(seq), 0) AS m FROM messages WHERE circle_id = ?', a.circleId)!.m });
 });
 app.patch('/api/circles/:id', async c => {
   const a = circleAccess(c);
   if (!a) return c.json({ error: 'not_found' }, 404);
   const b = await c.req.json().catch(() => ({}));
-  const cur = one('SELECT name, sensitivity, agent_active, invite_policy, invite_enabled, kind, story_title, description, send_policy, edit_policy, join_approval FROM circles WHERE id = ?', a.circleId)!;
+  const cur = one('SELECT name, sensitivity, agent_active, invite_policy, invite_enabled, kind, story_title, description, send_policy, edit_policy, join_approval, history_policy FROM circles WHERE id = ?', a.circleId)!;
   if (cur.kind === 'direct') return c.json({ error: 'forbidden' }, 403); // a one-to-one chat has nothing to configure
   // Two kinds of change. The group's face (name, description) is for managers, or for every member when the group says so.
   // Everything else (who sends, who invites, approval, the agent…) is for managers only: sent by a member, it is ignored.
@@ -207,8 +220,11 @@ app.patch('/api/circles/:id', async c => {
   const joinApproval = only(typeof b.joinApproval === 'boolean' ? (b.joinApproval ? 1 : 0) : cur.join_approval, cur.join_approval);
   // What the family calls its story. Empty clears it (the book then uses its default title).
   const storyTitle = only(typeof b.storyTitle === 'string' ? b.storyTitle.trim().slice(0, 80) || null : (cur.story_title ?? null), cur.story_title ?? null);
-  run(`UPDATE circles SET name = ?, sensitivity = ?, agent_active = ?, invite_policy = ?, invite_enabled = ?, story_title = ?, description = ?, send_policy = ?, edit_policy = ?, join_approval = ? WHERE id = ?`,
-    name, sensitivity, agent, invitePolicy, inviteEnabled, storyTitle, description, sendPolicy, editPolicy, joinApproval, a.circleId);
+  // What a NEW member may read: the whole chat, or only from the moment they joined (GRP-02). A family circle may not
+  // hide its past — the past is what it is for — so the setting exists for ordinary groups only.
+  const history = only(cur.kind === 'circle' ? 'all' : (b.historyPolicy === 'since_join' || b.historyPolicy === 'all' ? b.historyPolicy : cur.history_policy), cur.history_policy);
+  run(`UPDATE circles SET name = ?, sensitivity = ?, agent_active = ?, invite_policy = ?, invite_enabled = ?, story_title = ?, description = ?, send_policy = ?, edit_policy = ?, join_approval = ?, history_policy = ? WHERE id = ?`,
+    name, sensitivity, agent, invitePolicy, inviteEnabled, storyTitle, description, sendPolicy, editPolicy, joinApproval, history, a.circleId);
   // Members must be told when the agent starts/stops reading new messages (report §3.2).
   if (agent !== cur.agent_active) {
     const noticeId = systemMessage(a.circleId, agent ? 'agentOn' : 'agentOff', { name: a.user.name });
@@ -325,4 +341,23 @@ app.get('/api/people', c => {
     chatId: one(`SELECT ci.id FROM circles ci JOIN circle_members a ON a.circle_id = ci.id AND a.user_id = ? JOIN circle_members b ON b.circle_id = ci.id AND b.user_id = ?
                   WHERE ci.kind = 'direct' AND ci.deleted_at IS NULL ORDER BY ci.encrypted DESC, ci.id LIMIT 1`, me, r.id)?.id ?? null,
   })));
+});
+
+/**
+ * How long this invite link lives (GRP-02). `days` 1–365 sets it, `null` makes it permanent again. The code itself is
+ * untouched, so extending a link people already have does not break it; `invite/regenerate` is still how you revoke one.
+ */
+app.put('/api/circles/:id/invite/expiry', async c => {
+  const a = circleAccess(c);
+  if (!a) return c.json({ error: 'not_found' }, 404);
+  if (!isManager(a.role)) return c.json({ error: 'forbidden' }, 403);
+  const b = await c.req.json().catch(() => ({}));
+  if (b.days === null) {
+    run('UPDATE circles SET invite_expires_at = NULL WHERE id = ?', a.circleId);
+    return c.json({ inviteExpiresAt: null });
+  }
+  const days = Number(b.days);
+  if (!Number.isInteger(days) || days < 1 || days > 365) return c.json({ error: 'invalid_value' }, 400);
+  run("UPDATE circles SET invite_expires_at = datetime('now', '+' || ? || ' days') WHERE id = ?", days, a.circleId);
+  return c.json({ inviteExpiresAt: one('SELECT invite_expires_at AS t FROM circles WHERE id = ?', a.circleId)!.t });
 });

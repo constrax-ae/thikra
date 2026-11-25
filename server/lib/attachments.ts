@@ -3,13 +3,14 @@ import { blobs } from '../storage.ts';
 import { type Row } from '../db.ts';
 
 // ---- attachments (images, video, documents) ----------------------------------------------------
-// One message can carry up to 10 files plus a caption. What a file is comes from its BYTES (server/sniff.ts), never from its
-// name or the type the client claims. Prototype limits: one request per message, so 64 MB per video/document and 16 MB per
-// image; the resumable chunked upload for big files is backlog D-03.
+// What a file is comes from its BYTES (server/sniff.ts), never from its name or the type the client claims.
+// The figures are the ones in the chat specification (MED-05 transfer policy): 20 MB an image, 100 MB a video,
+// 100 MB a document, 20 files in one message. Anything over 8 MB goes up in chunks (routes/uploads.ts), so a
+// 100 MB video never depends on one request surviving.
 
-export const MAX_FILES = 10;
-export const MAX_IMAGE = 16 * 1024 * 1024;
-export const MAX_OTHER = 64 * 1024 * 1024;
+export const MAX_FILES = 20;
+export const MAX_IMAGE = 20 * 1024 * 1024;
+export const MAX_OTHER = 100 * 1024 * 1024;   // video and document alike
 export const MAX_THUMB = 300 * 1024;
 
 /** Serve a stored file to someone who is already known to be allowed. Content-addressed, so cacheable forever; images and videos of known types (and now audio) are shown inline, anything else is a download, never rendered. Supports Range. */

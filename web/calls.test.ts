@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fingerprintOf, safetyCode, gradeQuality, readQuality, clock, endKey } from './src/calls.ts';
+import { readFileSync } from 'node:fs';
+import { CALLS_IN_UI, fingerprintOf, safetyCode, gradeQuality, readQuality, clock, endKey } from './src/calls.ts';
 
 const fp = (h: string) => `v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=fingerprint:sha-256 ${h}\r\na=setup:actpass\r\n`;
 
@@ -47,4 +48,15 @@ test('time and end reasons', () => {
   assert.equal(clock(5), '0:05'); assert.equal(clock(65), '1:05'); assert.equal(clock(3725), '1:02:05');
   assert.equal(endKey('declined'), 'declined'); assert.equal(endKey('timeout'), 'noAnswer'); assert.equal(endKey('weird'), 'ended');
   assert.equal(endKey('lost'), 'lost'); assert.equal(endKey('offline'), 'offline'); assert.equal(endKey('cancelled'), 'ended');
+});
+
+/**
+ * The chat specification excludes voice and video calls, and UI-02 says the conversation header has no call buttons.
+ * The machinery below is finished and stays tested, but nothing in the app offers to start a call. If the client
+ * decides to keep calls, CALLS_IN_UI becomes true and the header has its button back.
+ */
+test('nothing in the app offers to start a call (calls are outside the specification)', () => {
+  assert.equal(CALLS_IN_UI, false, 'calls are not offered');
+  const header = readFileSync('web/src/CircleView.tsx', 'utf8');
+  assert.match(header, /\{CALLS_IN_UI && [^}]*<CallButton/, 'and the one place that drew the button asks first');
 });

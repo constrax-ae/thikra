@@ -146,6 +146,8 @@
   --animate-scale-in: scale-in var(--dur-base) var(--ease-emphasis) both;
   --animate-shimmer: shimmer 1.4s linear infinite;
   --animate-pulse-soft: pulse-soft 1.8s var(--ease-standard) infinite;
+  --animate-rec-in: rec-in var(--dur-base) var(--ease-entrance) both;
+  --animate-pop-in: pop-in var(--dur-base) var(--ease-emphasis) both;
 
   @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
   @keyframes slide-up { from { opacity: 0; transform: translateY(0.5rem); } to { opacity: 1; transform: none; } }
@@ -154,6 +156,9 @@
   @keyframes scale-in { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: none; } }
   @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
   @keyframes pulse-soft { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+  /* The recording bar grows out of the round mic button at the inline end. */
+  @keyframes rec-in { from { opacity: 0; transform: scaleX(0.92); } to { opacity: 1; transform: none; } }
+  @keyframes pop-in { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: none; } }
 }
 
 /* Large-text mode (accessibility): everything is rem-based, so scaling the root scales the whole app. */
@@ -225,6 +230,10 @@ html[data-theme="dark"] .btn:not(.btn-ghost):not([class*="bg-red"]):not(.btn-dan
 .agent-orb { width: 2.75rem; height: 2.75rem; border-radius: 9999px; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; background: color-mix(in srgb, var(--color-gold) 22%, var(--color-card)); }
 html[data-theme="dark"] .card { background: color-mix(in srgb, var(--color-card) 88%, transparent); backdrop-filter: blur(6px); }
 .agent-note { border: 1px solid color-mix(in srgb, var(--color-gold) 55%, transparent); border-radius: 9999px; background: color-mix(in srgb, var(--color-gold) 10%, var(--color-card)); }
+/* The same tint, but for a notice that is a BLOCK rather than a line: a warning with a code and
+   buttons under it. The pill above is right for "Today"; around four lines of text it turns into a
+   lozenge with great empty curves at both ends, which is what this replaces. */
+.notice-card { border: 1px solid color-mix(in srgb, var(--color-gold) 55%, transparent); border-radius: var(--radius-card); background: color-mix(in srgb, var(--color-gold) 10%, var(--color-card)); }
 
 /* Chat theme (You > Appearance): wallpaper behind the messages and the colour of my bubbles. */
 .bubble-mine { background: var(--bubble-mine, #d9f2d6); color: var(--bubble-ink, #2b3832); border: 1px solid var(--bubble-edge, #bfe3bb); --bubble-tick: var(--bubble-tick-user, #12924a);
@@ -269,10 +278,74 @@ html[data-wall="rose"] .chat-wall, .wall-rose { background-image: url("data:imag
 b, strong, h1, h2, h3, .font-bold { font-weight: 500; }
 
 /* Bubbles lift a little off the wall (a hairline shadow, as in every messenger) instead of relying on a drawn border alone. */
-.bubble-mine, .bubble-other { box-shadow: 0 1px 1.5px rgb(43 56 50 / 0.08), 0 1px 0.5px rgb(43 56 50 / 0.04); }
+/* Flat bubbles (owner's choice): the fill and the hairline border set them off the wall; no drop shadow. */
+.bubble-mine, .bubble-other { box-shadow: none; }
 .bubble-other { border-color: #ece7dc; }
 /* A sticker on its own: no fill, no border, no shadow; only its time underneath. */
 .bubble-bare { background: transparent; border: 0; box-shadow: none; padding: 0; color: var(--color-ink); }
+
+/* ---------------------------------------------------------------------------
+   My bubbles in the dark theme: a warm bronze card, gold accents (the dark theme's accent) and cream text, instead of the
+   light-mode mint. A bubble colour picked in You > Appearance still wins (it sets --bubble-mine and --bubble-ink).
+   --------------------------------------------------------------------------- */
+html[data-theme="dark"] .bubble-mine {
+  background: var(--bubble-mine, linear-gradient(165deg, #4b3514 0%, #3b2a10 58%, #31230d 100%));
+  color: var(--bubble-ink, #f7ecd6); border-color: var(--bubble-edge, #5c4419); --bubble-tick: var(--bubble-tick-user, #f0b957);
+  --color-ink: #f7ecd6; --color-muted: #dcc7a0; --color-green: #f0b957; --color-green-soft: #5a421a; --color-gold-dark: #f0b957; --color-card: #2b1f0b; --color-line: #5c4419;
+  --voice-accent: var(--bubble-voice, #e8a33d); --voice-accent-ink: var(--bubble-voice-ink, #2a1c05);
+}
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme="light"]) .bubble-mine {
+    background: var(--bubble-mine, linear-gradient(165deg, #4b3514 0%, #3b2a10 58%, #31230d 100%));
+    color: var(--bubble-ink, #f7ecd6); border-color: var(--bubble-edge, #5c4419); --bubble-tick: var(--bubble-tick-user, #f0b957);
+    --color-ink: #f7ecd6; --color-muted: #dcc7a0; --color-green: #f0b957; --color-green-soft: #5a421a; --color-gold-dark: #f0b957; --color-card: #2b1f0b; --color-line: #5c4419;
+    --voice-accent: var(--bubble-voice, #e8a33d); --voice-accent-ink: var(--bubble-voice-ink, #2a1c05);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Voice notes: a round play button in the accent, the waveform (played part in the accent), a speed pill, and the text in a
+   soft inset. The accent is the brand green on light bubbles, gold on my dark bubbles, and white on a picked bubble colour.
+   --------------------------------------------------------------------------- */
+.bubble-mine, .bubble-other { --voice-accent: #1f4d3f; --voice-accent-ink: #ffffff; }
+.bubble-mine { --voice-accent: var(--bubble-voice, #1f4d3f); --voice-accent-ink: var(--bubble-voice-ink, #ffffff); }
+.voice-play {
+  background: var(--voice-accent); color: var(--voice-accent-ink);
+  box-shadow: none;
+  transition: transform var(--dur-fast) var(--ease-emphasis), box-shadow var(--dur-base) var(--ease-standard), filter var(--dur-instant) linear;
+}
+.voice-play:hover { filter: brightness(1.07); }
+.voice-play:active { transform: scale(0.9); }
+/* Playing: a soft halo, so the one that is talking can be found at a glance. */
+.voice-play[data-playing] { box-shadow: 0 0 0 5px color-mix(in srgb, var(--voice-accent) 22%, transparent); }
+.voice-chip { background: color-mix(in srgb, currentColor 11%, transparent); }
+.voice-chip:hover { background: color-mix(in srgb, currentColor 17%, transparent); }
+.voice-text { background: color-mix(in srgb, currentColor 8%, transparent); }
+.voice-link { color: var(--bubble-link, var(--color-green)); }
+.voice-played { color: var(--bubble-link, var(--voice-accent)); }
+.voice-dot { background: var(--bubble-link, var(--voice-accent)); }
+
+/* The round button beside the message box (record, send): a solid accent circle, with a glow in the dark theme. */
+.fab-accent {
+  background: var(--color-brand); color: #ffffff;
+  box-shadow: none;
+  transition: transform var(--dur-fast) var(--ease-emphasis), box-shadow var(--dur-base) var(--ease-standard), background-color var(--dur-instant) linear, opacity var(--dur-instant) linear;
+}
+.fab-accent:hover:not(:disabled) { filter: brightness(1.08); }
+.fab-accent:active:not(:disabled) { transform: scale(0.92); }
+.fab-accent.fab-recording { background: var(--color-danger-fill); color: #fff; box-shadow: 0 0 0 8px color-mix(in srgb, var(--color-danger-fill) 22%, transparent); }
+html[data-theme="dark"] .fab-accent:not(.fab-recording) { background: var(--color-gold); color: #241906; }
+@media (prefers-color-scheme: dark) { html:not([data-theme="light"]) .fab-accent:not(.fab-recording) { background: var(--color-gold); color: #241906; } }
+
+/* The recording bar takes the place of the message box, in the same pill shape. */
+.rec-bar { border-radius: 1.375rem; background: var(--color-card); border: 1px solid color-mix(in srgb, var(--color-green) 45%, var(--color-line)); box-shadow: var(--shadow-e1); transform-origin: right center; }
+[dir="rtl"] .rec-bar, .rec-bar:dir(rtl) { transform-origin: left center; }
+.rec-time { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; font-weight: 400; font-variant-numeric: tabular-nums; letter-spacing: 0.01em; color: var(--color-ink); }
+.rec-time-still { color: var(--color-muted); }
+/* While the recording bar is up (recording, paused or a kept draft), the message box under it is hidden, not painted over. */
+form:has(.rec-bar) > .field-group { visibility: hidden; }
+.rec-dot { width: 0.6rem; height: 0.6rem; border-radius: 9999px; background: #ef4444; box-shadow: 0 0 0 0 rgb(239 68 68 / 0.5); animation: rec-dot 1.4s var(--ease-standard) infinite; }
+@keyframes rec-dot { 0% { box-shadow: 0 0 0 0 rgb(239 68 68 / 0.45); } 70% { box-shadow: 0 0 0 7px rgb(239 68 68 / 0); } 100% { box-shadow: 0 0 0 0 rgb(239 68 68 / 0); } }
 
 /* ---------------------------------------------------------------------------
    Design foundation: elevation, focus and interaction states.
@@ -412,13 +485,16 @@ input.field, select.field { height: 2.75rem; padding-block: 0; }
   transition: border-color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
 }
 .field-group:hover:not(:focus-within) { border-color: color-mix(in srgb, var(--color-green) 35%, var(--color-line)); }
-.field-group:focus-within { border-color: var(--color-green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-focus) 18%, transparent); }
-.field-group > input {
+/* Focus is shown by the border itself going green and gaining a second, inner line. The pale 3px halo
+   this replaces read as a second rounded border floating outside the field. The inner line costs no
+   layout (it is a shadow), so nothing moves, and focus stays plainly visible for the keyboard. */
+.field-group:focus-within { border-color: var(--color-green); box-shadow: inset 0 0 0 1px var(--color-green); }
+.field-group > input, .field-group > textarea {
   flex: 1; min-width: 0; height: 2.75rem; padding: 0 0.85rem;
   border: 0; background: transparent; color: var(--color-ink); outline: none;
 }
 /* The ring belongs to the whole group, so the inner control must not draw its own. */
-.field-group > input:focus-visible, .field-group > .field-prefix:focus-visible { outline: none; }
+.field-group > input:focus-visible, .field-group > textarea:focus-visible, .field-group > .field-prefix:focus-visible { outline: none; }
 .field-group > .field-prefix {
   display: flex; align-items: center; gap: 0.4rem; padding: 0 0.75rem;
   border-inline-end: 1px solid var(--color-line); cursor: pointer; white-space: nowrap;
@@ -435,7 +511,7 @@ input.field, select.field { height: 2.75rem; padding-block: 0; }
     box-shadow var(--dur-fast) var(--ease-standard);
 }
 .field:hover:not(:focus):not(:disabled) { border-color: color-mix(in srgb, var(--color-green) 35%, var(--color-line)); }
-.field:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-focus) 18%, transparent); }
+.field:focus { box-shadow: inset 0 0 0 1px var(--color-green); }
 
 .card { transition: box-shadow var(--dur-base) var(--ease-standard), border-color var(--dur-base) var(--ease-standard); }
 /* Only cards that actually do something on click should lift. A static card that
@@ -535,6 +611,24 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
 /* An input that sits inside a box which already shows focus (the chat search): the box
    glows, so the input's own ring would draw a second outline inside it. */
 .bare-input, .bare-input:focus, .bare-input:focus-visible { outline: none; border: 0; }
+/* ...and it must stop being a NATIVE search field. Left alone, `input[type=search]` keeps the
+   platform's own rounded box: it draws a little lozenge at the start of the field and clips the
+   selection highlight into a pill, which looked like a stray border inside our own box. */
+.bare-input { appearance: none; -webkit-appearance: none; border-radius: 0; }
+/* The same, for EVERY text field. Chrome draws its own rounded box for a native text control, and
+   that shape is what clips the selection and the autofill tint: inside our own bordered field the
+   tint came out as a pill, rounded at the end that touches the country prefix. With the native
+   appearance off, the tint is a plain rectangle and the only rounding left is our field's own,
+   clipped by the group (which already hides its overflow). */
+input[type="text"], input[type="tel"], input[type="search"], input[type="email"], input[type="url"],
+input[type="password"], input[type="number"], input[type="date"], input[type="time"], textarea {
+  appearance: none; -webkit-appearance: none;
+}
+.field-group > input, .field-group > textarea { border-radius: 0; }
+.bare-input::-webkit-search-decoration,
+.bare-input::-webkit-search-cancel-button,
+.bare-input::-webkit-search-results-button,
+.bare-input::-webkit-search-results-decoration { appearance: none; -webkit-appearance: none; display: none; }
 
 /* The open chat docked in the desktop pane: header, tabs and the message wall run edge to
    edge like a native messenger; only the composer keeps an inset. Mobile is unchanged. */

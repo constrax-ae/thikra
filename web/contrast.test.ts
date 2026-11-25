@@ -125,3 +125,16 @@ test('every member-name colour reaches 4.5:1 on the white received bubble', () =
   const white: RGB = [255, 255, 255];
   assert.deepEqual(list.filter(c => ratio(rgb(c), white) < 4.5), []);
 });
+
+test('my dark-theme bubble (bronze) and its voice-note controls stay readable', () => {
+  const block = css.match(/html\[data-theme="dark"\] \.bubble-mine \{([^}]*)\}/)?.[1] ?? '';
+  const v = (name: string) => block.match(new RegExp(`${name}:\\s*(?:var\\([^,]+,\\s*)?(#[0-9a-fA-F]{6})`))?.[1];
+  const stops = [...(block.match(/linear-gradient\(([^)]*)\)/)?.[1] ?? '').matchAll(/#[0-9a-fA-F]{6}/g)].map(m => rgb(m[0]));
+  assert.equal(stops.length, 3, 'the gradient is read from styles.css');
+  const accent = rgb(v('--voice-accent')!), accentInk = rgb(v('--voice-accent-ink')!);
+  for (const bg of stops) {
+    for (const [what, fg, min] of [['text', rgb(v('color')!), 4.5], ['secondary', rgb(v('--color-muted')!), 4.5], ['gold link / ticks', rgb(v('--color-green')!), 4.5], ['play button', accent, 3]] as Array<[string, RGB, number]>)
+      assert.ok(ratio(fg, bg) >= min, `${what} on ${bg}: ${ratio(fg, bg).toFixed(2)}`);
+  }
+  assert.ok(ratio(accentInk, accent) >= 4.5, `play icon on the gold button: ${ratio(accentInk, accent).toFixed(2)}`);
+});

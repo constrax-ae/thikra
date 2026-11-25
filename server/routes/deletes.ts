@@ -53,3 +53,19 @@ app.post('/api/messages/:mid/archive', c => {
   poke(m.circle_id);
   return c.json(one('SELECT archive_status AS archiveStatus, score, reason FROM messages WHERE id = ?', m.id));
 });
+
+/**
+ * CHAT-01 "clear history": hide everything said in this chat up to now, for ME. It is a cutoff kept on my membership,
+ * not a delete — nobody else's copy changes, nothing leaves the server, and the next message arrives as usual. The
+ * chat itself stays in the list (deleting the chat is a different thing, and for a family circle a heavier one).
+ */
+app.post('/api/circles/:id/clear', async c => {
+  const a = circleAccess(c);
+  if (!a) return c.json({ error: 'not_found' }, 404);
+  const top = Number(one('SELECT COALESCE(MAX(seq), 0) AS s FROM messages WHERE circle_id = ?', a.circleId)!.s) || 0;
+  run('INSERT OR IGNORE INTO chat_prefs (user_id, circle_id) VALUES (?, ?)', a.user.id, a.circleId);
+  run('UPDATE chat_prefs SET clear_through = MAX(COALESCE(clear_through, 0), ?) WHERE user_id = ? AND circle_id = ?', top, a.user.id, a.circleId);
+  // The marks move with it: what I have chosen not to see cannot count as unread.
+  run('UPDATE circle_members SET read_seq = MAX(read_seq, ?), delivered_seq = MAX(delivered_seq, ?) WHERE circle_id = ? AND user_id = ?', top, top, a.circleId, a.user.id);
+  return c.json({ clearedThrough: top });
+});

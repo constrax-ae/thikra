@@ -105,6 +105,23 @@ export function sendText(circleId: number, userId: number, body: string, clientM
   log('msg', { circle: circleId, seq: sent.seq, store_ms: Math.round(stored.ms * 10) / 10, fanout_ms: Math.round(fan.ms * 10) / 10, delivered_to: fan.value });
   return sent;
 }
+/**
+ * The seq below which this person sees nothing in this chat:
+ *  - what they cleared (CHAT-01 "clear history" is a personal cutoff, never a delete for anyone else), and
+ *  - for a chat whose history policy is 'since_join', everything said before they joined (GRP-02).
+ * A family circle's policy is 'all': its past is the point of the product, and every chat made before this
+ * existed keeps that behaviour.
+ */
+export function floorSeq(circleId: number, userId: number): number {
+  const r = one(
+    `SELECT COALESCE(p.clear_through, 0) AS cleared, COALESCE(cm.joined_seq, 0) AS joined, c.history_policy AS policy
+       FROM circle_members cm JOIN circles c ON c.id = cm.circle_id
+       LEFT JOIN chat_prefs p ON p.circle_id = cm.circle_id AND p.user_id = cm.user_id
+      WHERE cm.circle_id = ? AND cm.user_id = ?`, circleId, userId);
+  if (!r) return 0;
+  return Math.max(Number(r.cleared) || 0, r.policy === 'since_join' ? Number(r.joined) || 0 : 0);
+}
+
 export const SYNC_PAGE = 200;
 /**
  * Sync by seq (the protocol's range sync): the OLDEST SYNC_PAGE messages after `afterSeq`, ascending, so a client that
@@ -114,8 +131,8 @@ export const SYNC_PAGE = 200;
 export function messagesSince(circleId: number, userId: number, afterSeq: number) {
   const rows = all(
     `SELECT ${MSG_COLS} FROM messages m LEFT JOIN users u ON u.id = m.user_id
-       WHERE m.circle_id = ? AND m.seq > ? AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
-       ORDER BY m.seq LIMIT ${SYNC_PAGE}`, circleId, afterSeq, userId);
+       WHERE m.circle_id = ? AND m.seq > ? AND m.seq > ? AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
+       ORDER BY m.seq LIMIT ${SYNC_PAGE}`, circleId, afterSeq, floorSeq(circleId, userId), userId);
   if (rows.length) markDelivered(circleId, userId, rows[rows.length - 1].seq); // fetching is receiving
   return decorate(circleId, rows);
 }
@@ -127,8 +144,8 @@ export function messagesSince(circleId: number, userId: number, afterSeq: number
 export function messagesChanged(circleId: number, userId: number, afterRev: number) {
   const rows = all(
     `SELECT ${MSG_COLS} FROM messages m LEFT JOIN users u ON u.id = m.user_id
-       WHERE m.circle_id = ? AND m.rev > ? AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
-       ORDER BY m.rev LIMIT ${SYNC_PAGE}`, circleId, afterRev, userId);
+       WHERE m.circle_id = ? AND m.rev > ? AND m.seq > ? AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
+       ORDER BY m.rev LIMIT ${SYNC_PAGE}`, circleId, afterRev, floorSeq(circleId, userId), userId);
   if (rows.length) markDelivered(circleId, userId, Math.max(...rows.map(r => r.seq as number)));
   return decorate(circleId, rows);
 }
@@ -147,20 +164,20 @@ export const clampPage = (limit: unknown, fallback = PAGE) => {
 export function messagesBefore(circleId: number, userId: number, beforeSeq: number, limit = PAGE) {
   const rows = all(
     `SELECT * FROM (SELECT ${MSG_COLS} FROM messages m LEFT JOIN users u ON u.id = m.user_id
-       WHERE m.circle_id = ? AND m.seq < ? AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
-       ORDER BY m.seq DESC LIMIT ${clampPage(limit)}) ORDER BY seq`, circleId, beforeSeq, userId);
+       WHERE m.circle_id = ? AND m.seq < ? AND m.seq > ? AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
+       ORDER BY m.seq DESC LIMIT ${clampPage(limit)}) ORDER BY seq`, circleId, beforeSeq, floorSeq(circleId, userId), userId);
   return decorate(circleId, rows);
 }
 /** Opening a chat: the latest page of messages after an id (0 = from the start of the chat view). */
 export function messagesAfter(circleId: number, userId: number, afterId = 0, limit = SYNC_PAGE) {
   const rows = all(
     `SELECT * FROM (SELECT ${MSG_COLS} FROM messages m LEFT JOIN users u ON u.id = m.user_id
-       WHERE m.circle_id = ? AND m.id > ? AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
-       ORDER BY m.id DESC LIMIT ${clampPage(limit, SYNC_PAGE)}) ORDER BY id`, circleId, afterId, userId);
+       WHERE m.circle_id = ? AND m.id > ? AND m.seq > ? AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = ?)
+       ORDER BY m.id DESC LIMIT ${clampPage(limit, SYNC_PAGE)}) ORDER BY id`, circleId, afterId, floorSeq(circleId, userId), userId);
   if (rows.length) markDelivered(circleId, userId, Math.max(...rows.map(r => r.seq as number)));
   return decorate(circleId, rows);
 }
-export const MAX_AUDIO = 5 * 1024 * 1024;
+export const MAX_AUDIO = 25 * 1024 * 1024;   // MED-01: 25 MB, which at a voice bitrate is far more than the 30 minutes below
 // Not `instanceof File`: the File class differs between Node versions.
 export const isFile = (v: unknown): v is File =>
   typeof v === 'object' && v !== null && typeof (v as File).arrayBuffer === 'function' && typeof (v as File).size === 'number';

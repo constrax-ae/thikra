@@ -158,6 +158,8 @@ export function markDelivered(circleId: number, userId: number, seq: number) {
  * read receipts on; either way their own unread counter moves. Never goes backwards, never past the newest message.
  */
 export function markRead(circleId: number, userId: number, seq: number) {
+  // A message request you have not accepted tells its sender nothing: no blue ticks until you accept it.
+  if (one('SELECT request FROM circle_members WHERE circle_id = ? AND user_id = ?', circleId, userId)?.request) return;
   const top = one('SELECT COALESCE(MAX(seq), 0) AS m FROM messages WHERE circle_id = ?', circleId)!.m as number;
   const to = Math.min(Math.max(0, Math.floor(seq) || 0), top);
   run('UPDATE chat_prefs SET marked_unread = 0 WHERE user_id = ? AND circle_id = ?', userId, circleId); // opening the chat clears "mark as unread"
@@ -206,15 +208,20 @@ export const requireAuth = async (c: Context<Env>, next: () => Promise<void>) =>
   // The phone app also sends the session in its own header: iOS's media player and file
   // downloads replace a hand-set Cookie with the system's cookie store, but leave custom headers alone.
   // Either may be stale (iOS can swap in an old cookie from its own store), so a valid one of the two wins.
-  const live = (t: string | undefined) => (t ? one('SELECT user_id FROM sessions WHERE token = ? AND expires_at > ?', sha(t), Date.now()) : undefined);
+  const live = (t: string | undefined) => (t ? one('SELECT rowid AS sid, user_id, last_seen_at FROM sessions WHERE token = ? AND expires_at > ?', sha(t), Date.now()) : undefined);
   const token = getCookie(c, 'thikra_session') || c.req.header('x-thikra-session');
   const s = live(getCookie(c, 'thikra_session')) ?? live(c.req.header('x-thikra-session'));
-  const user = s && one('SELECT id, phone, name, lang, is_admin, admin_role, read_receipts, push_preview, last_seen_privacy, keep_archived, email, (pin_hash IS NOT NULL) AS has_pin, avatar_at, created_at FROM users WHERE id = ?', s.user_id);
+  const user = s && one('SELECT id, phone, name, lang, is_admin, admin_role, read_receipts, push_preview, last_seen_privacy, keep_archived, email, about, (pin_hash IS NOT NULL) AS has_pin, avatar_at, created_at FROM users WHERE id = ?', s.user_id);
   if (!user) {
     // Uploads from the phone app carry the session by hand; say what arrived when they are refused.
     if (/\/(voice|attachments|sealed|audio|file)$|^\/api\/media\//.test(c.req.path)) console.warn(`[auth] ${c.req.method} ${c.req.path} refused: ${c.req.header('cookie') ? (token ? 'session cookie unknown or expired' : 'a Cookie header without the session') : 'no Cookie header'}`);
     return c.json({ error: 'unauthorized' }, 401);
   }
+  // When this device was last used (RT-03). Written at most once every five minutes: a column, not a log, and not a write per request.
+  if (!s.last_seen_at || Date.now() - Date.parse(`${String(s.last_seen_at).replace(' ', 'T')}Z`) > 5 * 60_000) {
+    run("UPDATE sessions SET last_seen_at = datetime('now') WHERE rowid = ?", s.sid);
+  }
+  c.set('sessionId', Number(s.sid));
   const suspended = suspension(user.id);   // a suspended person's session stops working at once
   if (suspended) return c.json({ error: 'suspended', until: suspended.until }, 403);
   // Maintenance: the app is read-only (reading, support and dismissing a notice still work; admin works so staff can switch it off).

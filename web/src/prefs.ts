@@ -5,8 +5,8 @@ const read = (key: string, fallback: boolean) => { try { const v = localStorage.
 const write = (key: string, on: boolean) => { try { localStorage.setItem(key, on ? '1' : '0'); } catch { /* not remembered, still works */ } };
 
 export const prefOn = (key: PrefKey) => read(`thikra_${key}`, DEFAULTS[key]);
-export type PrefKey = 'sound' | 'motion' | 'saver' | 'previews';
-const DEFAULTS: Record<PrefKey, boolean> = { sound: true, motion: true, saver: false, previews: true };
+export type PrefKey = 'sound' | 'motion' | 'saver' | 'previews' | 'voiceNext';
+const DEFAULTS: Record<PrefKey, boolean> = { sound: true, motion: true, saver: false, previews: true, voiceNext: true };
 
 const applyMotion = (on: boolean) => { if (typeof document !== 'undefined') document.documentElement.setAttribute('data-motion', on ? 'on' : 'off'); };
 if (typeof document !== 'undefined') applyMotion(prefOn('motion'));

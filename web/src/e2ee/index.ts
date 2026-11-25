@@ -38,6 +38,8 @@ const lock = <T,>(name: string, fn: () => Promise<T>): Promise<T> => {
 interface Running { userId: number; e2ee: E2ee; ready: Promise<boolean>; stop(): void }
 let current: Running | null = null;
 let enabled = false;
+/** How often encrypted chats catch up when there is no live connection (see the timer in startE2ee). */
+export const E2EE_POLL_MS = 20_000;
 const listeners = new Set<() => void>();
 const bump = () => listeners.forEach(l => { try { l(); } catch { /* a screen's mistake */ } });
 const chatListeners = new Set<(circle: number | null) => void>();
@@ -67,6 +69,18 @@ export function startE2ee(userId: number, showPreview: () => boolean = () => tru
     if (f.t === 'open') e2ee.syncAll().catch(() => undefined);
     else if (f.t === 'e2ee' && Number.isInteger(f.circle)) e2ee.sync(f.circle).catch(() => undefined);
   });
+  // Without the live connection (a host whose proxy refuses WebSocket upgrades, as tamtim.com's does) no 'e2ee' frame ever
+  // arrives, so someone who joins a group would wait until a member's app restarted to be added to its keys. Catch up on a
+  // timer instead, and whenever the page comes back into view.
+  let catching = false;
+  const catchUp = () => {
+    if (!enabled || live.connected || catching || document.hidden) return;
+    catching = true;
+    e2ee.syncAll().catch(() => undefined).finally(() => { catching = false; });
+  };
+  const poll = setInterval(catchUp, E2EE_POLL_MS);
+  const onShow = () => { if (!document.hidden) catchUp(); };
+  document.addEventListener('visibilitychange', onShow);
   // A notification asks an open page to read the newest message (the service worker holds no keys).
   const onSw = (ev: MessageEvent) => {
     const d = ev.data;
@@ -79,7 +93,7 @@ export function startE2ee(userId: number, showPreview: () => boolean = () => tru
     })().catch(() => port.postMessage(null));
   };
   navigator.serviceWorker?.addEventListener('message', onSw);
-  current = { userId, e2ee, ready, stop() { off(); navigator.serviceWorker?.removeEventListener('message', onSw); if (current?.userId === userId) { current = null; enabled = false; bump(); } } };
+  current = { userId, e2ee, ready, stop() { off(); clearInterval(poll); document.removeEventListener('visibilitychange', onShow); navigator.serviceWorker?.removeEventListener('message', onSw); if (current?.userId === userId) { current = null; enabled = false; bump(); } } };
   return e2ee;
 }
 /** Sign out: stop. The keys stay on this device (so signing in again keeps the chats); "forget this device" removes them. */

@@ -5,6 +5,7 @@ import { offsite, status as offsiteStatus } from '../offsite-store.ts';
 import { online } from '../live.ts';
 import { activityWindows, statsSeries, totals } from '../lib/rollups.ts';
 import { ROLES, audit, notesOf, can, endSessions, isBanned, maskPhone, phoneHash, requireAdmin, roleOf, staff, type Role } from '../lib/admin.ts';
+import { tellReporter } from '../lib/safety.ts';
 import { eraseMessage } from '../lib/deletes.ts';
 import { smsInfo } from '../lib/auth.ts';
 import { FLAGS, blockedCodes, flag, isFlag, setBlockedCodes, setFlag, type FlagName } from '../lib/ops.ts';
@@ -34,6 +35,7 @@ app.post('/api/admin/reports/:id/resolve', requireAdmin('reports.act'), async c 
   const id = Number(c.req.param('id'));
   const r = run("UPDATE reports SET status = 'resolved', action = 'dismiss', resolution = ?, resolved_at = datetime('now'), resolved_by = ? WHERE id = ? AND status != 'resolved'", text(b.resolution, 500) || null, c.get('user').id, id);
   if (!Number(r.changes)) return c.json({ error: 'not_found' }, 404);
+  tellReporter(id, 'dismiss');
   audit(c, 'report.resolve', { type: 'report', id });
   return c.json({ ok: true });
 });
@@ -77,6 +79,8 @@ app.post('/api/admin/reports/:id/action', requireAdmin('reports.act'), async c =
   }
   const status = action === 'escalate' ? 'escalated' : 'resolved';
   run(`UPDATE reports SET status = ?, action = ?, resolution = ?, resolved_by = ?, resolved_at = CASE WHEN ? = 'resolved' THEN datetime('now') END WHERE id = ?`, status, action, note, me.id, status, id);
+  // The person who reported hears the outcome once the matter is decided. An escalation is not a decision: they wait.
+  if (status === 'resolved') tellReporter(id, action);
   audit(c, `report.${action}`, { type: 'report', id }, detail);
   return c.json({ ok: true, status });
 });

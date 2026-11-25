@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, ApiError, toDate, type CircleSummary, type Kind } from './api';
+import { api, ApiError, toDate, type Across, type CircleSummary, type Kind, type MessageHit } from './api';
 import { useI18n, intlLocale, systemText } from './i18n';
 import { Dialog } from './Dialog';
 import { live } from './live';
@@ -10,8 +10,11 @@ import { Avatar, PersonAvatar } from './Groups';
 import { BroadcastLists } from './Broadcast';
 import { PinGate, useLock } from './Privacy';
 import { deviceLock } from './lock';
+import { ListsDialog, load as loadLists, type ChatListRow } from './Lists';
 import { onChatChange, openDirect, useE2ee } from './e2ee';
+import { JUMP_KEY } from './reminders';
 import { ChatTypeBadge } from './E2eeUi';
+import { plainText } from '../../core/format';
 
 interface Person { id: number; name: string; via: string; chatId: number | null; avatarAt?: string | null }
 type Filter = 'all' | 'unread' | 'favourites' | 'groups' | 'archived';
@@ -28,15 +31,65 @@ function listTime(iso: string, lang: string, t: { today: string; yesterday: stri
   return d.toLocaleDateString(loc, { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
+type Range = '' | 'today' | 'week' | 'month' | 'custom';
+/** A day as the date input writes it, in THIS person's timezone (toISOString would roll over for anyone east of London). */
+const dayStr = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+/** What each named range means. "Custom" is handled by the two fields; the rest need no typing at all. */
+function rangeDates(r: Range): { from: string; to: string } {
+  const now = new Date(), today = dayStr(now);
+  if (r === 'today') return { from: today, to: today };
+  if (r === 'week') { const d = new Date(now); d.setDate(d.getDate() - 6); return { from: dayStr(d), to: today }; }
+  if (r === 'month') return { from: dayStr(new Date(now.getFullYear(), now.getMonth(), 1)), to: today };
+  return { from: '', to: '' };
+}
+const RANGES: Array<[Exclude<Range, ''>, (t: { facet: { today: string; week: string; month: string; custom: string } }) => string]> = [
+  ['today', t => t.facet.today], ['week', t => t.facet.week], ['month', t => t.facet.month], ['custom', t => t.facet.custom],
+];
+
 export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) => void; activeId?: number; onCount?: (n: number) => void }) {
   const { t, lang } = useI18n();
   const [list, setList] = useState<CircleSummary[] | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
+  // A list is a filter the person made themselves; it narrows whatever filter is chosen above it.
+  const [lists, setLists] = useState<ChatListRow[]>([]);
+  const [listId, setListId] = useState<number | null>(null);
+  const [listsOpen, setListsOpen] = useState(false);
+  useEffect(() => { loadLists().then(setLists).catch(() => { /* lists are a convenience: the chat list works without them */ }); }, []);
   const [query, setQuery] = useState('');
+  // Searching the WORDS of every chat, not only their names: the server does it (GET /api/search) because the
+  // history is not on this device. It cannot read an encrypted chat and will not open a locked one, and it says how
+  // many it left out so the screen can tell the truth instead of implying there was nothing there.
+  const [hits, setHits] = useState<MessageHit[]>([]);
+  const [skipped, setSkipped] = useState(0);
+  // CHAT-02 facets: what kind of thing, and when. They narrow the message results only — the chats above are matched
+  // by name as before.
+  const [kind, setKind] = useState<'' | 'text' | 'photo' | 'video' | 'file' | 'voice' | 'link'>('');
+  const [range, setRange] = useState<Range>('');
+  const [custom, setCustom] = useState<{ from: string; to: string }>({ from: '', to: '' });
+  const { from, to } = range === 'custom' ? custom : rangeDates(range);
+  const setFrom = (v: string) => setCustom(c => ({ ...c, from: v }));
+  const setTo = (v: string) => setCustom(c => ({ ...c, to: v }));
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) { setHits([]); setSkipped(0); return; }
+    let live = true;
+    const h = setTimeout(() => {
+      api<Across>(`/search?q=${encodeURIComponent(q)}${kind ? `&kind=${kind}` : ''}${from ? `&from=${from}` : ''}${to ? `&to=${to}` : ''}`)
+        .then(r => { if (live) { setHits(r.results); setSkipped(r.skipped); } })
+        .catch(() => { if (live) { setHits([]); setSkipped(0); } });   // offline: the chats above still match by name
+    }, 250);   // one request per pause in the typing, not one per letter
+    return () => { live = false; clearTimeout(h); };
+  }, [query, kind, from, to]);
+  /** Open the chat this message is in and land on the message itself. */
+  const openHit = (m: MessageHit) => {
+    try { sessionStorage.setItem(JUMP_KEY, String(m.id)); } catch { /* the chat still opens, without the jump */ }
+    onOpen(m.circleId);
+  };
   const [menu, setMenu] = useState<CircleSummary | null>(null);
   const [sheet, setSheet] = useState<null | 'new' | 'chat' | 'group' | 'circle' | 'join'>(null);
   const [broadcast, setBroadcast] = useState(false);
   const [folder, setFolder] = useState(false);                         // the locked chats
+  const [asking, setAsking] = useState(false);                         // the message requests
   const [locking, setLocking] = useState<CircleSummary | null>(null);   // a chat waiting for the PIN before it is locked
   const lock = useLock();
   const [field, setField] = useState('');
@@ -59,7 +112,8 @@ export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) =
     const timer = setInterval(load, 8000); // the badges and previews stay fresh while the list is on screen
     // A chat made or joined elsewhere (someone opened a private chat with you, approved your request) appears at once.
     const off = live.on(f => { if (f.t === 'member_added') load(); });
-    return () => { clearInterval(timer); off(); };
+    window.addEventListener('thikra:chats', load);   // a request accepted or declined inside the chat
+    return () => { clearInterval(timer); off(); window.removeEventListener('thikra:chats', load); };
   }, [load]);
 
   // Hear every chat in the list live, including ones created or joined after the page loaded (and again after a reconnect).
@@ -97,7 +151,9 @@ export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) =
   const fail = (e: unknown) => setError(t.errors[e instanceof ApiError ? e.code : 'generic'] ?? t.errors.generic);
   // A locked chat is not in the main list, the filters or the search: it lives only under "Locked chats", behind the PIN of this device.
   const lockedChats = (list ?? []).filter(c => c.locked);
-  const all = (list ?? []).filter(c => !c.locked);
+  // A message request is not in the main list either, so a stranger cannot push a chat into it: it waits under "Message requests".
+  const requests = (list ?? []).filter(c => c.request && !c.locked);
+  const all = (list ?? []).filter(c => !c.locked && !c.request);
   const visible = all.filter(c => !c.archived);
   const counts = {
     unread: visible.filter(c => c.unread > 0 || c.markedUnread).length,
@@ -113,11 +169,12 @@ export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) =
       if (filter === 'unread' && !(c.unread > 0 || c.markedUnread)) return false;
       if (filter === 'favourites' && !c.favourite) return false;
       if (filter === 'groups' && c.kind === 'direct') return false;
+      if (listId !== null && !(lists.find(l => l.id === listId)?.circleIds ?? []).includes(c.id)) return false;
       return !q || c.name.toLowerCase().includes(q) || c.lastText.toLowerCase().includes(q);
     });
     // Family circles stay at the top of the main list (only those: groups and people keep their order by time). A search or a filter shows plain results.
     return filter === 'all' && !q ? [...rows.filter(c => c.kind === 'circle'), ...rows.filter(c => c.kind !== 'circle')] : rows;
-  }, [all, filter, query]);
+  }, [all, filter, query, listId, lists]);
 
   const sectioned = filter === 'all' && !query.trim();
   const fam = shown.filter(c => c.kind === 'circle');
@@ -172,13 +229,13 @@ export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) =
         <>
           {p.userId === me_id.current && <span className="shrink-0">{t.youLabel}:</span>}
           {ic && <Icon name={ic} className="w-3.5 h-3.5 shrink-0" />}
-          <span className="truncate">{p.text || KIND_WORD(p.kind)}</span>
+          <span className="truncate">{(p.text && plainText(p.text)) || KIND_WORD(p.kind)}</span>
         </>
       );
     }
     if (!c.lastKind) return <>{c.members === 1 ? t.oneMember : `${c.members} ${t.members}`}</>;
     const word = KIND_WORD(c.lastKind);
-    const body = c.lastKind === 'deleted' ? word : systemText(c.lastText, t) || word;
+    const body = c.lastKind === 'deleted' ? word : (c.lastText.startsWith('sys:') ? systemText(c.lastText, t) : plainText(c.lastText)) || word;
     const who = c.lastFromMe ? t.youLabel : c.lastAuthor && c.kind !== 'direct' ? c.lastAuthor : '';
     const ic = KIND_ICON[c.lastKind];
     return (
@@ -194,13 +251,27 @@ export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) =
 
   // ⌘K / Ctrl+K jumps to the search, like every desktop messenger.
   const searchRef = useRef<HTMLInputElement>(null);
+  // The desktop shortcuts, on the chat that is open: mute, archive, pin, mark unread — the four things people do over
+  // and over while reading through a list. They all take Ctrl/⌘ + Alt so nothing collides with typing in Arabic or
+  // English, and they do nothing when no chat is open. The list of them is in You → Chats.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); searchRef.current?.focus(); }
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && !e.altKey && e.key.toLowerCase() === 'k') { e.preventDefault(); searchRef.current?.focus(); return; }
+      if (e.key === 'Escape' && document.activeElement === searchRef.current && query) { e.preventDefault(); setQuery(''); return; }
+      if (!mod || !e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key === 'n') { e.preventDefault(); openSheet('new'); return; }
+      const c = (list ?? []).find(x => x.id === activeId);
+      if (!c) return;
+      if (key === 'm') { e.preventDefault(); pref(c, { muted: !c.muted }); }
+      else if (key === 'e') { e.preventDefault(); pref(c, { archived: !c.archived }); }
+      else if (key === 'p') { e.preventDefault(); pref(c, { pinned: !c.pinned }); }
+      else if (key === 'u') { e.preventDefault(); pref(c, { markedUnread: !c.markedUnread }); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [list, activeId, query]);   // eslint-disable-line react-hooks/exhaustive-deps
   const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 
   const openSheet = (s: NonNullable<typeof sheet>) => { setSheet(s); setError(''); setField(''); };
@@ -304,9 +375,11 @@ export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) =
 
       <label className="group/search flex items-center gap-2.5 h-12 px-4 rounded-2xl bg-card border border-line elevated-1
         transition-[border-color,box-shadow] duration-[var(--dur-fast)]
-        focus-within:border-green focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-focus)_16%,transparent)]">
+        focus-within:border-green focus-within:shadow-[inset_0_0_0_1px_var(--color-green)]">
         <Icon name="search" className="w-5 h-5 text-muted shrink-0" />
+        {/* A search term is not prose: no spellcheck squiggle, no capitalising, no autocorrect fighting an Arabic name. */}
         <input ref={searchRef} type="search" value={query} placeholder={t.searchChats} aria-label={t.searchChats}
+          spellCheck={false} autoComplete="off" autoCorrect="off" autoCapitalize="off"
           onChange={e => setQuery(e.target.value)}
           className="bare-input flex-1 min-w-0 bg-transparent text-ink placeholder:text-muted" />
         <kbd className="hidden md:inline-flex items-center gap-1 h-6 px-1.5 rounded-md border border-line bg-paper text-caption text-muted font-sans shrink-0" aria-hidden>
@@ -321,13 +394,32 @@ export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) =
           {chip('favourites', t.filterFavourites, counts.favourites)}
           {chip('groups', t.filterGroups, counts.groups)}
           {counts.archived > 0 && chip('archived', t.archivedChats, counts.archived)}
+          {lists.map(l => {
+            const on = listId === l.id;
+            return (
+              <button key={`list-${l.id}`} onClick={() => setListId(on ? null : l.id)} aria-pressed={on}
+                className={`shrink-0 h-9 px-3.5 rounded-xl text-sm inline-flex items-center gap-1.5 transition-[background-color,color,box-shadow] duration-[var(--dur-fast)]
+                  ${on ? 'bg-green-soft text-green font-bold elevated-1' : 'text-muted hover:text-ink hover:bg-green-soft/50'}`}><bdi>{l.name}</bdi></button>
+            );
+          })}
+          <button onClick={() => setListsOpen(true)} aria-label={t.lists.manage} title={t.lists.manage}
+            className="shrink-0 w-9 h-9 rounded-xl inline-flex items-center justify-center text-muted hover:text-green hover:bg-green-soft/50"><Icon name="list" className="w-4 h-4" /></button>
         </div>
       )}
+
+      {listsOpen && <ListsDialog lists={lists} chats={all} onChange={next => { setLists(next); if (listId !== null && !next.some(l => l.id === listId)) setListId(null); }} onClose={() => setListsOpen(false)} />}
 
       {lockedChats.length > 0 && (
         <button className="row-interactive w-full px-3 py-3 rounded-2xl text-start flex items-center gap-3.5 bg-card border border-line elevated-1" onClick={() => setFolder(true)}>
           <span aria-hidden className="w-12 h-12 rounded-2xl bg-green-soft text-green flex items-center justify-center shrink-0"><Icon name="lock" className="w-6 h-6" /></span>
           <span className="min-w-0 flex-1"><b className="block">{t.priv.lockedChats}</b><span className="block text-sm text-muted">{t.priv.lockedCount.replace('{n}', String(lockedChats.length))}</span></span>
+          <Icon name="chevron" className="w-4 h-4 text-muted -rotate-90 rtl:rotate-90" />
+        </button>
+      )}
+      {requests.length > 0 && (
+        <button className="row-interactive w-full px-3 py-3 rounded-2xl text-start flex items-center gap-3.5 bg-card border border-line elevated-1" onClick={() => setAsking(true)}>
+          <span aria-hidden className="w-12 h-12 rounded-2xl bg-gold/15 text-gold-dark flex items-center justify-center shrink-0"><Icon name="envelope" className="w-6 h-6" /></span>
+          <span className="min-w-0 flex-1"><b className="block">{t.req.title}</b><span className="block text-sm text-muted">{t.req.count.replace('{n}', String(requests.length))}</span></span>
           <Icon name="chevron" className="w-4 h-4 text-muted -rotate-90 rtl:rotate-90" />
         </button>
       )}
@@ -349,6 +441,63 @@ export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) =
               {others.length > 0 && <Section title={t.sectionChats}>{others.map(row)}</Section>}
             </>
           ) : shown.length > 0 && <ul className="space-y-0.5">{shown.map(row)}</ul>}
+          {query.trim().length >= 2 && (
+            <div className="space-y-1.5">
+              {/* One scrolling line of facets, as the filter chips above do: on a phone these wrapped into three
+                  ragged rows and pushed the results off the screen. */}
+              <div className="flex gap-1 overflow-x-auto -mx-1 px-1 pb-0.5" role="group" aria-label={t.searchMessages}>
+                {([['', t.filterAll], ['text', t.facet.text], ['photo', t.photoWord], ['video', t.videoWord], ['voice', t.voiceWord], ['file', t.fileWord], ['link', t.facet.link]] as const).map(([k, label]) => (
+                  <button key={k || 'any'} type="button" aria-pressed={kind === k} onClick={() => setKind(k as typeof kind)}
+                    className={`shrink-0 h-8 px-3 rounded-xl text-sm transition-colors duration-[var(--dur-fast)] ${kind === k ? 'bg-green-soft text-green font-bold' : 'text-muted hover:text-ink hover:bg-green-soft/50'}`}>{label}</button>
+                ))}
+                <span aria-hidden className="shrink-0 self-center w-px h-5 bg-line mx-0.5" />
+                {/* When, said the way people say it. A raw pair of date boxes was the first try and it looked like a form. */}
+                {RANGES.map(([k, label]) => (
+                  <button key={k} type="button" aria-pressed={range === k} onClick={() => setRange(range === k ? '' : k)}
+                    className={`shrink-0 h-8 px-3 rounded-xl text-sm inline-flex items-center gap-1.5 transition-colors duration-[var(--dur-fast)] ${range === k ? 'bg-green-soft text-green font-bold' : 'text-muted hover:text-ink hover:bg-green-soft/50'}`}>
+                    {k === 'custom' && <Icon name="clock" className="w-4 h-4" />}{label(t)}
+                  </button>
+                ))}
+              </div>
+              {range === 'custom' && (
+                <div className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 rounded-2xl bg-card border border-line elevated-1 px-3 py-1.5 animate-slide-up">
+                  <label className="inline-flex items-center gap-1.5">
+                    <span className="text-caption text-muted">{t.facet.from}</span>
+                    <input type="date" dir="ltr" className="bare-input bg-transparent text-sm text-ink w-[8.5rem]" value={from} max={to || undefined} onChange={e => setFrom(e.target.value)} />
+                  </label>
+                  <span aria-hidden className="text-muted">–</span>
+                  <label className="inline-flex items-center gap-1.5">
+                    <span className="text-caption text-muted">{t.facet.to}</span>
+                    <input type="date" dir="ltr" className="bare-input bg-transparent text-sm text-ink w-[8.5rem]" value={to} min={from || undefined} onChange={e => setTo(e.target.value)} />
+                  </label>
+                  {(from || to) && (
+                    <button type="button" className="text-caption text-muted hover:text-ink underline underline-offset-2" onClick={() => { setFrom(''); setTo(''); }}>{t.facet.clear}</button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          {query.trim().length >= 2 && (hits.length > 0 || skipped > 0) && (
+            <Section title={t.searchMessages}>
+              {hits.map((m, i) => (
+                <li key={m.id} className="animate-slide-up" style={{ animationDelay: `${Math.min(i, 8) * 35}ms` }}>
+                  <button className="row-interactive w-full px-3 py-2.5 rounded-2xl text-start" onClick={() => openHit(m)}>
+                    <span className="flex items-baseline gap-2">
+                      <b className="min-w-0 flex-1 truncate"><bdi>{m.circleName}</bdi></b>
+                      <span className="text-caption text-muted shrink-0">{listTime(m.createdAt, lang, t)}</span>
+                    </span>
+                    <span className="block text-sm text-muted truncate">
+                      {m.author ? <span className="text-ink">{m.author}: </span> : null}
+                      {m.kind === 'voice' ? (m.transcript || t.voiceWord)
+                        : m.body ? plainText(m.body)
+                        : m.attachment === 'image' ? t.photoWord : m.attachment === 'video' ? t.videoWord : t.fileWord}
+                    </span>
+                  </button>
+                </li>
+              ))}
+              {skipped > 0 && <li className="px-3 py-2 text-caption text-muted">{t.searchSkipped.replace('{n}', String(skipped))}</li>}
+            </Section>
+          )}
           {peopleShown.length > 0 && (
             <Section title={t.sectionPeople} note={t.sectionPeopleNote}>
               {peopleShown.map((p, i) => (
@@ -417,6 +566,25 @@ export function ChatList({ onOpen, activeId, onCount }: { onOpen: (id: number) =
           <div className="mt-4 flex gap-2"><button className="btn btn-primary flex-1" onClick={() => { deviceLock.lock(); setFolder(false); }}>{t.priv.lockNow}</button><button className="btn btn-ghost" onClick={() => setFolder(false)}>{t.close}</button></div>
         </Dialog>
       ) : <PinGate onClose={() => setFolder(false)} onDone={() => {}} otherDevice={!lock.hasPin} />)}
+      {asking && (
+        <Dialog onClose={() => setAsking(false)} label={t.req.title}>
+          <h2 className="text-lg font-bold flex items-center gap-2"><Icon name="envelope" className="w-5 h-5 text-gold-dark" />{t.req.title}</h2>
+          <p className="mt-1 text-sm text-muted">{t.req.help}</p>
+          <ul className="mt-3 space-y-0.5 max-h-80 overflow-y-auto">
+            {requests.length === 0 && <li className="p-3 text-sm text-muted text-center">{t.req.none}</li>}
+            {requests.map(c => (
+              <li key={c.id}>
+                <button className="row-interactive w-full p-2 rounded-xl text-start flex items-center gap-3" onClick={() => { setAsking(false); onOpen(c.id); }}>
+                  <Avatar name={c.name} kind={c.kind} photo={c.photo} person={c.peerId ? { id: c.peerId, avatarAt: c.peerAvatarAt } : null} className="w-10 h-10 text-base" />
+                  <span className="min-w-0 flex-1"><b className="block truncate">{c.name}</b><span className="flex items-center gap-1 text-sm text-muted min-w-0"><Preview c={c} /></span></span>
+                  <Icon name="chevron" className="w-4 h-4 text-muted -rotate-90 rtl:rotate-90 shrink-0" />
+                </button>
+              </li>
+            ))}
+          </ul>
+          <button className="btn btn-ghost w-full mt-4" onClick={() => setAsking(false)}>{t.close}</button>
+        </Dialog>
+      )}
       {broadcast && <BroadcastLists onClose={() => setBroadcast(false)} />}
 
       {sheet && (

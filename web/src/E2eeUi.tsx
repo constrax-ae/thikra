@@ -175,16 +175,19 @@ export function NoticeLine({ n, names, me, circle, onCompare }: { n: Notice; nam
   const name = names.get(n.userId) ?? '…';
   const cls = 'agent-note text-center text-xs text-gold-dark py-1.5 px-3 mx-auto w-fit max-w-full my-2 animate-fade-in';
   const row = 'flex items-center justify-center gap-1.5';
-  const warn = `${cls} bg-gold/15 text-ink rounded-xl`;
+  // A warning is a small card, not a pill: the width is held to something readable, the words sit on the
+  // start edge, and the buttons line up under them instead of floating in the middle of a wide bar.
+  const warn = 'notice-card text-sm text-ink mx-auto w-fit max-w-[min(32rem,100%)] my-2 p-3 animate-fade-in';
   if (n.kind === 'gone') return <p role="status" className={`${cls} ${row}`}><Icon name="lock" className="w-3.5 h-3.5 shrink-0" />{t.e2ee.goneNote}</p>;
   if (n.kind === 'new_device_waiting' && state === 'gone') return null;
   if (n.kind === 'new_device_unconfirmed') return unconf === false ? null : (
     <div role="status" className={warn}>
-      <p className="flex items-start gap-1.5 text-start"><Icon name="alert" className="w-4 h-4 shrink-0 text-gold-dark" /><span>{t.e2ee.unconfirmedNote.replace('{name}', name)}{n.detail?.code && <span dir="ltr" className="block text-muted">{t.e2ee.deviceCode.replace('{code}', n.detail.code)}</span>}</span></p>
+      <p className="flex items-start gap-2 text-start"><Icon name="alert" className="w-4 h-4 mt-0.5 shrink-0 text-gold-dark" /><span>{t.e2ee.unconfirmedNote.replace('{name}', name)}</span></p>
+      {n.detail?.code && <p dir="ltr" className="mt-1.5 ms-6 w-fit rounded-lg bg-card border border-line px-2 py-0.5 font-mono text-xs text-muted">{t.e2ee.deviceCode.replace('{code}', n.detail.code)}</p>}
       {unconf && circle !== undefined && e2ee && (
-        <span className="flex flex-wrap justify-center gap-2 mt-1.5">
-          {onCompare && <button type="button" className="btn btn-ghost !py-1 text-xs" onClick={onCompare}>{t.e2ee.newDeviceCompare}</button>}
+        <span className="flex flex-wrap gap-2 mt-2.5 ms-6">
           <button type="button" className="btn !py-1 text-xs" onClick={() => { e2ee.acceptDevice(circle, n.userId, n.detail!.deviceId!).catch(() => {}); }}>{t.e2ee.unconfirmedKeep}</button>
+          {onCompare && <button type="button" className="btn btn-ghost !py-1 text-xs" onClick={onCompare}>{t.e2ee.newDeviceCompare}</button>}
           <button type="button" className="btn btn-ghost !py-1 text-xs" onClick={() => { e2ee.removeDevice(circle, n.userId, n.detail!.deviceId!).catch(() => {}); }}>{t.e2ee.unconfirmedRemove}</button>
         </span>
       )}
@@ -192,11 +195,12 @@ export function NoticeLine({ n, names, me, circle, onCompare }: { n: Notice; nam
   );
   if (n.kind === 'new_device_waiting') return (
     <div role="status" className={warn}>
-      <p className="flex items-start gap-1.5 text-start"><Icon name="alert" className="w-4 h-4 shrink-0 text-gold-dark" /><span>{(state === 'added' ? t.e2ee.newDeviceAdded : t.e2ee.newDeviceWaiting).replace('{name}', name)}{n.detail?.code && <span dir="ltr" className="block text-muted">{t.e2ee.deviceCode.replace('{code}', n.detail.code)}</span>}</span></p>
+      <p className="flex items-start gap-2 text-start"><Icon name="alert" className="w-4 h-4 mt-0.5 shrink-0 text-gold-dark" /><span>{(state === 'added' ? t.e2ee.newDeviceAdded : t.e2ee.newDeviceWaiting).replace('{name}', name)}</span></p>
+      {n.detail?.code && <p dir="ltr" className="mt-1.5 ms-6 w-fit rounded-lg bg-card border border-line px-2 py-0.5 font-mono text-xs text-muted">{t.e2ee.deviceCode.replace('{code}', n.detail.code)}</p>}
       {still && circle !== undefined && e2ee && (
-        <span className="flex flex-wrap justify-center gap-2 mt-1.5">
-          {onCompare && <button type="button" className="btn btn-ghost !py-1 text-xs" onClick={onCompare}>{t.e2ee.newDeviceCompare}</button>}
+        <span className="flex flex-wrap gap-2 mt-2.5 ms-6">
           <button type="button" className="btn !py-1 text-xs" onClick={() => { e2ee.acceptDevice(circle, n.userId, n.detail!.deviceId!).catch(() => {}); }}>{t.e2ee.newDeviceAdd}</button>
+          {onCompare && <button type="button" className="btn btn-ghost !py-1 text-xs" onClick={onCompare}>{t.e2ee.newDeviceCompare}</button>}
           {state === 'waiting' && <button type="button" className="btn btn-ghost !py-1 text-xs" onClick={() => { e2ee.dismissWaiting(circle, n.detail!.deviceId!).catch(() => {}); }}>{t.e2ee.newDeviceNotNow}</button>}
         </span>
       )}

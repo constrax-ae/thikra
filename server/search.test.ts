@@ -72,6 +72,80 @@ test('search is Arabic-aware and respects privacy and deletion', async () => {
   assert.equal((await call(outsider.cookie, `/api/circles/${circle}/search?q=farm`)).status, 404);
 });
 
+test('searching every chat at once: only chats you are in, never a locked or encrypted one, and it says how many it could not read', async () => {
+  const a = await login('A'), b = await login('B'), stranger = await login('S');
+  const open = async (who: typeof a, name: string, body?: object) => (await call(who.cookie, '/api/circles', 'POST', { name, ...body })).json.id as number;
+  const join = async (who: typeof a, circle: number) => {
+    const code = (await call(a.cookie, `/api/circles/${circle}`)).json.inviteCode;
+    await call(who.cookie, '/api/circles/join', 'POST', { code });
+  };
+  const send = async (who: typeof a, circle: number, body: string) => (await call(who.cookie, `/api/circles/${circle}/messages`, 'POST', { body })).json;
+  const across = async (who: typeof a, q: string) => (await call(who.cookie, `/api/search?q=${encodeURIComponent(q)}`)).json;
+
+  const family = await open(a, 'العائلة'); await join(b, family);
+  const work = await open(a, 'العمل'); await join(b, work);
+  const theirs = await open(stranger, 'ليست لك');
+  await send(a, family, 'موعد الزيارة يوم الخميس');
+  const atWork = await send(b, work, 'الزيارة الثانية للمصنع');
+  await send(stranger, theirs, 'الزيارة سرية');
+
+  const r = await across(a, 'الزياره');
+  assert.equal(r.results.length, 2, 'both of my chats, and never the stranger\'s');
+  assert.equal(r.results[0].id, atWork.id, 'newest first');
+  assert.equal(r.results[0].circleId, work);
+  assert.equal(r.results[0].circleName, 'العمل', 'each result says which chat it came from');
+  assert.equal(r.results[0].author, 'B');
+  assert.equal(r.skipped, 0);
+  assert.deepEqual((await across(a, 'ا')).results, [], 'a one-letter query returns nothing');
+  assert.equal((await across(stranger, 'الزياره')).results.length, 1, 'the stranger sees only their own');
+
+  // A locked chat stays out of the results, and the answer admits it was not read.
+  await call(a.cookie, `/api/circles/${work}/prefs`, 'PATCH', { locked: true });
+  const locked = await across(a, 'الزياره');
+  assert.deepEqual(locked.results.map((x: any) => x.circleId), [family], 'the locked chat is not searched');
+  assert.equal(locked.skipped, 1, 'and the screen can say one chat was not looked inside');
+  assert.equal((await across(b, 'الزياره')).results.length, 2, 'locking is mine alone: B still finds both');
+  await call(a.cookie, `/api/circles/${work}/prefs`, 'PATCH', { locked: false });
+
+  // An encrypted chat holds only ciphertext: the server cannot search it, and says so rather than implying "nothing".
+  process.env.THIKRA_E2EE = '1';
+  const made = await call(a.cookie, '/api/circles', 'POST', { name: 'سر', kind: 'group', encrypted: true });
+  process.env.THIKRA_E2EE = '0';
+  assert.equal(made.status, 201, 'encryption must be switched on for this test to mean anything');
+  const secret = made.json.id as number;
+  const enc = await across(a, 'الزياره');
+  assert.equal(enc.skipped, 1);
+  assert.ok(!enc.results.some((x: any) => x.circleId === secret));
+
+  // Deleted for me: out of my results, still in B's.
+  const mine = (await call(a.cookie, `/api/circles/${family}/messages?after=0`)).json.find((x: any) => x.body.includes('الخميس'));
+  await call(a.cookie, `/api/messages/${mine.id}/hide`, 'POST', {});
+  assert.deepEqual((await across(a, 'الزياره')).results.map((x: any) => x.circleId), [work]);
+  assert.equal((await across(b, 'الزياره')).results.length, 2);
+});
+
+test('starred messages gathered from every chat, newest first, and each person sees only their own', async () => {
+  const a = await login('A'), b = await login('B');
+  const one = (await call(a.cookie, '/api/circles', 'POST', { name: 'أولى' })).json.id as number;
+  const two = (await call(a.cookie, '/api/circles', 'POST', { name: 'ثانية' })).json.id as number;
+  const code = (await call(a.cookie, `/api/circles/${one}`)).json.inviteCode;
+  await call(b.cookie, '/api/circles/join', 'POST', { code });
+  const m1 = (await call(a.cookie, `/api/circles/${one}/messages`, 'POST', { body: 'وصفة الكبسة' })).json;
+  const m2 = (await call(a.cookie, `/api/circles/${two}/messages`, 'POST', { body: 'رقم السباك' })).json;
+  const starred = async (who: typeof a) => (await call(who.cookie, '/api/starred')).json;
+
+  assert.deepEqual((await starred(a)).results, [], 'nothing starred yet');
+  await call(a.cookie, `/api/messages/${m1.id}/star`, 'POST', {});
+  await call(a.cookie, `/api/messages/${m2.id}/star`, 'POST', {});
+  await call(b.cookie, `/api/messages/${m1.id}/star`, 'POST', {});
+  const mine = await starred(a);
+  assert.deepEqual(mine.results.map((x: any) => x.id), [m2.id, m1.id], 'newest first, from both chats');
+  assert.deepEqual(mine.results.map((x: any) => x.circleName), ['ثانية', 'أولى']);
+  assert.deepEqual((await starred(b)).results.map((x: any) => x.id), [m1.id], 'a star is personal: B sees only the one they starred, in the chat they are in');
+  await call(a.cookie, `/api/messages/${m1.id}/star`, 'POST', { on: false });
+  assert.deepEqual((await starred(a)).results.map((x: any) => x.id), [m2.id]);
+});
+
 test('speed: under 300 ms in a circle of 100,000 messages (MASTER-PLAN §6)', async () => {
   const a = await login('Perf');
   const circle = (await call(a.cookie, '/api/circles', 'POST', { name: 'كبيرة' })).json.id as number;

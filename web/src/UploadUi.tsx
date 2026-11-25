@@ -3,6 +3,9 @@ import { useI18n } from './i18n';
 import { Dialog } from './Dialog';
 import { Icon } from './icons';
 import { prepare } from './media';
+import { BlurFrame, CropFrame, MarkupPad, applyStrokes, blurBox, crop, rotate } from './ImageEdit';
+import type { Stroke } from './edit';
+import { VideoTrim, canEditVideo } from './VideoEdit';
 import { readQuality, type Quality } from './quality';
 import { MAX_FILES, tooLarge, type UploadFile, type UploadJob, type Uploader } from './uploads';
 import { clock } from './VoiceUi';
@@ -36,7 +39,7 @@ export function SendSheet({ picked, caption0, onClose, onSend }: { picked: File[
   useEffect(() => { if (!files.length) onClose(); }, [files.length]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   async function send() {
-    if (busy || blocked || !files.length) return;
+    if (busy || blocked || !files.length || tool !== 'none' || editing) return;
     setBusy(true);
     const ready = await Promise.all(files.map(f => prepare(f, quality)));
     const big = new Map<File, number>();
@@ -47,6 +50,29 @@ export function SendSheet({ picked, caption0, onClose, onSend }: { picked: File[
   const [active, setActive] = useState(0);
   const cur = files[Math.min(active, files.length - 1)];
   const curMax = cur ? limitOf(cur) : null;
+  // Editing the photo being looked at: turn it, crop it, hide part of it, draw on it. The edited picture takes its place in the list.
+  const [tool, setTool] = useState<'none' | 'crop' | 'hide' | 'draw' | 'trim'>('none');
+  const [editing, setEditing] = useState(false);
+  const [editError, setEditError] = useState('');
+  const editable = !!cur && cur.type.startsWith('image/') && cur.type !== 'image/gif' && !busy;
+  // A video can be cut and silenced only where the browser can re-make it; elsewhere the button is simply not there.
+  const trimmable = !!cur && cur.type.startsWith('video/') && !busy && canEditVideo();
+  async function edit(make: () => Promise<File>) {
+    if (!cur) return;
+    const was = cur;
+    setEditing(true); setEditError('');
+    try { const next = await make(); setFiles(list => list.map(f => (f === was ? next : f))); setOver(new Map()); }
+    catch { setEditError(t.photoEdit.failed); }
+    finally { setEditing(false); setTool('none'); }
+  }
+  // The order they are sent in: drag a thumbnail onto another, or move the one being looked at.
+  const [dragging, setDragging] = useState<number | null>(null);
+  function moveTo(from: number, to: number) {
+    if (from === to || to < 0 || to >= files.length) return;
+    setFiles(list => { const next = [...list]; const [f] = next.splice(from, 1); next.splice(to, 0, f); return next; });
+    setActive(to);
+  }
+  const at = cur ? files.indexOf(cur) : -1;
   return (
     <Dialog wide onClose={() => { if (!busy) onClose(); }} label={t.photosAndFiles}>
       <div className="flex items-center gap-2">
@@ -57,7 +83,11 @@ export function SendSheet({ picked, caption0, onClose, onSend }: { picked: File[
       {picked.length > MAX_FILES && <p role="status" className="text-xs text-gold-dark mt-1">{t.tooManyFiles}</p>}
 
       {/* The one being looked at, large; the others as a strip underneath to switch between and remove. */}
-      {cur && (
+      {cur && tool === 'crop' && <CropFrame src={cur} onCancel={() => setTool('none')} onDone={box => edit(() => crop(cur, box))} />}
+      {cur && tool === 'hide' && <BlurFrame src={cur} onCancel={() => setTool('none')} onDone={box => edit(() => blurBox(cur, box))} />}
+      {cur && tool === 'draw' && <MarkupPad src={cur} onCancel={() => setTool('none')} onDone={(strokes: Stroke[]) => edit(() => applyStrokes(cur, strokes))} />}
+      {cur && tool === 'trim' && <VideoTrim src={cur} onCancel={() => setTool('none')} onDone={next => edit(async () => next)} />}
+      {cur && tool === 'none' && (
         <div className={`mt-3 relative rounded-2xl overflow-hidden bg-paper border ${curMax !== null ? 'border-danger' : 'border-line'} h-[min(20rem,45vh)] flex items-center justify-center animate-fade-in`}>
           {cur.type.startsWith('image/') ? <BlobImg blob={cur} className="max-w-full max-h-full object-contain" />
             : (
@@ -67,15 +97,36 @@ export function SendSheet({ picked, caption0, onClose, onSend }: { picked: File[
               </span>
             )}
           <span className="absolute bottom-2 start-2 rounded-full bg-black/55 text-white text-[11px] px-2 py-0.5" dir="ltr">{sizeText(cur.size)}</span>
+          {editing && <span className="absolute inset-0 bg-card/60 flex items-center justify-center"><Icon name="refresh" className="w-6 h-6 text-green animate-spin" /></span>}
         </div>
       )}
+      {cur && tool === 'none' && (editable || trimmable || files.length > 1) && (
+        <div role="toolbar" aria-label={t.photosAndFiles} className="mt-2 flex items-center gap-1 flex-wrap">
+          {editable && <>
+            <button type="button" disabled={editing} onClick={() => edit(() => rotate(cur))} className="h-9 px-3 rounded-xl inline-flex items-center gap-1.5 text-sm text-ink hover:bg-green-soft hover:text-green transition-colors duration-[var(--dur-instant)] disabled:opacity-50"><Icon name="rotate" className="w-4 h-4" />{t.photoEdit.rotate}</button>
+            <button type="button" disabled={editing} onClick={() => setTool('crop')} className="h-9 px-3 rounded-xl inline-flex items-center gap-1.5 text-sm text-ink hover:bg-green-soft hover:text-green transition-colors duration-[var(--dur-instant)] disabled:opacity-50"><Icon name="crop" className="w-4 h-4" />{t.photoEdit.crop}</button>
+            <button type="button" disabled={editing} onClick={() => setTool('hide')} className="h-9 px-3 rounded-xl inline-flex items-center gap-1.5 text-sm text-ink hover:bg-green-soft hover:text-green transition-colors duration-[var(--dur-instant)] disabled:opacity-50"><Icon name="mosaic" className="w-4 h-4" />{t.photoEdit.hide}</button>
+            <button type="button" disabled={editing} onClick={() => setTool('draw')} className="h-9 px-3 rounded-xl inline-flex items-center gap-1.5 text-sm text-ink hover:bg-green-soft hover:text-green transition-colors duration-[var(--dur-instant)] disabled:opacity-50"><Icon name="pen" className="w-4 h-4" />{t.photoEdit.draw}</button>
+          </>}
+          {trimmable && <button type="button" disabled={editing} onClick={() => setTool('trim')} className="h-9 px-3 rounded-xl inline-flex items-center gap-1.5 text-sm text-ink hover:bg-green-soft hover:text-green transition-colors duration-[var(--dur-instant)] disabled:opacity-50"><Icon name="scissors" className="w-4 h-4" />{t.videoEdit.trim}</button>}
+          {files.length > 1 && <>
+            <span className="flex-1" />
+            <button type="button" disabled={busy || at <= 0} onClick={() => moveTo(at, at - 1)} aria-label={t.photoEdit.moveEarlier} title={t.photoEdit.moveEarlier} className="w-9 h-9 rounded-xl inline-flex items-center justify-center text-ink hover:bg-green-soft hover:text-green disabled:opacity-40 disabled:hover:bg-transparent"><Icon name="arrow-start" className="w-4 h-4 rtl:-scale-x-100" /></button>
+            <span className="text-xs text-muted tabular-nums" dir="ltr">{at + 1} / {files.length}</span>
+            <button type="button" disabled={busy || at >= files.length - 1} onClick={() => moveTo(at, at + 1)} aria-label={t.photoEdit.moveLater} title={t.photoEdit.moveLater} className="w-9 h-9 rounded-xl inline-flex items-center justify-center text-ink hover:bg-green-soft hover:text-green disabled:opacity-40 disabled:hover:bg-transparent"><Icon name="arrow-end" className="w-4 h-4 rtl:-scale-x-100" /></button>
+          </>}
+        </div>
+      )}
+      {editError && <p role="alert" className="text-sm text-danger mt-1">{editError}</p>}
       {files.length > 1 && (
         <ul className="mt-1 flex gap-2 overflow-x-auto pt-2 pb-1 pe-2">
           {files.map((f, i) => {
             const max = limitOf(f);
             const on = f === cur;
             return (
-              <li key={`${f.name}-${f.size}-${i}`} className="relative shrink-0">
+              <li key={`${f.name}-${f.size}-${i}`} className={`relative shrink-0 transition-opacity ${dragging === i ? 'opacity-40' : ''}`}
+                draggable={!busy} onDragStart={e => { setDragging(i); e.dataTransfer.effectAllowed = 'move'; }} onDragEnd={() => setDragging(null)}
+                onDragOver={e => { if (dragging !== null) e.preventDefault(); }} onDrop={e => { e.preventDefault(); if (dragging !== null) moveTo(dragging, i); setDragging(null); }}>
                 <button type="button" onClick={() => setActive(i)} aria-label={f.name} aria-pressed={on}
                   className={`block w-14 h-14 rounded-xl overflow-hidden bg-paper border-2 transition-colors duration-[var(--dur-instant)] ${max !== null ? 'border-danger' : on ? 'border-green' : 'border-transparent'}`}>
                   {f.type.startsWith('image/') ? <BlobImg blob={f} className="w-full h-full object-cover" />
@@ -125,7 +176,7 @@ export function SendSheet({ picked, caption0, onClose, onSend }: { picked: File[
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); send(); } }} />
           </div>
         ) : <span className="flex-1" />}
-        <button type="button" className="btn btn-primary !rounded-full h-11 px-5 shrink-0 inline-flex items-center gap-2" disabled={busy || blocked} onClick={send}>
+        <button type="button" className="btn btn-primary !rounded-full h-11 px-5 shrink-0 inline-flex items-center gap-2" disabled={busy || blocked || tool !== 'none' || editing} onClick={send}>
           {busy ? t.preparing : <><Icon name="send" className="w-4 h-4 rtl:-scale-x-100" />{fill(t.sendCount, { n: files.length })}</>}
         </button>
       </div>

@@ -1,4 +1,5 @@
 import { readQuality, type Quality } from './quality';
+import { stripPng } from '../../core/metadata';
 
 // ---- attachments: prepare on the device, so less is uploaded and the receiver sees a preview at once --------------
 
@@ -17,7 +18,7 @@ const toJpeg = (img: CanvasImageSource, srcW: number, srcH: number, max: number,
 
 /**
  * Compression on the device. Standard: a phone photo of 4 MB becomes about 300 KB at 1600 px. HD: up to 4096 px at high quality.
- * Either way a 320 px thumbnail is made, and the camera's own file is kept whenever it is already the smaller one.
+ * Either way a 320 px thumbnail is made. A photo is always re-drawn, so where it was taken never leaves the phone (see below).
  * A video is not re-encoded (browsers cannot do it reliably): it gets a poster frame and is sent as it is. Anything that cannot be decoded is sent as it is.
  */
 export async function prepare(file: File, quality: Quality = readQuality()): Promise<{ file: File; thumb: Blob | null; w: number | null; h: number | null }> {
@@ -26,8 +27,14 @@ export async function prepare(file: File, quality: Quality = readQuality()): Pro
       const img = await loadImage(file);
       const hd = quality === 'original';
       const big = await toJpeg(img, img.naturalWidth, img.naturalHeight, hd ? 4096 : 1600, hd ? 0.9 : 0.82), small = await toJpeg(img, img.naturalWidth, img.naturalHeight, 320, 0.7);
-      const use = big && big.blob.size < file.size ? big : null;
-      return { file: use ? new File([use.blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' }) : file, thumb: small?.blob ?? null, w: use?.w ?? img.naturalWidth, h: use?.h ?? img.naturalHeight };
+      // Location stays on the phone: a re-drawn picture carries no EXIF, XMP or GPS. So a camera photo is ALWAYS sent re-drawn,
+      // even in the rare case the camera's own file is smaller. Only a PNG (a screenshot, a drawing) may go as it is, and then
+      // without its metadata chunks.
+      const png = file.type === 'image/png';
+      const use = big && (!png || big.blob.size < file.size) ? big : null;
+      if (use) return { file: new File([use.blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' }), thumb: small?.blob ?? null, w: use.w, h: use.h };
+      const clean = png ? new File([stripPng(new Uint8Array(await file.arrayBuffer())) as BlobPart], file.name, { type: file.type }) : file;
+      return { file: clean, thumb: small?.blob ?? null, w: img.naturalWidth, h: img.naturalHeight };
     }
     if (file.type.startsWith('video/')) {
       const url = URL.createObjectURL(file);

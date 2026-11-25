@@ -1,4 +1,8 @@
-import tile from './brand/logo-tile.png';
+import logoEn from './brand/logo-en.svg';
+import logoEnDark from './brand/logo-en-dark.svg';
+import logoAr from './brand/logo-ar.svg';
+import logoArDark from './brand/logo-ar-dark.svg';
+import { useI18n } from './i18n';
 // One line-icon set for the whole app (replaces emoji, which render differently on every phone and look cheap).
 // 24×24, 1.75 stroke, currentColor: icons take the text colour, so they follow the light and dark themes automatically.
 import type { ReactElement } from 'react';
@@ -11,9 +15,19 @@ export type IconName =
   | 'plus' | 'plus-circle' | 'arrow-out' | 'more' | 'envelope' | 'sparkle' | 'link'
   | 'book' | 'upload' | 'calendar' | 'trash' | 'arrow-back' | 'album'
   | 'x' | 'copy' | 'pen' | 'cake' | 'star-fill' | 'shield' | 'snow' | 'call'
-  | 'chart' | 'location' | 'once' | 'eye' | 'qr' | 'megaphone' | 'mic-off' | 'sticker';
+  | 'chart' | 'location' | 'once' | 'eye' | 'qr' | 'megaphone' | 'mic-off' | 'sticker'
+  | 'rotate' | 'crop' | 'arrow-start' | 'arrow-end' | 'undo' | 'mosaic' | 'scissors' | 'list' | 'wave';
 
 const paths: Record<IconName, ReactElement> = {
+  rotate: <><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3" /><path d="M4.5 3.5v3.7h3.7" /></>,
+  crop: <><path d="M7 3v14h14" /><path d="M3 7h14v14" /></>,
+  undo: <><path d="M4 9h11a5 5 0 0 1 0 10h-6" /><path d="M8 5 4 9l4 4" /></>,
+  mosaic: <><rect x="3.5" y="3.5" width="7" height="7" rx="1" /><rect x="13.5" y="3.5" width="7" height="7" rx="1" /><rect x="3.5" y="13.5" width="7" height="7" rx="1" /><rect x="13.5" y="13.5" width="7" height="7" rx="1" /></>,
+  scissors: <><circle cx="6" cy="6" r="2.5" /><circle cx="6" cy="18" r="2.5" /><path d="M8 7.5 20 18M8 16.5 20 6" /></>,
+  list: <><path d="M4 6h16M4 12h16M4 18h10" /></>,
+  wave: <path d="M3 11v2M7 8v8M11 5v14M15 9v6M19 7v10M23 11v2" transform="translate(-1 0)" />,
+  'arrow-start': <><path d="M19 12H5.5" /><path d="m11 6-6 6 6 6" /></>,
+  'arrow-end': <><path d="M5 12h13.5" /><path d="m13 6 6 6-6 6" /></>,
   chats: <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 4v-4H6.5A2.5 2.5 0 0 1 4 13.5z" />,
   memory: <><path d="M12 21v-7" /><path d="M12 14c-3.5 0-6-2.3-6-5.3C6 5.5 8.7 3 12 3s6 2.5 6 5.7c0 3-2.5 5.3-6 5.3z" /><path d="M9 21h6" /></>,
   you: <><circle cx="12" cy="8" r="4" /><path d="M4.5 20.5c1.2-3.6 4-5.5 7.5-5.5s6.3 1.9 7.5 5.5" /></>,
@@ -91,12 +105,19 @@ export function Icon({ name, className = 'w-5 h-5' }: { name: IconName; classNam
   );
 }
 
-/** The wordmark in the header: the app icon (the owner's smiling speech bubble) and the name. */
-export function Wordmark({ name }: { name: string }) {
+/**
+ * The owner's logo, as they asked for it: the Arabic lockup (bubble + تمتم) when the app is in
+ * Arabic, the English one (bubble + Tamtim) in every other language. Each comes in two inks -
+ * green on paper, and the green turned to paper for the night theme - and only the one for the
+ * theme in use is shown (.logo-light / .logo-dark in styles.css). The amber stays on both.
+ */
+export function Wordmark({ name, className = 'h-12 w-auto' }: { name: string; className?: string }) {
+  const { lang } = useI18n();
+  const ar = lang === 'ar';
   return (
-    <span className="flex items-center gap-2.5">
-      <img src={tile} alt="" width={40} height={40} className="w-10 h-10 rounded-xl elevated-1" />
-      <span className="text-2xl font-bold text-green tracking-tight">{name}</span>
+    <span className="flex items-center">
+      <img src={ar ? logoAr : logoEn} alt={name} className={`logo-light ${className}`} />
+      <img src={ar ? logoArDark : logoEnDark} alt={name} className={`logo-dark ${className}`} />
     </span>
   );
 }

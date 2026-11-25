@@ -68,7 +68,7 @@ export function Picker<T extends string | number>(
         onClick={() => { setSheet(matchMedia('(max-width: 639px)').matches); setOpen(o => !o); }}
         className={`h-11 w-full px-3.5 rounded-xl bg-card border flex items-center gap-2 text-ink elevated-1
           transition-[border-color,box-shadow] duration-[var(--dur-fast)] ease-[var(--ease-standard)]
-          ${open ? 'border-green shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-focus)_16%,transparent)]' : 'border-line hover:border-green/40'}`}>
+          ${open ? 'border-green shadow-[inset_0_0_0_1px_var(--color-green)]' : 'border-line hover:border-green/40'}`}>
         {icon && <Icon name={icon} className="w-[18px] h-[18px] text-muted shrink-0" />}
         <span className="flex-1 text-start font-bold tabular-nums">{current?.label}</span>
         <Icon name="chevron" className={`w-4 h-4 text-muted shrink-0 transition-transform duration-[var(--dur-fast)] ${open ? 'rotate-180' : ''}`} />

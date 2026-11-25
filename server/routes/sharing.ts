@@ -5,7 +5,7 @@ import { sniff } from '../sniff.ts';
 import { announce, announceUpdate, circleAccess, insertMessage, isFrozen, limited, mayPost, membership, tx } from '../lib/helpers.ts';
 import { blockedInDirect } from '../lib/moments.ts';
 import { bumpRev } from '../lib/polls.ts';
-import { cleanCard, storeCard, type CardType } from '../lib/cards.ts';
+import { cleanCard, cleanPoint, storeCard, type CardType } from '../lib/cards.ts';
 import { UnsafeLink, cleanLink, previewOf } from '../lib/linkpreview.ts';
 import { gifById, gifKnown, gifProvider, gifThumb, searchGifs } from '../lib/gifs.ts';
 import { purgeLinkPreviews } from '../lib/deletes.ts';
@@ -119,4 +119,40 @@ app.post('/api/circles/:id/cards', async c => {
   });
   if (!sent.duplicate) announce(a.circleId, sent.id);
   return c.json({ id: sent.id, seq: sent.seq }, sent.duplicate ? 200 : 201);
+});
+
+// ---- live location ---------------------------------------------------------------------------
+// The card made above with type 'live' is the whole of it: the sender's device sends a new point now and then, the
+// server overwrites the one card, and everyone's screen is told. Nothing is kept but the LATEST point — there is no
+// trail of where someone has been, because a trail is a thing that can be stolen. It stops by itself at `until`,
+// or the moment the sender says stop; after that no new point is accepted.
+const liveCard = (mid: number, userId: number) => {
+  const m = one('SELECT id, circle_id, user_id, deleted_at FROM messages WHERE id = ?', mid);
+  if (!m || m.deleted_at || m.user_id !== userId || !membership(m.circle_id, userId)) return null;
+  const row = one("SELECT data FROM message_cards WHERE message_id = ? AND type = 'live'", m.id);
+  if (!row) return null;
+  try { return { m, data: JSON.parse(row.data as string) as { until: string; ended: boolean } }; } catch { return null; }
+};
+
+app.put('/api/messages/:mid/live', async c => {
+  const found = liveCard(Number(c.req.param('mid')), c.get('user').id);
+  if (!found) return c.json({ error: 'not_found' }, 404);
+  const { m, data } = found;
+  if (data.ended || Date.parse(data.until) <= Date.now()) return c.json({ error: 'live_over' }, 409);
+  const point = cleanPoint(await c.req.json().catch(() => ({})));
+  if (!point) return c.json({ error: 'invalid_card' }, 400);
+  storeCard(m.id, 'live', { ...data, ...point, at: new Date().toISOString() });
+  announceUpdate(m.circle_id, m.id);
+  return c.json({ ok: true });
+});
+
+app.post('/api/messages/:mid/live/stop', c => {
+  const found = liveCard(Number(c.req.param('mid')), c.get('user').id);
+  if (!found) return c.json({ error: 'not_found' }, 404);
+  const { m, data } = found;
+  if (!data.ended) {
+    storeCard(m.id, 'live', { ...data, ended: true, until: new Date().toISOString() });
+    announceUpdate(m.circle_id, m.id);
+  }
+  return c.json({ ok: true });
 });

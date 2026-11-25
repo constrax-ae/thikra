@@ -26,12 +26,14 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
   return data as T;
 }
 
-export interface Me { id: number; phone: string; name: string; lang: string; is_admin: number; read_receipts: number; push_preview: number; /** Optional second way to reach someone; the phone stays the identity. */ email?: string | null; last_seen_privacy?: 'everyone' | 'family' | 'nobody'; keep_archived?: number; has_pin?: number; avatar_at?: string | null; admin_role?: 'owner' | 'moderator' | 'support' | null }
+export interface Me { id: number; phone: string; name: string; lang: string; is_admin: number; read_receipts: number; push_preview: number; /** Optional second way to reach someone; the phone stays the identity. */ email?: string | null; last_seen_privacy?: 'everyone' | 'family' | 'nobody'; keep_archived?: number; has_pin?: number; avatar_at?: string | null; /** An optional one-line bio others see under the name (AUTH-01). */ about?: string | null; admin_role?: 'owner' | 'moderator' | 'support' | null }
 export type Kind = 'circle' | 'group' | 'direct';
 export interface CircleSummary {
   id: number; kind: Kind; name: string; sensitivity: string; agentActive: number; role: string; members: number; unread: number;
   /** End-to-end encrypted (a private chat or an ordinary group made so at creation). A family circle is never. */
   encrypted?: boolean;
+  /** A message request: a private chat from someone you do not know, waiting for you to accept it. */
+  request?: boolean;
   /** A private chat: the other person, and when their profile picture last changed (null: none). */
   peerId?: number | null; peerAvatarAt?: string | null;
   pinned: boolean; muted: boolean; mutedUntil: string | null; archived: boolean; favourite: boolean; markedUnread: boolean;
@@ -45,13 +47,19 @@ export interface CircleDetail {
   id: number; kind: Kind; name: string; sensitivity: 'strict' | 'medium' | 'lenient'; agentActive: number; role: string; ownerId: number;
   /** End-to-end encrypted: set once at creation, never changes. */
   encrypted?: boolean;
-  inviteCode?: string; invitePolicy: 'admins' | 'members'; inviteEnabled: boolean;
+  /** A message request waiting for YOUR answer (see CircleSummary.request). */
+  request?: boolean;
+  inviteCode?: string; invitePolicy: 'admins' | 'members'; inviteExpiresAt?: string | null;
+  historyPolicy?: 'all' | 'since_join';
+  inviteEnabled: boolean;
   description: string | null; photo: number | null; sendPolicy: 'all' | 'admins'; editPolicy: 'all' | 'admins'; joinApproval: boolean;
   /** How many people wait for approval (managers only). */
   joinRequests?: number;
-  members: Array<{ id: number; name: string; role: string; deliveredSeq: number; readSeq: number | null; /** When their profile picture last changed (null: none); also busts the browser's copy. */ avatarAt?: string | null }>;
+  members: Array<{ id: number; name: string; role: string; deliveredSeq: number; readSeq: number | null; /** When their profile picture last changed (null: none); also busts the browser's copy. */ avatarAt?: string | null; /** Their optional one-line bio (AUTH-01); null when none, or when they blocked you. */ about?: string | null }>;
   lastSeq: number; createdAt?: string; storyTitle?: string | null; muted?: boolean; mutedUntil?: string | null; favourite?: boolean;
   disappearSeconds?: number | null; locked?: boolean; wallpaper?: string | null;
+  /** What this chat may interrupt me with: everything, only when my name is written, or nothing at all. */
+  notify?: 'all' | 'mentions' | 'none';
 }
 export interface Billing {
   stripe?: boolean;
@@ -89,13 +97,22 @@ export type Card =
   | { type: 'gif'; provider: string; title: string }
   | { type: 'sticker'; pack: string; id: string }
   | { type: 'contact'; name: string; phones: string[] }
-  | { type: 'location'; lat: number; lng: number; accuracy: number | null; label: string | null };
+  | { type: 'location'; lat: number; lng: number; accuracy: number | null; label: string | null }
+  | { type: 'live'; lat: number; lng: number; accuracy: number | null; until: string; ended: boolean; at: string };
 export interface LinkPreview { url: string; title: string; description: string; site: string; image: string | null }
 /** For the author of a message: everyone else in the chat, in exactly one of the three lists. `at` is null for receipts from before times were stored. */
 export interface MessageInfo { readBy: Array<{ id: number; name: string; at: string | null }>; deliveredTo: Array<{ id: number; name: string; at: string | null }>; pending: Array<{ id: number; name: string }> }
 export interface Attachment { id: number; kind: 'image' | 'video' | 'file'; mime: string; name: string | null; size: number; w: number | null; h: number | null; thumb: number | null;
   /** An encrypted chat: the file on the server is ciphertext. `k` is its key, `hash` the SHA-256 of what the server holds, `thumb` a preview made on the sender's device. */
   enc?: { k: string; hash: string; thumb?: string } }
+/** A message found by the search that spans every chat (GET /api/search), or starred anywhere (GET /api/starred). */
+export interface MessageHit {
+  id: number; seq: number; kind: 'text' | 'voice' | 'system'; body: string; transcript: string | null; createdAt: string;
+  userId: number | null; author: string | null; hasAudio: number;
+  circleId: number; circleKind: Kind; circleName: string; attachment: 'image' | 'video' | 'file' | null;
+}
+/** `skipped`: how many of your chats the server could not look inside — encrypted (ciphertext only) or locked by you. */
+export interface Across { results: MessageHit[]; skipped: number }
 export interface GalleryItem extends Attachment { messageId: number; seq: number; createdAt: string; author: string | null }
 export interface ArchiveEntry {
   id: number; title: string; summary: string; category: string | null; eventDate: string; source: 'auto' | 'manual';

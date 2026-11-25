@@ -16,6 +16,8 @@ export interface UploadFile {
   name: string; type: string; size: number; blob: Blob; thumb: Blob | null; w: number | null; h: number | null;
   /** The server's id for this file's resumable upload, once it has started. */
   uploadId?: string;
+  /** MED-05: the SHA-256 of these bytes, worked out once on this device and declared when the upload opens. */
+  sha256?: string | null;
 }
 export interface UploadJob {
   cid: string; circle: number; at: number; kind: 'files' | 'voice';
@@ -31,7 +33,7 @@ export interface UploadJob {
 export interface JobStore { all(): Promise<UploadJob[]>; put(job: UploadJob): Promise<void>; remove(cid: string): Promise<void> }
 export interface UploadError { code: string; offset?: number; max?: number }
 export interface UploadTransport {
-  open(circle: number, name: string, size: number, signal: AbortSignal): Promise<{ id: string }>;
+  open(circle: number, name: string, size: number, checksum: string | null, signal: AbortSignal): Promise<{ id: string }>;
   /** How many bytes the server holds, or null if it no longer knows this upload. */
   offset(id: string, signal: AbortSignal): Promise<number | null>;
   /** Send one piece; resolves with the server's new offset. Rejects with UploadError ('network' when there was no answer). */
@@ -77,7 +79,11 @@ export function createUploader(store: JobStore, transport: UploadTransport, o: U
       const held = await transport.offset(f.uploadId, signal);
       if (held === null) f.uploadId = undefined; else at = held;
     }
-    if (!f.uploadId) { f.uploadId = (await transport.open(job.circle, f.name, f.size, signal)).id; at = 0; await save(job); }
+    if (!f.uploadId) {
+      // MED-05: tell the server what the bytes should add up to, so a file that arrives wrong never becomes a message.
+      f.sha256 ??= await sha256Of(f.blob);
+      f.uploadId = (await transport.open(job.circle, f.name, f.size, f.sha256 ?? null, signal)).id; at = 0; await save(job);
+    }
     sent[i] = at; emit('progress', job);
     while (at < f.size) {
       if (signal.aborted) throw { code: 'cancelled' };
@@ -173,7 +179,16 @@ export function createUploader(store: JobStore, transport: UploadTransport, o: U
 export type Uploader = ReturnType<typeof createUploader>;
 
 /** The limits, checked on the device before anything is sent, so the person gets the reason at once (the server checks again). */
-export const MAX_FILES = 10, MAX_IMAGE_BYTES = 16 * 1024 * 1024, MAX_FILE_BYTES = 64 * 1024 * 1024;
+
+/** The SHA-256 of a file, as hex, computed on this device. Returns null where the browser has no WebCrypto (then the server simply has nothing to check). */
+export async function sha256Of(blob: Blob): Promise<string | null> {
+  try {
+    const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+    return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch { return null; }
+}
+
+export const MAX_FILES = 20, MAX_IMAGE_BYTES = 20 * 1024 * 1024, MAX_FILE_BYTES = 100 * 1024 * 1024;   // MED-05, the same figures the server enforces
 export function tooLarge(f: { type: string; size: number }): number | null {
   const max = f.type.startsWith('image/') && f.type !== 'image/heic' ? MAX_IMAGE_BYTES : MAX_FILE_BYTES;
   return f.size > max ? max : null;

@@ -7,6 +7,7 @@ import { app } from '../app.ts';
 import { one, run } from '../db.ts';
 import { toMs } from '../lib/deletes.ts';
 import { isEncrypted } from '../lib/e2ee.ts';
+import { MAX_TEXT } from '../../core/format.ts';
 
 // ---- receipts, reactions, edits ------------------------------------------------------------
 
@@ -53,8 +54,9 @@ app.patch('/api/messages/:mid', async c => {
   if (!mayPost(m.circle_id, user.id)) return c.json({ error: 'admins_only' }, 403);   // rewriting an old message is posting too
   if (Date.now() - toMs(m.created_at) > EDIT_WINDOW_MS) return c.json({ error: 'edit_window_closed' }, 403);
   const b = await c.req.json().catch(() => ({}));
-  const body = String(b.body ?? '').trim().slice(0, 4000);
+  const body = String(b.body ?? '').trim();
   if (!body) return c.json({ error: 'empty' }, 400);
+  if (body.length > MAX_TEXT) return c.json({ error: 'too_long', max: MAX_TEXT }, 413);
   run("UPDATE messages SET body = ?, search_text = ?, edited_at = datetime('now') WHERE id = ?", body, searchable(body), m.id);
   pruneMentions(m.id, body);
   pruneLinkCard(m.id, body);

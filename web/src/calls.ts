@@ -1,6 +1,16 @@
 // Voice calls (trial): the parts of the call screen that are plain logic, so they can be tested without a browser.
 // The rest (the peer connection, the sheet) is in CallUi.tsx. Design: docs/superpowers/specs/2026-11-19-calls-design.md.
 
+/**
+ * Whether a call can be STARTED from the app.
+ *
+ * The chat specification excludes voice and video calls from the product ("Voice and video calls, call signaling…
+ * are excluded"), and UI-02 says the conversation header carries no call buttons. So the button is not there.
+ * Everything behind it is finished and tested and stays in the code: if the client decides to keep calls, this
+ * one line becomes `true` and the header has its button back. Nothing else changes.
+ */
+export const CALLS_IN_UI = false;
+
 /** The DTLS fingerprint of an SDP (the first `a=fingerprint:` line), upper case, or null. */
 export function fingerprintOf(sdp: string): string | null {
   // More than one DIFFERENT fingerprint in one SDP is refused: a decoy first line would make both codes match while the browser uses another key.

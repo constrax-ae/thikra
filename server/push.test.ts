@@ -249,3 +249,30 @@ test('the real sender: the message is encrypted (aes128gcm) and signed with the 
     fake.close();
   }
 });
+
+test('someone you blocked never wakes your phone, not even from a group you both belong to', async () => {
+  const { a, b, circle } = await pair();
+  await call(a.cookie, '/api/push/subscribe', 'POST', sub('blocker'));
+  sent.length = 0;
+  await say(b, circle, 'قبل الحجب');
+  await settle();
+  assert.equal(sent.length, 1, 'before blocking, A is notified as usual');
+
+  assert.equal((await call(a.cookie, `/api/users/${b.id}/block`, 'POST', { on: true })).status, 200);
+  sent.length = 0;
+  await say(b, circle, 'بعد الحجب');
+  await settle();
+  assert.deepEqual(sent, [], 'blocked: their message in the shared group does not reach A\'s phone');
+
+  // Unblocking brings it back, and the block was A's alone: B was never told and is notified normally.
+  await call(b.cookie, '/api/push/subscribe', 'POST', sub('blocked-person'));
+  sent.length = 0;
+  await say(a, circle, 'رسالة من أ');
+  await settle();
+  assert.equal(sent.length, 1, 'the person who was blocked still hears from the one who blocked them');
+  await call(a.cookie, `/api/users/${b.id}/block`, 'POST', { on: false });
+  sent.length = 0;
+  await say(b, circle, 'بعد رفع الحجب');
+  await settle();
+  assert.equal(sent.length, 1);
+});

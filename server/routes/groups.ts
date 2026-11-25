@@ -4,7 +4,7 @@ import { blobs } from '../storage.ts';
 import { sniff } from '../sniff.ts';
 import { MAX_IMAGE } from '../lib/attachments.ts';
 import { isFile } from '../lib/moments.ts';
-import { addMember, tellManagers } from '../lib/groups.ts';
+import { addMember, chatIsFull, tellManagers } from '../lib/groups.ts';
 import { dropBlobIfUnused } from '../lib/deletes.ts';
 import { circleAccess, circleChanged, isFrozen, isManager, limited, systemMessage } from '../lib/helpers.ts';
 
@@ -79,6 +79,7 @@ app.post('/api/circles/:id/join-requests/:uid', async c => {
   if (!user) return c.json({ error: 'not_found' }, 404);
   if (b.approve) {
     if (isFrozen(a.circleId)) return c.json({ error: 'circle_frozen' }, 423);
+    if (chatIsFull(a.circleId)) return c.json({ error: 'chat_full' }, 409);
     addMember(a.circleId, user);
   } else run('DELETE FROM join_requests WHERE circle_id = ? AND user_id = ?', a.circleId, uid);
   tellManagers(a.circleId);

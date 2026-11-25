@@ -18,7 +18,7 @@ if (PROD && process.env.THIKRA_SHOW_SIGNIN_CODES === '1') console.warn('[auth] T
 export const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 export const safeEq = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 export const today = () => new Date().toISOString().slice(0, 10);
-export type Env = { Variables: { user: Row } };
+export type Env = { Variables: { user: Row; sessionId: number } };
 export const app = new Hono<Env>();
 // Every request gets an id (returned to the caller, so a bug report can quote it) and one log line:
 // method, route pattern (not the URL, which can hold ids and codes), status and time. Never a body or a query string.

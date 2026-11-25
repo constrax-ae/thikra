@@ -121,12 +121,12 @@ test('uploads: cancelling at any moment leaves no message, deletes what the serv
 test('uploads: a refusal is shown with its reason and waits for the person; retry continues, discard removes', async () => {
   const s = fakeServer(), { kept, store } = memoryStore();
   const up = createUploader(store, s.transport, opts);
-  s.refuse = { code: 'attachment_too_large', max: 64 * 1024 * 1024 };
+  s.refuse = { code: 'attachment_too_large', max: 100 * 1024 * 1024 };
   const events: string[] = [];
   up.subscribe(e => events.push(e.type));
   await up.add(job('a', [file('film.mp4', 300)]));
   await until(() => !!up.list(5)[0]?.failed);
-  assert.equal(up.list(5)[0].failed, 'attachment_too_large'); assert.equal(up.list(5)[0].max, 64 * 1024 * 1024);
+  assert.equal(up.list(5)[0].failed, 'attachment_too_large'); assert.equal(up.list(5)[0].max, 100 * 1024 * 1024);
   assert.equal(kept.get('a')?.failed, 'attachment_too_large', 'still failed after a reload');
   assert.ok(events.includes('failed'));
   s.refuse = null;
@@ -158,12 +158,15 @@ test('voice notes wait in the same outbox: a recording made offline is sent when
   await until(() => kept.size === 0);
 });
 
-test('uploads: the limits are known before anything is sent', () => {
-  assert.equal(tooLarge({ type: 'image/jpeg', size: 16 * 1024 * 1024 }), null);
-  assert.equal(tooLarge({ type: 'image/jpeg', size: 16 * 1024 * 1024 + 1 }), 16 * 1024 * 1024);
-  assert.equal(tooLarge({ type: 'video/mp4', size: 64 * 1024 * 1024 }), null);
-  assert.equal(tooLarge({ type: 'video/mp4', size: 64 * 1024 * 1024 + 1 }), 64 * 1024 * 1024);
-  assert.equal(tooLarge({ type: 'application/pdf', size: 70 * 1024 * 1024 }), 64 * 1024 * 1024);
+// The figures of MED-05 in the chat specification: 20 MB an image, 100 MB a video or a document. The device
+// knows them so a file that would be refused is never carried all the way to the server to be told so.
+test('uploads: the limits are known before anything is sent, and they are the ones in the specification', () => {
+  assert.equal(tooLarge({ type: 'image/jpeg', size: 20 * 1024 * 1024 }), null);
+  assert.equal(tooLarge({ type: 'image/jpeg', size: 20 * 1024 * 1024 + 1 }), 20 * 1024 * 1024);
+  assert.equal(tooLarge({ type: 'video/mp4', size: 100 * 1024 * 1024 }), null);
+  assert.equal(tooLarge({ type: 'video/mp4', size: 100 * 1024 * 1024 + 1 }), 100 * 1024 * 1024);
+  assert.equal(tooLarge({ type: 'application/pdf', size: 100 * 1024 * 1024 }), null);
+  assert.equal(tooLarge({ type: 'application/pdf', size: 120 * 1024 * 1024 }), 100 * 1024 * 1024);
 });
 
 test('voice: the waveform is the loudest moment of each stretch, scaled; the gestures; the speeds', () => {

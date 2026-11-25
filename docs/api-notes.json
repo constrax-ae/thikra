@@ -293,6 +293,15 @@
       "q": "string"
     }
   },
+  "GET /api/search": {
+    "summary": "The same search over every chat you are in, newest first (50). Answers { results, skipped }: `skipped` is how many of your chats could not be looked inside — an encrypted one (the server holds only ciphertext) or one you locked — so the screen can say so instead of implying there was nothing.",
+    "query": {
+      "q": "string (at least 2 characters)"
+    }
+  },
+  "GET /api/starred": {
+    "summary": "Everything you have starred, in every chat, newest first (200). Same shape and the same exclusions as GET /api/search."
+  },
   "POST /api/circles/:id/sealed": {
     "summary": "Write a sealed letter (text, voice, video or photo) opened on a date, an occasion or after the author's death (event and death need the agent on).",
     "errors": [
@@ -326,6 +335,20 @@
   },
   "GET /api/admin/stats": {
     "summary": "Platform totals (no content)."
+  },
+  "POST /api/users/:id/report": {
+    "summary": "Report a PERSON you share a chat with (a pattern, not one message). No conversation content travels: only the reason and the note the reporter writes. One open report per person; ten reports an hour.",
+    "body": {
+      "reason": "'spam' | 'abuse' | 'harassment' | 'illegal' | 'other'",
+      "note": "string, optional, 500 max"
+    }
+  },
+  "POST /api/circles/:id/report": {
+    "summary": "Report a whole CHAT you are in. Same shape and same rules as reporting a person; no messages are sent with it.",
+    "body": {
+      "reason": "'spam' | 'abuse' | 'harassment' | 'illegal' | 'other'",
+      "note": "string, optional, 500 max"
+    }
   },
   "GET /api/admin/reports": {
     "summary": "Reports sent by members, open first. The only place staff see message text (of reported messages); each look is written to the audit log.",
@@ -556,7 +579,7 @@
     "summary": "Start a resumable upload of one file. Nothing appears in the chat until POST /api/circles/:id/attachments is called with the finished upload ids.",
     "request": {
       "name": "string: file name",
-      "size": "integer: total bytes (max 64 MB; a photo max 16 MB is checked at the end, by its bytes)"
+      "size": "integer: total bytes (max 100 MB; a photo max 20 MB is checked at the end, by its bytes)"
     },
     "response": {
       "id": "string",
@@ -641,9 +664,9 @@
     ]
   },
   "POST /api/circles/:id/cards": {
-    "summary": "Send a contact, a location, a sticker or a GIF. It is an ordinary message with empty text and `card` set.",
+    "summary": "Send a contact, a location, a live location, a sticker or a GIF. It is an ordinary message with empty text and `card` set.",
     "request": {
-      "type": "string: contact | location | sticker | gif",
+      "type": "string: contact | location | live | sticker | gif",
       "name": "string: contact name (max 100)",
       "phones": "array: 1-5 phone numbers",
       "lat": "number: -90..90",
@@ -653,7 +676,8 @@
       "pack": "string: sticker pack id (core/stickers.ts)",
       "id": "string: sticker id, or the GIF id from /api/gifs",
       "client_msg_id": "string (max 64)",
-      "reply_to": "integer: message id"
+      "reply_to": "integer: message id",
+      "minutes": "number: live location only — 15, 60 or 480"
     },
     "response": {
       "id": "integer",
@@ -774,7 +798,8 @@
       "favourite": "boolean",
       "markedUnread": "boolean",
       "locked": "boolean",
-      "wallpaper": "string|null: none | dots | dusk | dunes | forest | rose | #rrggbb; null = my default"
+      "wallpaper": "string|null: none | dots | dusk | dunes | forest | rose | #rrggbb; null = my default",
+      "notify": "string: all | mentions | none — what this chat may interrupt me with (mute is a timer; this is standing, and none silences mentions too)"
     },
     "response": {
       "ok": "boolean"
@@ -958,5 +983,101 @@
       "upload_not_found",
       "upload_incomplete"
     ]
+  },
+  "GET /api/lists": {
+    "summary": "My own chat lists (private filters over my chat list), each with the chats in it."
+  },
+  "POST /api/lists": {
+    "summary": "Make a chat list. Mine alone: nobody is told a list exists or which chats are in it.",
+    "request": {
+      "name": "string: 1-40 characters"
+    },
+    "response": {
+      "id": "integer",
+      "name": "string",
+      "circleIds": "array"
+    },
+    "errors": [
+      "name_required",
+      "too_many_lists (more than 20)"
+    ],
+    "status": 201
+  },
+  "PATCH /api/lists/:lid": {
+    "summary": "Rename a list, or set exactly which chats are in it. Chats I am not a member of are ignored.",
+    "request": {
+      "name": "string: optional",
+      "circleIds": "array: optional, up to 500 circle ids"
+    },
+    "errors": [
+      "name_required",
+      "invalid_value",
+      "not_found"
+    ]
+  },
+  "DELETE /api/lists/:lid": {
+    "summary": "Remove a list. The chats themselves are untouched.",
+    "errors": [
+      "not_found"
+    ]
+  },
+  "GET /api/storage/chats": {
+    "summary": "What each of my chats is using on the server, biggest first, split by photos, videos, voice notes and files (archived media counted separately)."
+  },
+  "POST /api/circles/:id/media/cleanup": {
+    "summary": "Clear out files in one chat by kind, age and size. Managers only, and it deletes for EVERYONE. Archived media (the family's Memory) is never touched. The default is a count, not a deletion.",
+    "request": {
+      "kinds": "array: image | video | audio | file (default: all)",
+      "olderThanDays": "number: 0 = any age",
+      "minBytes": "number: only messages whose files add up to at least this",
+      "preview": "boolean: false actually deletes; anything else only counts"
+    },
+    "response": {
+      "preview": "boolean",
+      "messages": "integer: how many messages",
+      "bytes": "integer"
+    },
+    "errors": [
+      "forbidden (not a manager)",
+      "invalid_value",
+      "not_found"
+    ]
+  },
+  "PUT /api/messages/:mid/live": {
+    "summary": "A new point for a live location I am sharing. Only the sender, only before it ends. Only the latest point is kept — there is no trail.",
+    "request": {
+      "lat": "number: -90..90",
+      "lng": "number: -180..180",
+      "accuracy": "number: metres, optional"
+    },
+    "errors": [
+      "live_over (it ended or ran out)",
+      "invalid_card",
+      "not_found"
+    ]
+  },
+  "POST /api/messages/:mid/live/stop": {
+    "summary": "Stop sharing a live location now. No further point is accepted.",
+    "errors": [
+      "not_found"
+    ]
+  },
+  "POST /api/circles/:id/clear": {
+    "summary": "CHAT-01 clear history: hide everything said so far in this chat, for the caller alone (a cutoff on their membership, not a delete). Answers { clearedThrough }."
+  },
+  "PUT /api/circles/:id/invite/expiry": {
+    "summary": "GRP-02: how long the invite link lives. { days: 1..365 } sets it, { days: null } makes it permanent. Managers only; the code itself is unchanged.",
+    "body": {
+      "days": "number 1-365, or null"
+    }
+  },
+  "GET /api/me/sessions": {
+    "summary": "RT-03: every device this account is signed in on — what the browser said it is, when it was first and last used, and which one is asking. No token ever leaves the server."
+  },
+  "DELETE /api/me/sessions/:id": {
+    "summary": "End one of your sessions (the id comes from GET /api/me/sessions). Ending your own is simply signing out; the answer says so."
+  },
+  "POST /api/me/sessions/revoke-others": {
+    "summary": "End every session except the one asking — what you press when a device is lost. Answers { ended }."
   }
 }

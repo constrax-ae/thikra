@@ -5,6 +5,7 @@ import { app } from '../app.ts';
 import { blobs } from '../storage.ts';
 import { one, run } from '../db.ts';
 import { isEncrypted } from '../lib/e2ee.ts';
+import { MAX_TEXT } from '../../core/format.ts';
 
 app.get('/api/circles/:id/messages', c => {
   const a = circleAccess(c);
@@ -26,8 +27,9 @@ app.post('/api/circles/:id/messages', async c => {
   if (!a) return c.json({ error: 'not_found' }, 404);
   if (isFrozen(a.circleId)) return c.json({ error: 'circle_frozen' }, 423);
   const b = await c.req.json().catch(() => ({}));
-  const body = String(b.body ?? '').trim().slice(0, 4000);
+  const body = String(b.body ?? '').trim();
   if (!body) return c.json({ error: 'empty' }, 400);
+  if (body.length > MAX_TEXT) return c.json({ error: 'too_long', max: MAX_TEXT }, 413);   // refused, never cut: the sender keeps what they wrote
   const cmid = typeof b.client_msg_id === 'string' && b.client_msg_id.length <= 64 ? b.client_msg_id : null;
   const replyTo = Number.isInteger(b.reply_to) ? b.reply_to as number : null;
   try {
@@ -69,7 +71,7 @@ app.post('/api/circles/:id/voice', async c => {
   // Speech-to-text is not wired up yet: a client may supply a transcript, otherwise the clip waits for one.
   const transcript = !once && typeof form?.transcript === 'string' ? form.transcript.trim().slice(0, 4000) : '';
   const dur = Number(form?.duration);
-  const durationMs = Number.isInteger(dur) && dur > 0 && dur <= 15 * 60_000 ? dur : null; // as measured by the recorder; the file itself often lacks a usable length
+  const durationMs = Number.isInteger(dur) && dur > 0 && dur <= 30 * 60_000 ? dur : null; // MED-01: 30 minutes. As measured by the recorder; the file itself often lacks a usable length
   const sent = insertMessage({
     circleId: a.circleId, userId: a.user.id, kind: 'voice', body: '', audioPath: hash, clientMsgId: cmid, replyTo,
     transcript: transcript || null, archiveStatus: transcript || once ? 'none' : 'pending_transcript', viewOnce: once,

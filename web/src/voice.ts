@@ -28,8 +28,33 @@ export const TAP_MS = 350;
 /** The shortest recording worth sending; anything shorter was a slip of the finger. */
 export const MIN_MS = 700;
 
-/** The longest recording: a little under the server's 15 minutes. */
-export const MAX_MS = 14.5 * 60_000;
+/** The longest recording: a little under the 30 minutes of MED-01, which the server also enforces. */
+export const MAX_MS = 29.5 * 60_000;
 
 export const SPEEDS = [1, 1.5, 2] as const;
 export const nextSpeed = (s: number) => SPEEDS[(SPEEDS.indexOf(s as 1) + 1) % SPEEDS.length] ?? 1;
+
+/**
+ * MED-02 (P1) "sequential notes": when a voice note ends, which one plays next. Only the message RIGHT after it, and only when
+ * that message is itself a voice note: a run of voice notes plays through like one long message, and anything else in between
+ * (a text, a photo) stops it, so nobody hears a note that arrived much later out of context. `order` is the chat's messages
+ * in the order they are shown.
+ */
+export function nextVoiceNote(order: ReadonlyArray<{ id: number; voice: boolean }>, endedId: number): number | null {
+  const at = order.findIndex(m => m.id === endedId);
+  const next = at >= 0 ? order[at + 1] : undefined;
+  return next?.voice ? next.id : null;
+}
+
+/**
+ * A playhead that moves on every frame. Browsers only advance an audio element's `currentTime` in steps (often every 100-250
+ * ms), so reading it on each frame still stutters. This carries the position forward from the moment it last changed, at the
+ * playback speed, and never runs more than `slack` seconds ahead of what the element reports (a stall stops the dot quickly).
+ * `memo` is kept between frames by the caller.
+ */
+export interface Clock { t: number; at: number }
+export function smoothTime(memo: Clock | null, reported: number, nowMs: number, rate: number, slack = 0.3): { time: number; memo: Clock } {
+  const m = !memo || reported !== memo.t ? { t: reported, at: nowMs } : memo;
+  const ahead = Math.min(slack, Math.max(0, ((nowMs - m.at) / 1000) * rate));
+  return { time: reported + ahead, memo: m };
+}

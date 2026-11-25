@@ -15,7 +15,7 @@ const apply = (wall: Wallpaper, bubble: string) => {
   const el = document.documentElement;
   el.setAttribute('data-wall', wall);
   const colour = BUBBLES.find(([k]) => k === bubble)?.[1];
-  const vars: Array<[string, string]> = [['--bubble-mine', colour ?? ''], ['--bubble-ink', '#fff'], ['--bubble-tick-user', '#86efac'], ['--bubble-edge', 'transparent']];
+  const vars: Array<[string, string]> = [['--bubble-mine', colour ?? ''], ['--bubble-ink', '#fff'], ['--bubble-tick-user', '#86efac'], ['--bubble-edge', 'transparent'], ['--bubble-voice', '#fff'], ['--bubble-voice-ink', colour ?? ''], ['--bubble-link', '#fff']];
   for (const [k, v] of vars) { if (colour) el.style.setProperty(k, v); else el.style.removeProperty(k); }
 };
 

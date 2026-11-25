@@ -1,13 +1,24 @@
-import { all, run, type Row } from '../db.ts';
+import { all, one, run, type Row } from '../db.ts';
 import { live, memberJoined } from '../live.ts';
 import { circleChanged, ensurePerson, systemMessage } from './helpers.ts';
 import { memberAdded } from './e2ee.ts';
 
 // ---- groups: joining ---------------------------------------------------------------------------
 
-/** Put a person into a chat as an ordinary member, with the notice everyone sees. (The one way a member is added by invite or approval.) */
+/** GRP-01: the specification's proposed ceiling for one chat. */
+export const MAX_MEMBERS = 256;
+/** Is there room for one more? (Checked before anyone is let in, by every path: invite link, approval, direct add.) */
+export const chatIsFull = (circleId: number) =>
+  Number(one('SELECT COUNT(*) AS n FROM circle_members WHERE circle_id = ?', circleId)!.n) >= MAX_MEMBERS;
+
+/**
+ * Put a person into a chat as an ordinary member, with the notice everyone sees. (The one way a member is added by
+ * invite or approval.) `joined_seq` records where they came in, so a group whose history policy is 'since_join'
+ * can keep what was said before them to itself (GRP-02).
+ */
 export function addMember(circleId: number, user: Row) {
-  run("INSERT OR IGNORE INTO circle_members (circle_id, user_id, role) VALUES (?, ?, 'member')", circleId, user.id);
+  const seq = Number(one('SELECT COALESCE(MAX(seq), 0) AS s FROM messages WHERE circle_id = ?', circleId)!.s) || 0;
+  run("INSERT OR IGNORE INTO circle_members (circle_id, user_id, role, joined_seq) VALUES (?, ?, 'member', ?)", circleId, user.id, seq);
   run('DELETE FROM join_requests WHERE circle_id = ? AND user_id = ?', circleId, user.id);
   ensurePerson(circleId, user);
   memberJoined(circleId, [user.id as number]);

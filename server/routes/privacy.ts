@@ -1,3 +1,4 @@
+import { UNOPENED_DAYS } from '../lib/viewonce.ts';
 import { bodyLimit } from 'hono/body-limit';
 import { app } from '../app.ts';
 import { all, one, run } from '../db.ts';
@@ -36,6 +37,8 @@ app.post('/api/messages/:mid/open', c => {
   const m = one('SELECT id, circle_id, user_id, view_once, deleted_at FROM messages WHERE id = ?', Number(c.req.param('mid')));
   if (!m || !membership(m.circle_id, user.id) || !m.view_once || m.deleted_at) return c.json({ error: 'not_found' }, 404);
   if (m.user_id === user.id) return c.json({ error: 'view_once_closed' }, 403);
+  // PRIV-04: nobody claimed it within the fortnight, so there is nothing left to claim.
+  if (one(`SELECT 1 FROM messages WHERE id = ? AND created_at < datetime('now', '-${UNOPENED_DAYS} days')`, m.id)) return c.json({ error: 'view_once_gone' }, 410);
   if (!one('SELECT 1 FROM media WHERE message_id = ?', m.id)) return c.json({ error: 'already_opened' }, 410);   // the file is already gone
   const added = Number(run('INSERT OR IGNORE INTO view_once_opens (message_id, user_id) VALUES (?, ?)', m.id, user.id).changes) > 0;
   if (!added) return c.json({ error: 'already_opened' }, 410);

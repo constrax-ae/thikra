@@ -23,11 +23,14 @@ function locked<T>(id: string, fn: () => Promise<T>): Promise<T> {
   return next;
 }
 
-export function openUpload(userId: number, circleId: number, name: string, size: number): string {
+export function openUpload(userId: number, circleId: number, name: string, size: number, checksum: string | null = null): string {
   const id = randomBytes(16).toString('hex');
-  run('INSERT INTO uploads (id, user_id, circle_id, name, size) VALUES (?, ?, ?, ?, ?)', id, userId, circleId, name, size);
+  run('INSERT INTO uploads (id, user_id, circle_id, name, size, checksum) VALUES (?, ?, ?, ?, ?, ?)', id, userId, circleId, name, size, checksum);
   return id;
 }
+/** MED-05: a 64-character hex SHA-256, or nothing. Anything else is refused rather than silently ignored. */
+export const cleanChecksum = (v: unknown): string | null | undefined =>
+  v === undefined || v === null || v === '' ? null : (typeof v === 'string' && /^[0-9a-f]{64}$/i.test(v) ? v.toLowerCase() : undefined);
 export const openCount = (userId: number) => one(`SELECT COUNT(*) AS n FROM uploads WHERE user_id = ? AND created_at > ${STALE}`, userId)!.n as number;
 /** An upload of this person's that has not expired. */
 export const uploadOf = (id: unknown, userId: number): Row | undefined =>

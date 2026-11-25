@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiError, type Card, type LinkPreview } from './api';
-import { useI18n } from './i18n';
+import { intlLocale, useI18n } from './i18n';
 import { Dialog } from './Dialog';
 import { STICKER_PACKS, findSticker } from '../../core/stickers';
 import { mapLinks, vcard } from './links';
+import { isSharing, onShareChange, stopSharing } from './livelocation';
 import { Icon } from './icons';
 import { Spinner } from './States';
 
@@ -12,7 +13,7 @@ const OUT = { target: '_blank', rel: 'noopener noreferrer nofollow' } as const;
 
 /** What the chat list, a quoted reply and a pinned line call a message that is a card. */
 export function cardWord(type: string | null | undefined, t: Record<string, any>): string {
-  return ({ gif: `GIF`, sticker: `${t.stickerWord}`, contact: `${t.contactWord}`, location: `${t.locationWord}` } as Record<string, string>)[type ?? ''] ?? '';
+  return ({ gif: `GIF`, sticker: `${t.stickerWord}`, contact: `${t.contactWord}`, location: `${t.locationWord}`, live: `${t.liveWord}` } as Record<string, string>)[type ?? ''] ?? '';
 }
 
 // ---- link preview ------------------------------------------------------------------------------
@@ -238,12 +239,51 @@ export function LocationCard({ card, mine }: { card: Extract<Card, { type: 'loca
     </div>
   );
 }
+/**
+ * A live location in a bubble: the latest point, when it arrived, and until when it runs. The person sharing it
+ * sees a Stop button for as long as this device is the one sharing. There is no trail to draw, by design.
+ */
+export function LiveCard({ card, mine, mid, onChanged }: { card: Extract<Card, { type: 'live' }>; mine: boolean; mid: number; onChanged?: () => void }) {
+  const { t, lang } = useI18n();
+  const [stopping, setStopping] = useState(false);
+  const [, redraw] = useState(0);
+  useEffect(() => onShareChange(() => redraw(n => n + 1)), []);   // the watcher may stop a share on its own
+  const links = mapLinks(card.lat, card.lng);
+  const until = Date.parse(card.until);
+  const over = card.ended || !(until > Date.now());
+  const time = (iso: string) => { const d = new Date(iso); return isNaN(+d) ? '' : d.toLocaleTimeString(intlLocale(lang), { hour: '2-digit', minute: '2-digit' }); };
+  return (
+    <div className="min-w-[13rem]" data-card="live">
+      <div className={`rounded-xl px-3 py-3 flex items-center gap-3 ${mine ? 'bg-current/10' : 'bg-green-soft'}`}>
+        <span aria-hidden className={`relative w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${mine ? 'bg-current/15' : 'bg-card text-green'}`}>
+          <Icon name="location" className="w-5 h-5" />
+          {!over && <span className="absolute -top-0.5 -end-0.5 w-2.5 h-2.5 rounded-full bg-danger animate-pulse" />}
+        </span>
+        <span className="min-w-0">
+          <b className="block truncate">{t.liveWord}</b>
+          <span className="block text-xs opacity-80">{over ? t.liveEnded : fill(t.liveUntil, { time: time(card.until) })}</span>
+          <span className="block text-[11px] opacity-70 tabular-nums" dir="ltr">{card.lat.toFixed(5)}, {card.lng.toFixed(5)}</span>
+          {card.at && <span className="block text-[11px] opacity-70">{fill(t.liveUpdated, { time: time(card.at) })}</span>}
+        </span>
+      </div>
+      <div className="mt-2 flex gap-2">
+        <a className="btn btn-ghost !py-1 flex-1 text-sm text-center" href={links.google} {...OUT}>{t.openGoogleMaps}</a>
+        <a className="btn btn-ghost !py-1 flex-1 text-sm text-center" href={links.apple} {...OUT}>{t.openAppleMaps}</a>
+      </div>
+      {mine && !over && isSharing(mid) && (
+        <button type="button" disabled={stopping} className="btn btn-ghost !py-1 w-full mt-2 text-sm text-danger"
+          onClick={() => { setStopping(true); stopSharing(mid).then(() => onChanged?.()).finally(() => setStopping(false)); }}>{t.liveStop}</button>
+      )}
+    </div>
+  );
+}
+
 type Fix = { lat: number; lng: number; accuracy: number };
 /**
  * Sending where I am now. The device is asked for its best reading and keeps listening for a better one while the sheet is open;
  * the person sees the accuracy and sends when it is good. If permission is refused, the sheet says exactly what to do.
  */
-export function LocationSheet({ onClose, onSend }: { onClose: () => void; onSend: (fix: Fix, label: string) => void }) {
+export function LocationSheet({ onClose, onSend, onSendLive }: { onClose: () => void; onSend: (fix: Fix, label: string) => void; onSendLive?: (fix: Fix, minutes: number) => void }) {
   const { t } = useI18n();
   const [fix, setFix] = useState<Fix | null>(null);
   const [problem, setProblem] = useState<'denied' | 'unavailable' | 'unsupported' | null>(null);
@@ -288,6 +328,17 @@ export function LocationSheet({ onClose, onSend }: { onClose: () => void; onSend
             <button type="button" className="btn flex-1" onClick={() => onSend(fix, label.trim())}>{t.sendLocation}</button>
             <button type="button" className="btn btn-ghost flex-1" onClick={onClose}>{t.cancel}</button>
           </div>
+          {onSendLive && (
+            <div className="mt-4 pt-3 border-t border-line">
+              <p className="text-sm font-bold flex items-center gap-2"><Icon name="location" className="w-4 h-4 text-green" />{t.liveFor}</p>
+              <div className="mt-2 flex gap-2">
+                {[15, 60, 480].map((m, i) => (
+                  <button key={m} type="button" className="btn btn-ghost flex-1 !py-1 text-sm" onClick={() => onSendLive(fix, m)}>{t.liveMins[i]}</button>
+                ))}
+              </div>
+              <p className="text-xs text-muted mt-2">{t.liveNote}</p>
+            </div>
+          )}
         </>
       )}
     </Dialog>

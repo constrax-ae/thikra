@@ -68,11 +68,50 @@ export function wallProps(w: string | null | undefined): { 'data-chatwall'?: str
 const TIMERS: Array<[number | null, 'off' | 'd1' | 'd7' | 'd90']> = [[null, 'off'], [86400, 'd1'], [604800, 'd7'], [7776000, 'd90']];
 export const timerWord = (secs: number, t: { priv: Record<string, string> }) => t.priv[secs === 86400 ? 'd1' : secs === 604800 ? 'd7' : 'd90'];
 
-export function ChatOptions({ circle, onClose, reload }: { circle: CircleDetail; onClose: () => void; reload: () => void }) {
+/**
+ * Reporting something bigger than one message: a person, or a whole chat. Nothing of the conversation goes with it —
+ * only the reason and, if they write one, their own words. (Reporting a MESSAGE does send that message's text, and
+ * says so; that is the one thing moderation ever reads.)
+ */
+export function ReportDialog({ path, title, onClose }: { path: string; title: string; onClose: () => void }) {
+  const { t } = useI18n();
+  const [sent, setSent] = useState(false);
+  const [note, setNote] = useState('');
+  const [error, setError] = useState('');
+  async function send(reason: string) {
+    setError('');
+    try { await api(path, { body: { reason, note: note.trim() || undefined } }); setSent(true); }
+    catch (e) { setError(t.errors[e instanceof ApiError ? e.code : 'generic'] ?? t.errors.generic); }
+  }
+  return (
+    <Dialog onClose={onClose} label={title}>
+      <h2 className="text-lg font-bold">{title}</h2>
+      {sent ? <p role="status" className="mt-3">{t.reportSent}</p> : (
+        <>
+          <p className="text-sm text-muted mt-2">{t.priv.reportWhatTravels}</p>
+          <label className="block mt-3 text-sm">{t.priv.reportNote}
+            <textarea className="field mt-1" rows={2} maxLength={500} value={note} onChange={e => setNote(e.target.value)} />
+          </label>
+          <div className="mt-3 flex flex-col gap-2">
+            {Object.entries(t.reportReasons).map(([k, label]) => (
+              <button key={k} className="btn btn-ghost" onClick={() => send(k)}>{label}</button>
+            ))}
+          </div>
+        </>
+      )}
+      {error && <p role="alert" className="text-sm text-danger mt-2">{error}</p>}
+      <button className="btn btn-ghost w-full mt-3" onClick={onClose}>{sent ? t.priv.done : t.cancel}</button>
+    </Dialog>
+  );
+}
+
+export function ChatOptions({ circle, meId, onClose, reload }: { circle: CircleDetail; meId: number; onClose: () => void; reload: () => void }) {
   const { t } = useI18n();
   const { unlocked } = useLock();
   const [error, setError] = useState('');
   const [pinFor, setPinFor] = useState<null | 'lock'>(null);
+  const [report, setReport] = useState<null | 'chat' | 'person'>(null);
+  const other = circle.kind === 'direct' ? circle.members.find(m => m.id !== meId) : undefined;
   const manager = circle.role === 'owner' || circle.role === 'admin';
   const canTimer = circle.kind === 'direct' || manager;
   const fail = (e: unknown) => setError(t.errors[e instanceof ApiError ? e.code : 'generic'] ?? t.errors.generic);
@@ -116,16 +155,49 @@ export function ChatOptions({ circle, onClose, reload }: { circle: CircleDetail;
           </div>
         </section>
         <section>
+          <h3 className="font-bold text-sm flex items-center gap-2"><span aria-hidden className="w-8 h-8 rounded-xl bg-green-soft text-green flex items-center justify-center shrink-0"><Icon name="bell" className="w-4 h-4" /></span>{t.priv.notify}</h3>
+          <p className="text-xs text-muted mt-1">{t.priv.notifyNote}</p>
+          <div className="mt-2 flex flex-wrap gap-2" role="radiogroup" aria-label={t.priv.notify}>
+            {(circle.kind === 'direct' ? ['all', 'none'] : ['all', 'mentions', 'none']).map(k => {
+              const on = (circle.notify ?? 'all') === k;
+              return <button key={k} type="button" role="radio" aria-checked={on} onClick={() => prefs({ notify: k })}
+                className={`btn btn-ghost !py-1 transition-colors duration-[var(--dur-instant)] ${on ? '!border-green !text-green font-bold' : ''}`}>{t.priv[k === 'all' ? 'notifyAll' : k === 'mentions' ? 'notifyMentions' : 'notifyNone']}</button>;
+            })}
+          </div>
+        </section>
+        <section>
           <h3 className="font-bold text-sm flex items-center gap-2"><span aria-hidden className="w-8 h-8 rounded-xl bg-green-soft text-green flex items-center justify-center shrink-0"><Icon name="lock" className="w-4 h-4" /></span>{t.priv.lockChat}</h3>
           <p className="text-xs text-muted mt-1">{t.priv.lockNote}</p>
           <button type="button" className="btn btn-ghost mt-2" onClick={() => (circle.locked ? prefs({ locked: false }) : unlocked ? prefs({ locked: true }) : setPinFor('lock'))}>
             {circle.locked ? t.priv.unlockChat : t.priv.lockChat}
           </button>
         </section>
+        <section>
+          <h3 className="font-bold text-sm flex items-center gap-2"><span aria-hidden className="w-8 h-8 rounded-xl bg-green-soft text-green flex items-center justify-center shrink-0"><Icon name="ban" className="w-4 h-4" /></span>{t.priv.clearHead}</h3>
+          <p className="text-xs text-muted mt-1">{t.priv.clearNote}</p>
+          <button type="button" className="btn btn-ghost mt-2" onClick={async () => {
+            if (!confirm(t.priv.clearConfirm)) return;
+            setError('');
+            try { await api(`/circles/${circle.id}/clear`, { body: {} }); reload(); onClose(); } catch (e) { fail(e); }
+          }}>{t.priv.clearHistory}</button>
+        </section>
+        <section>
+          <h3 className="font-bold text-sm flex items-center gap-2"><span aria-hidden className="w-8 h-8 rounded-xl bg-gold/15 text-gold-dark flex items-center justify-center shrink-0"><Icon name="alert" className="w-4 h-4" /></span>{t.priv.reportHead}</h3>
+          <p className="text-xs text-muted mt-1">{t.priv.reportPattern}</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {other && <button type="button" className="btn btn-ghost !py-1" onClick={() => setReport('person')}>{t.priv.reportPerson.replace('{name}', other.name)}</button>}
+            <button type="button" className="btn btn-ghost !py-1" onClick={() => setReport('chat')}>{t.priv.reportChat}</button>
+          </div>
+        </section>
       </div>
       {error && <p role="alert" className="text-sm text-danger mt-2">{error}</p>}
       <button className="btn w-full mt-4" onClick={onClose}>{t.priv.done}</button>
       {pinFor && <PinGate onClose={() => setPinFor(null)} onDone={() => { setPinFor(null); prefs({ locked: true }); }} />}
+      {report && (
+        <ReportDialog onClose={() => setReport(null)}
+          path={report === 'person' && other ? `/users/${other.id}/report` : `/circles/${circle.id}/report`}
+          title={report === 'person' && other ? t.priv.reportPerson.replace('{name}', other.name) : t.priv.reportChat} />
+      )}
     </Dialog>
   );
 }
@@ -194,11 +266,14 @@ const isConfigured = () => (status ??= api<{ configured: boolean }>('/transcribe
 const store = (k: string, v?: string) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch { /* not kept */ } return null; };
 
 /** "Show as text" for ONE voice note, asked by this reader. The note is sent to the speech service only when this is pressed; the text is kept on this device and shown to this person only. */
-export function Transcribe({ m }: { m: Message }) {
+/**
+ * "Show text" for a voice note that came with no transcript: the recording is sent to the transcription service (after a one-time
+ * consent), and the text is kept on THIS device only. `onText` is called when a new text arrives, so the bubble can open it.
+ */
+export function useTranscribe(m: Message, onText?: () => void) {
   const { t } = useI18n();
   const key = `tamtim_tx_${m.id}`;
   const [text, setText] = useState<string | null>(() => store(key));
-  const [shown, setShown] = useState(true);
   const [state, setState] = useState<'idle' | 'ask' | 'busy'>('idle');
   const [msg, setMsg] = useState('');
   async function start() {
@@ -216,27 +291,19 @@ export function Transcribe({ m }: { m: Message }) {
       const fd = new FormData();
       fd.append('audio', new File([blob], 'voice', { type: (audio.headers.get('content-type') ?? blob.type ?? 'audio/webm').split(';')[0] }));
       const r = await api<{ text: string }>('/transcribe', { form: fd });
-      store(key, r.text); setText(r.text); setShown(true);
-      if (!r.text.trim()) setMsg(t.priv.transcribeFail);
+      store(key, r.text); setText(r.text);
+      if (r.text.trim()) onText?.(); else setMsg(t.priv.transcribeFail);
     } catch (e) {
       const code = e instanceof ApiError ? e.code : '';
       setMsg(code === 'transcribe_off' ? t.priv.transcribeOff : code === 'too_many_requests' ? t.priv.transcribeLimit : t.priv.transcribeFail);
-    } finally { setState('idle'); }
+    } finally { setState(s => (s === 'busy' ? 'idle' : s)); }
   }
-  return (
-    <div className="mt-1 text-sm">
-      {text && shown && <p className="rounded-xl bg-green-soft text-ink px-2.5 py-1.5 whitespace-pre-wrap break-words" dir="auto"><span className="block text-[11px] opacity-70">{t.priv.transcribeLabel}</span>{text}</p>}
-      {text
-        ? <button type="button" className="text-xs underline opacity-80" onClick={() => setShown(s => !s)}>{shown ? t.priv.transcribeHide : t.priv.transcribe}</button>
-        : <button type="button" className="text-xs underline opacity-80" disabled={state === 'busy'} onClick={start}>{state === 'busy' ? t.priv.transcribing : t.priv.transcribe}</button>}
-      {msg && <p role="status" className="text-xs text-danger mt-0.5">{msg}</p>}
-      {state === 'ask' && (
-        <Dialog onClose={() => setState('idle')} label={t.priv.transcribe}>
-          <h2 className="text-lg font-bold">{t.priv.transcribe}</h2>
-          <p className="mt-2 text-sm">{t.priv.transcribeAsk}</p>
-          <div className="mt-4 flex gap-2"><button className="btn flex-1" onClick={() => { store('tamtim_tx_ok', '1'); run(); }}>{t.priv.transcribeYes}</button><button className="btn btn-ghost" onClick={() => setState('idle')}>{t.cancel}</button></div>
-        </Dialog>
-      )}
-    </div>
+  const consent = state === 'ask' && (
+    <Dialog onClose={() => setState('idle')} label={t.priv.transcribe}>
+      <h2 className="text-lg font-bold">{t.priv.transcribe}</h2>
+      <p className="mt-2 text-sm">{t.priv.transcribeAsk}</p>
+      <div className="mt-4 flex gap-2"><button className="btn flex-1" onClick={() => { store('tamtim_tx_ok', '1'); run(); }}>{t.priv.transcribeYes}</button><button className="btn btn-ghost" onClick={() => setState('idle')}>{t.cancel}</button></div>
+    </Dialog>
   );
+  return { text: text?.trim() ? text : null, busy: state === 'busy', msg, start, consent };
 }
