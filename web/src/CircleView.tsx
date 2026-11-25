@@ -1342,7 +1342,8 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive, onLeave }: { circle:
                   </button>
                 )}
                 {m.viewOnce && <ViewOnceBubble m={m} mine={mine} meId={me.id} />}
-                {!m.viewOnce && !!m.attachments?.length && (() => {
+                {/* A voice note's audio is its own player (in an encrypted chat it travels as an attachment): never also a file box. */}
+                {!m.viewOnce && !voiceCard && !!m.attachments?.length && (() => {
                   // A photo should reach the edge of its bubble; padding around it reads as a
                   // document attachment rather than an image someone sent.
                   const flush = (mine || grouped) && !m.replyTo && !m.sealedOn && !m.forwardCount
