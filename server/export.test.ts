@@ -40,7 +40,7 @@ test('the export has what you could see and nothing else, with the real files, a
   const res = await app.request('/api/me/export', { headers: { cookie: b } });
   assert.equal(res.status, 200);
   assert.equal(res.headers.get('content-type'), 'application/zip');
-  assert.match(res.headers.get('content-disposition') ?? '', /thikra-export-\d{4}-\d{2}-\d{2}\.zip/);
+  assert.match(res.headers.get('content-disposition') ?? '', /tamtim-export-\d{4}-\d{2}-\d{2}\.zip/);
   const zip = unzipSync(new Uint8Array(await res.arrayBuffer()));
   const names = Object.keys(zip);
   assert.ok(names.includes('README.txt') && names.includes('profile.json'));

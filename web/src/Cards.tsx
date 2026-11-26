@@ -233,8 +233,8 @@ export function LocationCard({ card, mine }: { card: Extract<Card, { type: 'loca
         </span>
       </div>
       <div className="mt-2 flex gap-2">
-        <a className="btn btn-ghost !py-1 flex-1 text-sm text-center" href={links.google} {...OUT}>{t.openGoogleMaps}</a>
-        <a className="btn btn-ghost !py-1 flex-1 text-sm text-center" href={links.apple} {...OUT}>{t.openAppleMaps}</a>
+        <a className="btn btn-ghost !py-1 !px-2 flex-1 text-sm text-center whitespace-nowrap min-w-0" href={links.google} {...OUT}>{t.openGoogleMaps}</a>
+        <a className="btn btn-ghost !py-1 !px-2 flex-1 text-sm text-center whitespace-nowrap min-w-0" href={links.apple} {...OUT}>{t.openAppleMaps}</a>
       </div>
     </div>
   );
@@ -267,8 +267,8 @@ export function LiveCard({ card, mine, mid, onChanged }: { card: Extract<Card, {
         </span>
       </div>
       <div className="mt-2 flex gap-2">
-        <a className="btn btn-ghost !py-1 flex-1 text-sm text-center" href={links.google} {...OUT}>{t.openGoogleMaps}</a>
-        <a className="btn btn-ghost !py-1 flex-1 text-sm text-center" href={links.apple} {...OUT}>{t.openAppleMaps}</a>
+        <a className="btn btn-ghost !py-1 !px-2 flex-1 text-sm text-center whitespace-nowrap min-w-0" href={links.google} {...OUT}>{t.openGoogleMaps}</a>
+        <a className="btn btn-ghost !py-1 !px-2 flex-1 text-sm text-center whitespace-nowrap min-w-0" href={links.apple} {...OUT}>{t.openAppleMaps}</a>
       </div>
       {mine && !over && isSharing(mid) && (
         <button type="button" disabled={stopping} className="btn btn-ghost !py-1 w-full mt-2 text-sm text-danger"

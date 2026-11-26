@@ -19,16 +19,24 @@
 import {
   createApplicationMessage, createCommit, createGroup as mlsCreateGroup, decodeGroupState, decodeMlsMessage, defaultCapabilities, defaultKeyPackageEqualityConfig,
   defaultKeyRetentionConfig, defaultLifetime, defaultLifetimeConfig, defaultPaddingConfig, emptyPskIndex, encodeGroupState, encodeMlsMessage, generateKeyPackageWithKey,
-  getCiphersuiteFromName, getCiphersuiteImpl, joinGroup, processPrivateMessage,
-  type ClientConfig, type ClientState, type CiphersuiteImpl, type Credential, type KeyPackage, type PrivateKeyPackage, type Proposal,
+  getCiphersuiteFromName, getCiphersuiteImpl, joinGroup, processPrivateMessage, nobleCryptoProvider,
+  type ClientConfig, type ClientState, type CiphersuiteImpl, type CryptoProvider, type Credential, type KeyPackage, type PrivateKeyPackage, type Proposal,
 } from 'ts-mls';
+import { sha256 as nobleSha256 } from '@noble/hashes/sha2.js';
 import { verifyKeyPackage } from 'ts-mls/keyPackage.js';
 import { verifyLeafNodeSignatureKeyPackage } from 'ts-mls/leafNode.js';
 
 /** The one ciphersuite: X25519 key agreement, AES-128-GCM, SHA-256, Ed25519 signatures (MLS ciphersuite 1, the mandatory one). */
 export const SUITE = 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519' as const;
 let cached: Promise<CiphersuiteImpl> | undefined;
-const suite = () => (cached ??= getCiphersuiteImpl(getCiphersuiteFromName(SUITE)));
+let provider: CryptoProvider | undefined;   // undefined: the library's default, which uses the platform's WebCrypto (browser, Node)
+const suite = () => (cached ??= getCiphersuiteImpl(getCiphersuiteFromName(SUITE), provider));
+/**
+ * The phone app: React Native has no WebCrypto (`crypto.subtle`), so it uses the library's pure-JavaScript provider built on the
+ * same @noble libraries. Same ciphersuite, same bytes on the wire: a phone and a browser read each other's messages.
+ * Called once at start-up, before anything is encrypted.
+ */
+export function usePureJsCrypto(): void { provider = nobleCryptoProvider; cached = undefined; }
 
 const enc = new TextEncoder(), dec = new TextDecoder();
 
@@ -87,7 +95,8 @@ function unpackSecret(b: Uint8Array): PrivateKeyPackage {
   return { initPrivateKey: parts[0], hpkePrivateKey: parts[1], signaturePrivateKey: parts[2] };
 }
 const hex = (b: Uint8Array) => Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
-async function sha256(b: Uint8Array) { return new Uint8Array(await crypto.subtle.digest('SHA-256', b as BufferSource)); }
+// @noble's SHA-256 (the same digest as WebCrypto's) so this works where there is no crypto.subtle (React Native).
+async function sha256(b: Uint8Array) { return nobleSha256(b); }
 async function refOf(publicBytes: Uint8Array) { return hex(await sha256(publicBytes)).slice(0, 32); }
 
 /** A device's long-lived identity: one Ed25519 signing key pair, made once when the device is set up. The public half is what a safety number is made from. */
