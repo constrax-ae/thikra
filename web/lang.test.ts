@@ -43,6 +43,17 @@ test('every machine-translation pack only translates texts that exist, keeps eve
   }
 });
 
+// The admin and operations screens are Arabic/English only (see the test below), so "complete" means every user-facing text.
+const ADMIN_KEY = /^(adm[A-Z]|pp[A-Z]|cap[A-Z]|op[A-Z]|sec[A-Z]|pm[A-Z]|an[A-Z])/;
+test('a shipped language has at least 98% of the user-facing texts of English (a mixed-language screen looks broken)', () => {
+  const wanted = Object.keys(EN).filter(k => !ADMIN_KEY.test(k));
+  for (const lang of PACKS) {
+    const pack: Record<string, string> = JSON.parse(readFileSync(new URL(`./src/lang/${lang}.json`, import.meta.url), 'utf8'));
+    const missing = wanted.filter(k => !(k in pack));
+    assert.ok(1 - missing.length / wanted.length >= 0.98, `${lang}: ${missing.length} of ${wanted.length} texts are missing, e.g. ${missing.slice(0, 5).join(', ')}. Translate them, or stop listing the language.`);
+  }
+});
+
 test('overlaying a pack changes texts only: the structure of the dictionary is untouched, and what a pack lacks stays English', () => {
   for (const lang of PACKS) {
     const pack: Record<string, string> = JSON.parse(readFileSync(new URL(`./src/lang/${lang}.json`, import.meta.url), 'utf8'));
