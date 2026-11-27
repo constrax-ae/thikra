@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // Feature 1: "online" and "last seen". Online = the app is on screen in at least one of the person's connections.
 // What must hold: allowed people learn it at once; a hidden status never leaks through the live frame or the HTTP route.
 

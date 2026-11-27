@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // Feature 6: a long chat opens on its latest messages and older ones load in pages of 50 as the person scrolls up.
 // What must hold: walking back never skips or repeats a message, new messages arriving meanwhile change nothing in the older pages,
 // and a page never contains what this reader hid.

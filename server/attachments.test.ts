@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // D-01/D-07 (web slice): images, video and documents in a message. The security rules matter most:
 // what a file is comes from its bytes, risky types are never rendered, and only circle members can fetch anything.
 process.env.THIKRA_DB = ':memory:';

@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // The three things a person arranges for themselves, and the one that moves:
 // chat lists (private filters), per-chat notification rules, storage per chat with a bulk clear-out, and live location.
 

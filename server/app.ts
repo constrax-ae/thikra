@@ -7,6 +7,12 @@ import { logError } from './lib/jobs.ts';
 
 // A published deployment (Replit sets REPLIT_DEPLOYMENT there) is production even if NODE_ENV was never set: it is on the open internet.
 export const PROD = process.env.NODE_ENV === 'production' || !!process.env.REPLIT_DEPLOYMENT;
+/**
+ * Development mode is something somebody turns on ON PURPOSE (THIKRA_DEV=1), never something a missing setting leaves behind.
+ * It is the only thing that (a) puts the sign-in code in the answer to /api/auth/request and (b) makes the first person to register
+ * platform admin. Read at the moment of use so a test can switch it. It never applies in production.
+ */
+export const devMode = () => process.env.THIKRA_DEV === '1' && !PROD;
 /** Where new people's and circles' data is placed (LAUNCH-PLAN D4). Stored only for now; unset means unassigned. */
 export const REGION = (process.env.THIKRA_REGION ?? '').trim().toLowerCase() || null;
 // Who may administer the platform. Set THIKRA_ADMIN_PHONES="+9665...,+9715..." to name them explicitly (required in production).

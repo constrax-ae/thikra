@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // Sealed messages v2, the owner's requirements (2026-10-19): text, voice or video; opened automatically to the whole family; nobody can
 // delete them; kept in the family archive; several per person for different dates and events. Plus the safeguards for event and death triggers.
 process.env.THIKRA_DB = ':memory:';

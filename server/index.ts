@@ -14,6 +14,7 @@ import { briefTick } from './lib/briefs.ts';
 import { refreshAll } from './lib/rollups.ts';
 import { one } from './db.ts';
 import { serve } from '@hono/node-server';
+import { startupMode } from './lib/mode.ts';
 import { serveStatic } from '@hono/node-server/serve-static';
 
 // The server is assembled here. Route files register themselves on import, so the ORDER of these imports is the order of the routes
@@ -114,8 +115,8 @@ app.use('/*', serveStatic({ root: './dist', onFound: caching }));
 // renames it at the end of the build so the request has to come here.
 app.get('*', serveStatic({ path: './dist/app.html', onFound: caching }));
 /** HTTP + the live gateway on one port. Exported so tests can start it on a free port. */
-export function startServer(port: number, onListening?: (port: number) => void) {
-  const server = serve({ fetch: app.fetch, port }, i => onListening?.(i.port)) as import('node:http').Server;
+export function startServer(port: number, onListening?: (port: number) => void, hostname?: string) {
+  const server = serve({ fetch: app.fetch, port, ...(hostname ? { hostname } : {}) }, i => onListening?.(i.port)) as import('node:http').Server;
   // A backup a day (and one shortly after start if the newest is older than 20 hours), keeping seven. THIKRA_BACKUP=0 turns it off.
   if (process.env.THIKRA_BACKUP !== '0') {
     const nightly = trackJob('backup', 24 * 3600_000, async () => { await createBackup(); await pruneBackups(7); console.log('[backup] done'); });
@@ -158,6 +159,8 @@ export function startServer(port: number, onListening?: (port: number) => void) 
   return server;
 }
 if (process.env.THIKRA_NO_LISTEN !== '1') {
-  startServer(Number(process.env.PORT ?? 8787), p => console.log(`Tamtim API on http://localhost:${p}`));
+  const mode = startupMode();
+  console.log(mode.line);
+  startServer(Number(process.env.PORT ?? 8787), p => console.log(`Tamtim API on http://localhost:${p}`), mode.localOnly ? '127.0.0.1' : undefined);
 }
 

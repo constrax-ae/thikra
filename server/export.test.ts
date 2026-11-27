@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // Your data in an open format: a zip of JSON and the original files, with nothing you could not see in the app.
 process.env.THIKRA_DB = ':memory:';
 process.env.THIKRA_NO_LISTEN = '1';

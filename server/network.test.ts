@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // F-07: the live path under a bad network. A real server, a real WebSocket client with the app's reconnect-and-sync
 // behaviour, and a TCP proxy in between that adds latency and cuts connections at random.
 // What must hold: every message a client sent exists exactly once (retries are safe), nothing acknowledged is lost,

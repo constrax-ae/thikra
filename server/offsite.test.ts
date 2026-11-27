@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // The off-server copy, tested with REAL restarts: separate server processes, a wiped disk, a stale file brought back by a republish.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

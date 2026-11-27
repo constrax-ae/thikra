@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // Step 2 (groups), features 11 and 12: @mentions and polls.
 
 process.env.THIKRA_DB = ':memory:';

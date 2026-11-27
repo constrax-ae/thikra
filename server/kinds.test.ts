@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // M-01 / M-02: the three kinds of conversation. circle = family space with the agent; group = ordinary group; direct = one to one.
 process.env.THIKRA_DB = ':memory:';
 process.env.THIKRA_NO_LISTEN = '1';

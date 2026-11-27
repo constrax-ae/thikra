@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // Notifications (Web Push) without touching a real push service: the network is replaced by a fake that records what would be sent.
 process.env.THIKRA_DB = ':memory:';
 process.env.THIKRA_NO_LISTEN = '1';

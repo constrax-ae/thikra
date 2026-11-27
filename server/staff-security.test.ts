@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 process.env.THIKRA_DB = ':memory:';
 process.env.THIKRA_NO_LISTEN = '1';
 process.env.THIKRA_ADMIN_PHONES = '+971500110001';

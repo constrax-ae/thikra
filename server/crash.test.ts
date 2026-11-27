@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // T-04 / invariant I4: "an acknowledged message is never lost", proven by really killing the server.
 // A real server process on a real database file is SIGKILLed in the middle of a burst of sends, restarted on the same
 // file, and checked: every message that was acknowledged before the kill must still exist with the same seq, a retry of

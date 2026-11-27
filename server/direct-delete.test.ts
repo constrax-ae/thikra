@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // MSG-03: in a one-to-one chat nobody is an admin. Whoever started it is stored as its "owner", but that must not let them
 // delete the other person's messages for everyone; only their own, within the normal window. Group managers keep their power.
 

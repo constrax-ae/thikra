@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // AUTH-01 "optional bio": the one-line About under your name, who sees it, and its limits.
 
 process.env.THIKRA_DB = ':memory:';

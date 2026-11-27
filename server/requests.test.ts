@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // Message requests (AUTH-02) and the text limit (MSG-01): a one-to-one chat from someone you do not know waits as a
 // request until you accept it; it can be declined, blocked or reported; and a stranger learns nothing from it.
 

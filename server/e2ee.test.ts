@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // Step 6, part A: end-to-end encryption on the server (feature 26). Design: docs/superpowers/specs/2026-11-19-encryption-design.md, plan: ...-encryption-plan.md.
 // The devices in these tests use the REAL encryption core (core/e2ee.ts, MLS): the server only ever sees bytes it cannot read.
 

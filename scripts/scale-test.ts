@@ -10,6 +10,7 @@ const N = Math.max(1000, Number(process.argv[2] ?? 20000));
 const dir = mkdtempSync(join(tmpdir(), 'thikra-scale-'));
 process.env.THIKRA_DB = join(dir, 'thikra.db');
 process.env.THIKRA_BLOBS = join(dir, 'blobs');
+process.env.THIKRA_DEV = '1';   // this script signs in with the on-screen code
 process.env.THIKRA_BACKUPS = join(dir, 'backups');
 process.env.THIKRA_NO_LISTEN = '1';
 process.env.THIKRA_BACKUP = '0';

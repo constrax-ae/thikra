@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // M-14: search inside a circle. Correctness first (Arabic spelling variants, privacy), then the speed target:
 // MASTER-PLAN §6 says a result in under 300 ms at 100,000 messages.
 process.env.THIKRA_DB = ':memory:';

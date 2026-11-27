@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // Backups that can be proven: take one, verify it, break it in every way we can think of and see verification notice, restore it into a
 // fresh directory and check the restored app data is the same as the live data.
 process.env.THIKRA_DB = ':memory:';

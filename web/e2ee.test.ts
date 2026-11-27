@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // Step 6, part B: the web client of end-to-end encryption, tested against the REAL server (in this process) and the REAL MLS library. No mocks of crypto.
 // Each "device" below is the same engine the browser runs (web/src/e2ee/engine.ts) over an in-memory store.
 

@@ -1,4 +1,4 @@
-import { ADMIN_PHONES, PROD, REGION, app } from '../app.ts';
+import { ADMIN_PHONES, REGION, app, devMode } from '../app.ts';
 import { checkOtp, issueOtp } from '../lib/auth.ts';
 import { normPhone } from '../lib/helpers.ts';
 import { one, run } from '../db.ts';
@@ -32,7 +32,7 @@ app.post('/api/auth/verify', async c => {
     if (!flag('signups_open')) return c.json({ error: 'signups_closed' }, 403);
     const name = String(body.name ?? '').trim().slice(0, 60);
     if (!name) return c.json({ error: 'name_required' }, 400);
-    const first = ADMIN_PHONES.size === 0 && !PROD && !one('SELECT 1 FROM users LIMIT 1'); // dev-only bootstrap
+    const first = ADMIN_PHONES.size === 0 && devMode() && !one('SELECT 1 FROM users LIMIT 1'); // dev-only bootstrap
     const admin = first || ADMIN_PHONES.has(phone);
     const lang = normLang(body.lang, 'ar');
     const r = run('INSERT INTO users (phone, name, lang, is_admin, admin_role, region) VALUES (?, ?, ?, ?, ?, ?)', phone, name, lang, admin ? 1 : 0, admin ? 'owner' : null, REGION);

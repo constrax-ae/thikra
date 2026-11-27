@@ -1,5 +1,5 @@
 import { type Context } from 'hono';
-import { ADMIN_PHONES, PROD, safeEq, sha } from '../app.ts';
+import { ADMIN_PHONES, PROD, devMode, safeEq, sha } from '../app.ts';
 import { logSms, isBlockedCode } from './ops.ts';
 import { SmsError, allowedCountry, otpText, providerFromEnv, takeDailyBudget, type SmsProvider } from '../sms.ts';
 import { count } from '../metrics.ts';
@@ -51,7 +51,7 @@ export async function issueOtp(c: Context, phone: string, wanted: unknown): Prom
   // A country the owner blocked from the admin screen gets no code, in any mode.
   if (isBlockedCode(phone)) { logSms(phone, 'blocked', sms.name); return { ok: false, status: 403, error: 'sms_blocked' }; }
   // Production never reveals the code; it is only sent by SMS. Refuse early when the number may not receive one (cost protection).
-  const real = (PROD && !demoLogin(phone) && !showCodesToEveryone()) || sms.name !== 'console';   // production never reveals a code, except the fake demo numbers in demo mode, or while THIKRA_SHOW_SIGNIN_CODES is on
+  const real = ((PROD || !devMode()) && !demoLogin(phone) && !showCodesToEveryone()) || sms.name !== 'console';   // a code is only ever shown in explicit development mode (THIKRA_DEV=1), for the fake demo numbers in demo mode, or while THIKRA_SHOW_SIGNIN_CODES is on
   if (real) {
     if (!allowedCountry(phone, ALLOWED_CODES)) { logSms(phone, 'blocked', sms.name); return { ok: false, status: 403, error: 'sms_blocked' }; }
     if (!takeDailyBudget(SMS_DAILY_CAP)) { console.error('[sms] daily cap reached'); logSms(phone, 'capped', sms.name); return { ok: false, status: 503, error: 'sms_unavailable' }; }

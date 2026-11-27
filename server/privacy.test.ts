@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // Step 4 (privacy and extras), features 18-23: disappearing messages, view once, chat lock, broadcast lists, wallpapers, voice-to-text.
 
 process.env.THIKRA_DB = ':memory:';

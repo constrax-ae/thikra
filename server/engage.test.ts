@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // M-05 receipts, M-03 unread, M-06 typing, M-07 replies, M-08 reactions, M-10 edits: the behaviour around a message.
 process.env.THIKRA_DB = ':memory:';
 process.env.THIKRA_NO_LISTEN = '1';

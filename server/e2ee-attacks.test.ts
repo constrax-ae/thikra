@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // RED TEAM: attacks on the server side of end-to-end encryption (feature 26). Every test is an ATTACK written as a test: it passes when the attack FAILS.
 // A test marked `todo` is an attack that still works and cannot be fixed in our code (it is listed in docs/RED-TEAM-REPORT.md as open); it is reported but does not fail the run.
 // Attacker models: a malicious group member, an ex-member, a hostile client sending bytes the honest app never would. Local throwaway database only; no network.

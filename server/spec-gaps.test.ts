@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // The last gaps between the chat specification and this server: CHAT-01 clear history, GRP-01 member cap,
 // GRP-02 pre-join history and expiring invites, CHAT-02 search facets, PRIV-04 unopened view-once expiry, MED-05 checksum.
 process.env.THIKRA_DB = ':memory:';

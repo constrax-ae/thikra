@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // Property tests for PROTOCOL.md invariants I1-I5 (backlog F-06).
 // Each scenario is generated from a seed, so a failure prints the seed and can be replayed:
 //   THIKRA_PROP_SEED=12345 pnpm test        THIKRA_PROP_RUNS=2000 pnpm test   (default 150 scenarios)

@@ -29,7 +29,7 @@ async function http(cookie: string | undefined, path: string, body?: unknown, fo
 }
 async function signIn(p: { phone: string; name: string }) {
   const r = await http(undefined, '/api/auth/request', { phone: p.phone });
-  if (!r.json.devCode) throw new Error(`no devCode for ${p.phone} (${r.status} ${JSON.stringify(r.json)}): the server must be in development mode`);
+  if (!r.json.devCode) throw new Error(`no devCode for ${p.phone} (${r.status} ${JSON.stringify(r.json)}): start the server with THIKRA_DEV=1 (development mode)`);
   const v = await http(undefined, '/api/auth/verify', { phone: p.phone, code: r.json.devCode, name: p.name });
   if (!v.cookie) throw new Error(`sign-in failed for ${p.phone}: ${JSON.stringify(v.json)}`);
   return v.cookie;

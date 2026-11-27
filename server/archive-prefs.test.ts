@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // Feature 4: archive and "mark as unread" are private to the person, and one setting decides what a new message does to an archived chat.
 
 process.env.THIKRA_DB = ':memory:';

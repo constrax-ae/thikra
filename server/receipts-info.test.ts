@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // Feature 3: "message info". For your own message: who has read it and who has received it, with the time for each person.
 // Read times obey the read-receipts setting on BOTH sides, exactly like the blue ticks.
 

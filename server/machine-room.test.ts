@@ -1,3 +1,4 @@
+process.env.THIKRA_DEV = '1';   // these tests sign in with the on-screen code, which only exists in explicit development mode
 // Jobs, the error log, costs, the app-version rule, and restoring a backup with a REAL restart (separate server processes on one disk).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
