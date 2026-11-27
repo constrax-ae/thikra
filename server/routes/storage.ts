@@ -4,6 +4,7 @@ import { app } from '../app.ts';
 import { circleAccess, isManager, membership, poke } from '../lib/helpers.ts';
 import { eraseMessage } from '../lib/deletes.ts';
 import { subscription, usage } from '../billing.ts';
+import { isEncrypted } from '../lib/e2ee.ts';
 
 // ---- storage, plan and persons -------------------------------------------------------
 
@@ -24,6 +25,7 @@ app.post('/api/circles/:id/persons', async c => {
   const a = circleAccess(c);
   if (!a) return c.json({ error: 'not_found' }, 404);
   if (!isManager(a.role)) return c.json({ error: 'forbidden' }, 403);
+  if (isEncrypted(a.circleId)) return c.json({ error: 'encrypted_chat' }, 409);   // a readable name must never be stored for an encrypted group
   const b = await c.req.json().catch(() => ({}));
   const name = String(b.name ?? '').trim().slice(0, 60);
   const birth = cleanDate(b.birthDate ?? null);
@@ -38,6 +40,7 @@ app.patch('/api/persons/:pid', async c => {
   const m = p && membership(p.circle_id, c.get('user').id);
   if (!p || !m) return c.json({ error: 'not_found' }, 404);
   if (!isManager(m.role)) return c.json({ error: 'forbidden' }, 403);
+  if (isEncrypted(p.circle_id)) return c.json({ error: 'encrypted_chat' }, 409);
   const b = await c.req.json().catch(() => ({}));
   const name = typeof b.name === 'string' && b.name.trim() ? b.name.trim().slice(0, 60) : p.name;
   const birth = 'birthDate' in b ? cleanDate(b.birthDate) : p.birth_date;

@@ -507,6 +507,14 @@ test('path: plain text over HTTP is refused (and over the live gateway: the same
   assert.throws(() => sendText(id, owner.id, 'hello server', null), (e: any) => e.code === 'encrypted_chat');
   assert.equal(one('SELECT COUNT(*) n FROM messages WHERE circle_id = ? AND body != ?', id, '')!.n, 0);
 });
+test('path: the family-tree "persons" of an encrypted group are refused (a readable name must never be stored there)', async () => {
+  const { id, owner } = await chat('group', 1);
+  const before = one('SELECT COUNT(*) n FROM persons WHERE circle_id = ?', id)!.n;
+  const r = await call(owner.cookie, `/api/circles/${id}/persons`, 'POST', { name: 'LEAKNAME' });
+  assert.equal(r.status, 409); assert.equal(r.json.error, 'encrypted_chat');
+  assert.equal(one('SELECT COUNT(*) n FROM persons WHERE circle_id = ?', id)!.n, before);
+  assert.equal(one('SELECT COUNT(*) n FROM persons WHERE name LIKE ?', '%LEAKNAME%')!.n, 0);
+});
 test('path: a plain voice note, plain attachments, plain cards and polls are refused', async () => {
   const { id, owner } = await chat('group', 1);
   const v = await form(owner.cookie, `/api/circles/${id}/voice`, [['audio', new Blob([Buffer.from('fake-audio')], { type: 'audio/webm' }), 'a.webm'], ['transcript', 'PLAIN-transcript-MARKER']]);
