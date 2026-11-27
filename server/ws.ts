@@ -17,7 +17,7 @@ import { suspension } from './lib/admin.ts';
 import { trackSocket } from './lib/sockets.ts';
 import { count } from './metrics.ts';
 import { MAX_TEXT } from '../core/format.ts';
-
+import { originAllowed, requestHosts } from './lib/origin.ts';
 export interface GatewayDeps {
   sendText(circleId: number, userId: number, body: string, clientMsgId: string | null, replyTo?: number | null, mentions?: unknown, preview?: unknown): { id: number; seq: number; duplicate: boolean };
   membership(circleId: number, userId: number): Row | undefined;
@@ -47,6 +47,9 @@ export function attachGateway(server: Server, deps: GatewayDeps) {
 
   server.on('upgrade', (req, socket, head) => {
     if (new URL(req.url ?? '/', 'http://x').pathname !== '/ws') return; // not ours
+    // A browser always sends Origin on a socket, and a page on another origin must not be able to open one with the person's cookie (lib/origin.ts).
+    const fwd = req.headers['x-forwarded-host'];
+    if (!originAllowed(req.headers.origin, requestHosts(req.headers.host, Array.isArray(fwd) ? fwd[0] : fwd))) { socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); socket.destroy(); return; }
     // The phone app also sends the session in its own header (as on every request, see requireAuth): iOS may swap a hand-set
     // Cookie for an old one from its own store, so a valid one of the two is enough.
     const live = (t: string | undefined) => (t ? one('SELECT user_id FROM sessions WHERE token = ? AND expires_at > ?', sha(t), Date.now()) : undefined);

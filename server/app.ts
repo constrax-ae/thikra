@@ -4,6 +4,7 @@ import { count, log, observe } from './metrics.ts';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { normalizePhone } from '../core/phone.ts';
 import { logError } from './lib/jobs.ts';
+import { STATE_CHANGING, originAllowed, requestHosts } from './lib/origin.ts';
 
 // A published deployment (Replit sets REPLIT_DEPLOYMENT there) is production even if NODE_ENV was never set: it is on the open internet.
 export const PROD = process.env.NODE_ENV === 'production' || !!process.env.REPLIT_DEPLOYMENT;
@@ -57,6 +58,11 @@ app.use('*', async (c, next) => {
   h.set('permissions-policy', 'microphone=(self), camera=(self), geolocation=(self)');
   if (FRAME_ANCESTORS === "'none'") h.set('x-frame-options', 'DENY');
   if (PROD) h.set('strict-transport-security', 'max-age=31536000; includeSubDomains');
+});
+// Cross-site request forgery, second layer (see lib/origin.ts): a request that changes something must not come from another origin.
+app.use('/api/*', async (c, next) => {
+  if (STATE_CHANGING.has(c.req.method) && !originAllowed(c.req.header('origin'), requestHosts(c.req.header('host') ?? new URL(c.req.url).host, c.req.header('x-forwarded-host')))) return c.json({ error: 'bad_origin' }, 403);
+  await next();
 });
 // An unexpected error: the caller gets a plain JSON 500 (never a stack), and the route pattern plus a short message go to the durable error log.
 app.onError((err, c) => {
