@@ -38,7 +38,7 @@ export function LinkCard({ url, title, description, site, image, mine, onRemove 
   );
 }
 /** While a link is being written: ask the server for its preview (after a pause in typing). Nothing is asked when previews are off. */
-export function useLinkPreview(link: string | null, on: boolean) {
+export function useLinkPreview(link: string | null, on: boolean, circleId: number) {
   const [found, setFound] = useState<(LinkPreview & { asked: string }) | null>(null);
   const [dismissed, setDismissed] = useState<string | null>(null);
   useEffect(() => {
@@ -46,10 +46,10 @@ export function useLinkPreview(link: string | null, on: boolean) {
     if (!on || !link || link === dismissed) return;
     let gone = false;
     const timer = setTimeout(() => {
-      api<{ preview: LinkPreview | null }>('/link-preview', { body: { url: link } }).then(r => { if (!gone && r.preview) setFound({ ...r.preview, asked: link }); }).catch(() => {});
+      api<{ preview: LinkPreview | null }>('/link-preview', { body: { url: link, circleId } }).then(r => { if (!gone && r.preview) setFound({ ...r.preview, asked: link }); }).catch(() => {});
     }, 600);
     return () => { gone = true; clearTimeout(timer); };
-  }, [link, on, dismissed]);
+  }, [link, on, dismissed, circleId]);
   return { found: found && found.asked === link ? found : null, dismiss: () => setDismissed(link) };
 }
 

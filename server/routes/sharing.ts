@@ -32,6 +32,12 @@ app.post('/api/link-preview', async c => {
   const b = await c.req.json().catch(() => ({}));
   const u = cleanLink(b.url);
   if (!u) return c.json({ error: 'unsafe_link' }, 400);
+  // A preview is always asked for from inside a chat, and never for an encrypted one: the server must not fetch or store a link written there.
+  // A request that names no chat is refused too, otherwise an old or modified client could simply leave the chat out.
+  const circleId = Number(b.circleId);
+  if (!Number.isInteger(circleId) || circleId <= 0) return c.json({ error: 'circle_required' }, 400);
+  if (!membership(circleId, user.id)) return c.json({ error: 'not_found' }, 404);
+  if (isEncrypted(circleId)) return c.json({ error: 'encrypted_chat' }, 409);
   if (await limited(`preview:${user.id}`, 30, 60_000)) return c.json({ error: 'too_many_requests' }, 429);
   // Housekeeping rides along, at most once an hour: previews older than a week are thrown away with their pictures.
   if (Date.now() - lastPurge > 3600_000) { lastPurge = Date.now(); purgeLinkPreviews().catch(e => console.error('[link previews]', e)); }

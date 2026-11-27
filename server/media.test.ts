@@ -243,10 +243,10 @@ test('link safety: only plain http/https links to a real site name on the usual 
 });
 
 test('link safety: the route refuses this machine, the private network and cloud metadata, by number or by name, and never stores a card for them', async () => {
-  const p = await person('ناصر');
+  const g = await group();
   for (const url of ['http://127.0.0.1/', 'http://2130706433/', 'http://0x7f.0.0.1/', 'http://[::1]/', 'http://[::ffff:127.0.0.1]/', 'http://169.254.169.254/latest/meta-data/', 'http://10.0.0.1/', 'http://192.168.1.1/admin',
     'http://localhost./', 'http://localhost/', `http://127.0.0.1:${port}/api/me`, 'ftp://example.com/']) {
-    const r = await call(p.cookie, '/api/link-preview', 'POST', { url });
+    const r = await call(g.owner.cookie, '/api/link-preview', 'POST', { url, circleId: g.id });
     assert.equal(r.status, 400, url); assert.equal(r.json.error, 'unsafe_link', url);
   }
   assert.equal(one('SELECT COUNT(*) AS n FROM link_previews')!.n, 0);
@@ -311,15 +311,15 @@ test('link previews: the sender asks, the server keeps the answer, and the sent 
   setPreviewFetcher(async u => { fetched++; return u.hostname === 'news.example.com' ? { page: { title: 'عنوان الخبر', description: 'وصف', site: 'الأخبار', image: null }, image: { buf: PNG_BYTES, mime: 'image/png' } } : null; });
   try {
     const url = 'https://news.example.com/a/1';
-    const asked = await call(g.owner.cookie, '/api/link-preview', 'POST', { url });
+    const asked = await call(g.owner.cookie, '/api/link-preview', 'POST', { url, circleId: g.id });
     assert.equal(asked.status, 200);
     assert.equal(asked.json.preview.title, 'عنوان الخبر'); assert.match(asked.json.preview.image, /^[0-9a-f]{64}$/);
     const pic = await app.request(`/api/link-preview/image/${asked.json.preview.image}`, { headers: { cookie: g.owner.cookie } });
     assert.equal(pic.status, 200); assert.equal(pic.headers.get('content-type'), 'image/png');
-    await call(g.member.cookie, '/api/link-preview', 'POST', { url });
+    await call(g.member.cookie, '/api/link-preview', 'POST', { url, circleId: g.id });
     assert.equal(fetched, 1, 'the same link is fetched once, not once per person');
-    assert.deepEqual((await call(g.owner.cookie, '/api/link-preview', 'POST', { url: 'https://nothing.example.com/' })).json, { preview: null });
-    await call(g.owner.cookie, '/api/link-preview', 'POST', { url: 'https://nothing.example.com/' });
+    assert.deepEqual((await call(g.owner.cookie, '/api/link-preview', 'POST', { url: 'https://nothing.example.com/', circleId: g.id })).json, { preview: null });
+    await call(g.owner.cookie, '/api/link-preview', 'POST', { url: 'https://nothing.example.com/', circleId: g.id });
     assert.equal(fetched, 2, 'a link that gave nothing is not asked again at once');
 
     const sent = await call(g.owner.cookie, `/api/circles/${g.id}/messages`, 'POST', { body: `شوفوا ${url}`, preview: url });
@@ -500,13 +500,34 @@ test('review: a page made to choke the reader (thousands of unclosed tags) is re
   assert.equal(parsePreview('<meta '.repeat(1000) + '<title>still read</title>', base)!.title, 'still read');
 });
 
+test('link previews are tied to a chat: an encrypted chat gets no fetch and nothing stored, and a request with no chat (an old or modified client) is refused', async () => {
+  const g = await group();
+  let fetched = 0;
+  setPreviewFetcher(async () => { fetched++; return { page: { title: 'x', description: '', site: 'x', image: null }, image: null }; });
+  try {
+    const url = 'https://leak.example.com/?LEAKMARK';
+    run('UPDATE circles SET encrypted = 1 WHERE id = ?', g.id);
+    const enc = await call(g.owner.cookie, '/api/link-preview', 'POST', { url, circleId: g.id });
+    assert.equal(enc.status, 409); assert.equal(enc.json.error, 'encrypted_chat');
+    assert.equal(fetched, 0, 'the server never opens a link from an encrypted chat');
+    assert.equal(one('SELECT COUNT(*) AS n FROM link_previews WHERE url LIKE ?', '%LEAKMARK%')!.n, 0, 'and stores no address');
+    run('UPDATE circles SET encrypted = 0 WHERE id = ?', g.id);
+    const none = await call(g.owner.cookie, '/api/link-preview', 'POST', { url });
+    assert.equal(none.status, 400); assert.equal(none.json.error, 'circle_required');
+    assert.equal(fetched, 0);
+    const outsider = await person('غريب');
+    assert.equal((await call(outsider.cookie, '/api/link-preview', 'POST', { url, circleId: g.id })).status, 404, 'only a member can ask for a chat');
+    assert.equal(fetched, 0);
+  } finally { setPreviewFetcher(null); }
+});
+
 test('review: stored previews older than a week are thrown away with their pictures, unless a message still shows the picture', async () => {
   const g = await group();
   setPreviewFetcher(async u => ({ page: { title: u.pathname, description: '', site: 'x', image: null }, image: { buf: Buffer.concat([PNG_BYTES, Buffer.from(u.pathname)]), mime: 'image/png' } }));
   try {
-    const old = (await call(g.owner.cookie, '/api/link-preview', 'POST', { url: 'https://old.example.com/gone' })).json.preview;
-    const kept = (await call(g.owner.cookie, '/api/link-preview', 'POST', { url: 'https://old.example.com/kept' })).json.preview;
-    const fresh = (await call(g.owner.cookie, '/api/link-preview', 'POST', { url: 'https://old.example.com/fresh' })).json.preview;
+    const old = (await call(g.owner.cookie, '/api/link-preview', 'POST', { url: 'https://old.example.com/gone', circleId: g.id })).json.preview;
+    const kept = (await call(g.owner.cookie, '/api/link-preview', 'POST', { url: 'https://old.example.com/kept', circleId: g.id })).json.preview;
+    const fresh = (await call(g.owner.cookie, '/api/link-preview', 'POST', { url: 'https://old.example.com/fresh', circleId: g.id })).json.preview;
     const sent = await call(g.owner.cookie, `/api/circles/${g.id}/messages`, 'POST', { body: 'https://old.example.com/kept', preview: 'https://old.example.com/kept' });
     run("UPDATE link_previews SET fetched_at = ? WHERE url LIKE '%/gone' OR url LIKE '%/kept'", Date.now() - 8 * 24 * 3600_000);
     assert.equal(await purgeLinkPreviews(), 2);

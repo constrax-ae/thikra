@@ -1025,7 +1025,7 @@ function Chat({ circle, me, panel, setPanel, onOpenArchive, onLeave, blocked = f
   const typing = typingLabel(typersOf(circle.id), t, circle.kind !== 'direct');
   // A link being written gets a preview card (asked from the server after a pause in typing), unless previews are off or an edit is open.
   const previewsOn = prefOn('previews');
-  const linkPreview = useLinkPreview(editing || enc ? null : firstLink(text), previewsOn);
+  const linkPreview = useLinkPreview(editing || enc ? null : firstLink(text), previewsOn, circle.id);
   /** One line that stands for a message where its full bubble is not drawn (a quoted reply, the pinned bar). */
   const lineOf = (m: Pick<Message, 'kind' | 'body' | 'transcript'> & { card?: { type: string } | string | null; attachments?: Attachment[] }) => {
     const type = typeof m.card === 'string' ? m.card : m.card?.type;
