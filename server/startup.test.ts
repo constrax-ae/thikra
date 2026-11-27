@@ -21,3 +21,13 @@ test('start-up says in one line which mode runs, and only explicit development m
   assert.equal(startupMode({ REPLIT_DEPLOYMENT: '1', THIKRA_DEV: '1' }).mode, 'production');
   assert.equal(startupMode({ NODE_ENV: 'production', THIKRA_DEV: '1' }).mode, 'production');
 });
+
+test('production refuses to start with the console SMS provider (it prints phone and code to the log), unless development is switched on', () => {
+  assert.match(startupMode({ NODE_ENV: 'production' }, 'console').refuse ?? '', /console/);
+  assert.match(startupMode({ REPLIT_DEPLOYMENT: '1' }, 'console').refuse ?? '', /THIKRA_SMS_PROVIDER/);
+  assert.equal(startupMode({ NODE_ENV: 'production' }, 'twilio').refuse, undefined, 'a real provider is fine');
+  assert.equal(startupMode({ NODE_ENV: 'production' }, 'http').refuse, undefined);
+  assert.equal(startupMode({}, 'console').refuse, undefined, 'outside production the console provider is the normal one');
+  assert.equal(startupMode({ NODE_ENV: 'production', THIKRA_DEV: '1' }, 'console').refuse, undefined, 'the dev flag is the explicit way out');
+  assert.equal(startupMode({ NODE_ENV: 'production', THIKRA_SHOW_SIGNIN_CODES: '1' }, 'console').refuse, undefined, 'so is the loud "no SMS provider yet" switch');
+});

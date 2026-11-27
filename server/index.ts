@@ -15,6 +15,7 @@ import { refreshAll } from './lib/rollups.ts';
 import { one } from './db.ts';
 import { serve } from '@hono/node-server';
 import { startupMode } from './lib/mode.ts';
+import { smsInfo } from './lib/auth.ts';
 import { serveStatic } from '@hono/node-server/serve-static';
 
 // The server is assembled here. Route files register themselves on import, so the ORDER of these imports is the order of the routes
@@ -159,7 +160,8 @@ export function startServer(port: number, onListening?: (port: number) => void, 
   return server;
 }
 if (process.env.THIKRA_NO_LISTEN !== '1') {
-  const mode = startupMode();
+  const mode = startupMode(process.env, smsInfo().provider);
+  if (mode.refuse) { console.error(mode.refuse); process.exit(1); }
   console.log(mode.line);
   startServer(Number(process.env.PORT ?? 8787), p => console.log(`Tamtim API on http://localhost:${p}`), mode.localOnly ? '127.0.0.1' : undefined);
 }
