@@ -161,6 +161,56 @@ test('plaintext grep: the same five in an ordinary group, read by two other memb
   assert.equal((await dc.history(id)).filter(m => m.kind !== 'system').length, 5);
 });
 
+// The same grep for the rest of what a message can carry. Each marker is a string that would be readable if any of these paths ever wrote plain text.
+const MARK2 = {
+  reply: 'reply-text-rr21', mention: 'mention-text-mm34', before: 'before-edit-bb52', after: 'after-edit-aa77', question: 'poll-question-qq90', optionA: 'poll-optA-oa11', optionB: 'poll-optB-ob22',
+  contactName: 'contact-name-cn63', contactPhone: '+966555123987', stickerPack: 'pack-zk47', stickerId: 'sticker-id-sk58', onceName: 'once-name-on73.jpg', onceBytes: 'once-bytes-ob84', onceCaption: 'once-caption-oc95',
+};
+/** Polls, a contact card, a sticker, a reply, a mention, an edit and a view-once photo. `other` is the person to reply to and mention. */
+async function sendMore(d: E2ee, circle: number, other: { id: number }) {
+  const first = await d.sendText(circle, MARK2.before);
+  await d.edit(circle, first.id, MARK2.after);
+  await d.sendText(circle, MARK2.reply, { replyTo: first.id });
+  await d.sendText(circle, MARK2.mention, { mentions: [other.id] });
+  const poll = await d.sendPoll(circle, MARK2.question, [MARK2.optionA, MARK2.optionB], false);
+  await d.vote(circle, poll.id, [0]);
+  await d.sendText(circle, '', { card: { type: 'contact', name: MARK2.contactName, phones: [MARK2.contactPhone] } });
+  await d.sendText(circle, '', { card: { type: 'sticker', pack: MARK2.stickerPack, id: MARK2.stickerId } as any });
+  await d.sendMedia(circle, [{ bytes: enc.encode(MARK2.onceBytes), name: MARK2.onceName, mime: 'image/jpeg', w: 8, h: 8 }], MARK2.onceCaption, { viewOnce: true });
+  return first;
+}
+test('plaintext grep: polls, contact cards, stickers, replies, mentions, edits and view-once photos leave nothing readable, and the other side reads them', async () => {
+  const a = await person('ناصر'), b = await person('سارة');
+  const [da, db] = [await device(a), await device(b)];
+  const id = await direct(a, b);
+  await da.startChat(id);
+  const first = await sendMore(da, id, b);
+  const stored = everythingStored();
+  for (const m of Object.values(MARK2)) assert.equal(stored.includes(m), false, `the server stored "${m}"`);
+  const got = (await db.history(id)).filter(m => m.kind !== 'system');
+  assert.equal(got[0].body, MARK2.after); assert.ok(got[0].editedAt, 'the edit is read, not the first text');
+  assert.equal(got[1].body, MARK2.reply); assert.equal(got[1].replyTo?.id, first.id); assert.ok([MARK2.before, MARK2.after].includes(got[1].replyTo?.text as string), 'the quoted text is filled in on this device (it shows the text as first sent)');
+  assert.equal(got[2].body, MARK2.mention); assert.deepEqual(got[2].mentions!.map((x: any) => x.id), [b.id]);
+  assert.equal(got[3].body, MARK2.question); assert.deepEqual(got[3].poll!.options.map(o => o.text), [MARK2.optionA, MARK2.optionB]);
+  assert.equal(got[3].poll!.options[0].voters.length, 1);
+  assert.equal(got[4].card?.type, 'contact'); assert.equal((got[4].card as any).name, MARK2.contactName);
+  assert.equal(got[5].card?.type, 'sticker'); assert.equal((got[5].card as any).id, MARK2.stickerId);
+  assert.equal(got[6].body, MARK2.onceCaption); assert.equal(got[6].attachments![0].name, MARK2.onceName);
+  assert.equal((await call(b.cookie, `/api/messages/${got[6].id}/open`, 'POST')).status, 200, 'the receiver opens the view-once photo (the server only starts its window)');
+  assert.equal(Buffer.from(await db.openAttachment(got[6].attachments![0])).toString(), MARK2.onceBytes);
+});
+test('plaintext grep: the same seven in an ordinary group', async () => {
+  const a = await person('ناصر'), b = await person('سارة'), c = await person('خالد');
+  const [da, db, dc] = [await device(a), await device(b), await device(c)];
+  const id = await group(a, [b, c]);
+  await da.startChat(id);
+  await sendMore(db, id, c);
+  const stored = everythingStored();
+  for (const m of Object.values(MARK2)) assert.equal(stored.includes(m), false, `the server stored "${m}"`);
+  assert.equal((await dc.history(id)).filter(m => m.kind !== 'system').length, 7);
+  assert.equal((await da.history(id)).filter(m => m.kind !== 'system').length, 7);
+});
+
 test('a retry with the same message id never makes a second message, and the receiver still decrypts once', async () => {
   const a = await person('ناصر'), b = await person('سارة');
   const [da, db] = [await device(a), await device(b)];
