@@ -22,12 +22,21 @@ test('start-up says in one line which mode runs, and only explicit development m
   assert.equal(startupMode({ NODE_ENV: 'production', THIKRA_DEV: '1' }).mode, 'production');
 });
 
-test('production refuses to start with the console SMS provider (it prints phone and code to the log), unless development is switched on', () => {
-  assert.match(startupMode({ NODE_ENV: 'production' }, 'console').refuse ?? '', /console/);
-  assert.match(startupMode({ REPLIT_DEPLOYMENT: '1' }, 'console').refuse ?? '', /THIKRA_SMS_PROVIDER/);
-  assert.equal(startupMode({ NODE_ENV: 'production' }, 'twilio').refuse, undefined, 'a real provider is fine');
-  assert.equal(startupMode({ NODE_ENV: 'production' }, 'http').refuse, undefined);
-  assert.equal(startupMode({}, 'console').refuse, undefined, 'outside production the console provider is the normal one');
-  assert.equal(startupMode({ NODE_ENV: 'production', THIKRA_DEV: '1' }, 'console').refuse, undefined, 'the dev flag is the explicit way out');
-  assert.equal(startupMode({ NODE_ENV: 'production', THIKRA_SHOW_SIGNIN_CODES: '1' }, 'console').refuse, undefined, 'so is the loud "no SMS provider yet" switch');
+test('production with the console SMS provider still starts, warns, and never prints a phone number or code to the log', async () => {
+  const line = startupMode({ NODE_ENV: 'production' }, 'console').line;
+  assert.match(line, /WARNING: no SMS provider/);
+  assert.doesNotMatch(startupMode({ NODE_ENV: 'production' }, 'twilio').line, /WARNING/, 'a real provider gives no warning');
+  const { consoleProvider } = await import('./sms.ts');
+  const logged: string[] = [];
+  const was = console.log, env = process.env.NODE_ENV;
+  console.log = (...a: unknown[]) => { logged.push(a.join(' ')); };
+  try {
+    process.env.NODE_ENV = 'production';
+    await consoleProvider.send('+971501234567', 'Your Tamtim code is 482913');
+    process.env.NODE_ENV = 'test';
+    await consoleProvider.send('+971501234567', 'Your Tamtim code is 482913');
+  } finally { console.log = was; if (env === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = env; }
+  assert.doesNotMatch(logged[0], /482913|501234/, 'production hides the code and the number');
+  assert.match(logged[0], /\+971•+67/);
+  assert.match(logged[1], /482913/, 'outside production the log is how a developer signs in');
 });

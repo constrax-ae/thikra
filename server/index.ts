@@ -161,7 +161,6 @@ export function startServer(port: number, onListening?: (port: number) => void, 
 }
 if (process.env.THIKRA_NO_LISTEN !== '1') {
   const mode = startupMode(process.env, smsInfo().provider);
-  if (mode.refuse) { console.error(mode.refuse); process.exit(1); }
   console.log(mode.line);
   startServer(Number(process.env.PORT ?? 8787), p => console.log(`Tamtim API on http://localhost:${p}`), mode.localOnly ? '127.0.0.1' : undefined);
 }

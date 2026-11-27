@@ -15,9 +15,17 @@ export interface SmsProvider { name: string; send(to: string, text: string): Pro
 
 export class SmsError extends Error { constructor(public code: 'sms_unavailable' | 'sms_failed' | 'sms_blocked', msg: string) { super(msg); } }
 
+/** The phone number with all but its first 4 and last 2 digits hidden, for a log line. */
+export const maskPhone = (to: string) => to.length <= 6 ? '•'.repeat(to.length) : to.slice(0, 4) + '•'.repeat(to.length - 6) + to.slice(-2);
+// In production the console provider never prints the number or the code: anyone who can read the log could otherwise sign in as anyone.
+// (Live runs without an SMS provider for now; people sign in there with the demo numbers or the owner's code, never from the log.)
+const inProduction = () => process.env.NODE_ENV === 'production' || !!process.env.REPLIT_DEPLOYMENT;
 export const consoleProvider: SmsProvider = {
   name: 'console',
-  async send(to, text) { console.log(`[sms:console] ${to} -> ${text}`); },
+  async send(to, text) {
+    if (inProduction()) console.log(`[sms:console] a code for ${maskPhone(to)} was not sent: no SMS provider is set (THIKRA_SMS_PROVIDER)`);
+    else console.log(`[sms:console] ${to} -> ${text}`);
+  },
 };
 
 export function twilioProvider(env: NodeJS.ProcessEnv = process.env, fetchFn: typeof fetch = fetch): SmsProvider {
