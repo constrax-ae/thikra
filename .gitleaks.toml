@@ -1,0 +1,15 @@
+# Secret scanning (CI: .github/workflows, "Dependencies and secrets"). The default rules apply; the only exceptions are
+# two values that are made up on purpose and appear in tests:
+#  - sk_test_abcdefghijklmnop: a fake Stripe test key (server/payments.test.ts, server/admin.test.ts)
+#  - GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ: the RFC 6238 one-time-code test vector, "12345678901234567890" in base32
+#    (server/staff-security.test.ts)
+# Anything else that looks like a key still fails the build.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Made-up values used in tests"
+regexes = [
+  '''sk_test_abcdefghijklmnop''',
+  '''GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ''',
+]
